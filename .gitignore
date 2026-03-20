@@ -26,3 +26,10 @@ build/
 # Data — keep directory structure (.gitkeep) but exclude run outputs
 data/**/*.csv
 data/watchlist.json
+data/positions.json
+
+# ...but track persistent state needed across automated runs
+!data/raw_flow/*.csv
+!data/trade_log.csv
+!data/positions.json
+!data/watchlist.json

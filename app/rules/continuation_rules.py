@@ -43,30 +43,67 @@ def find_support_resistance(df: pd.DataFrame, lookback: int = 20) -> dict:
     }
 
 
+def is_pullback_to_ema(
+    df: pd.DataFrame,
+    atr_multiple: float = 1.0,
+    lookback: int = 5,
+) -> bool:
+    """Check whether any of the last ``lookback`` bars pulled back near the
+    EMA20 or EMA50.
+
+    Each bar is evaluated against its own EMA values (not today's), since the
+    EMA shifts daily.  Passes if any bar's low came within
+    ``atr_multiple * ATR`` of either EMA while closing above it.
+    """
+    if len(df) < lookback:
+        return False
+
+    window = df.iloc[-lookback:]
+
+    for _, bar in window.iterrows():
+        atr = bar.get("atr14")
+        ema20 = bar.get("ema20")
+        ema50 = bar.get("ema50")
+        low = bar.get("low")
+        close = bar.get("close")
+
+        if any(pd.isna(v) for v in (atr, ema20, ema50, low, close)) or atr <= 0:
+            continue
+
+        band = atr_multiple * atr
+        for ema in (ema20, ema50):
+            if low <= ema + band and close >= ema - band:
+                return True
+
+    return False
+
+
 def is_pullback_to_support(
     df: pd.DataFrame,
     support_level: float,
     atr_multiple: float = 0.25,
+    lookback: int = 5,
 ) -> bool:
+    """Check whether any of the last ``lookback`` bars pulled back into the
+    support zone and held it.
     """
-    Check whether the latest candle pulled back into the support zone and held it.
-    """
-    if df.empty:
+    if len(df) < lookback:
         return False
 
-    last = df.iloc[-1]
-    atr = last["atr14"]
+    window = df.iloc[-lookback:]
 
-    if pd.isna(atr) or atr <= 0:
-        return False
+    for _, bar in window.iterrows():
+        atr = bar["atr14"]
+        if pd.isna(atr) or atr <= 0:
+            continue
 
-    zone_low = support_level - atr_multiple * atr
-    zone_high = support_level + atr_multiple * atr
+        zone_low = support_level - atr_multiple * atr
+        zone_high = support_level + atr_multiple * atr
 
-    touched_zone = last["low"] <= zone_high
-    closed_above_zone_low = last["close"] > zone_low
+        if bar["low"] <= zone_high and bar["close"] > zone_low:
+            return True
 
-    return bool(touched_zone and closed_above_zone_low)
+    return False
 
 
 def bullish_strong_close(df: pd.DataFrame, threshold: float = 0.75) -> bool:
@@ -145,7 +182,7 @@ def is_healthy_pullback_volume(
 
 def has_volume_confirmation(
     df: pd.DataFrame,
-    min_rel_volume: float = 1.2,
+    min_rel_volume: float = 1.0,
 ) -> bool:
     """Check whether the latest bar has stronger-than-normal volume."""
     if df.empty:
@@ -161,6 +198,189 @@ def has_volume_confirmation(
         return False
 
     return bool(rel_volume >= min_rel_volume)
+
+
+def is_bounce_and_fail_long(
+    df: pd.DataFrame,
+    atr_multiple: float = 1.0,
+    lookback: int = 5,
+    min_red_bars: int = 1,
+) -> bool:
+    """Detect a dip-and-recovery pattern for long continuation.
+
+    Requires:
+    1. At least ``min_red_bars`` red bars in the lookback window (evidence of
+       a pullback dip).
+    2. One of those red bars reached within ``atr_multiple * ATR`` of EMA20 or
+       EMA50 (dip touched dynamic support).
+    3. The final bar is green (close > open), confirming the dip was bought.
+    """
+    if len(df) < lookback + 1:
+        return False
+
+    window = df.iloc[-(lookback + 1):-1]
+    last = df.iloc[-1]
+
+    if last["close"] <= last["open"]:
+        return False
+
+    red_bars_near_ema = 0
+    for _, bar in window.iterrows():
+        if bar["close"] >= bar["open"]:
+            continue
+        atr = bar.get("atr14")
+        ema20 = bar.get("ema20")
+        ema50 = bar.get("ema50")
+        low = bar.get("low")
+        if any(pd.isna(v) for v in (atr, ema20, ema50, low)) or atr <= 0:
+            continue
+        band = atr_multiple * atr
+        for ema in (ema20, ema50):
+            if low <= ema + band:
+                red_bars_near_ema += 1
+                break
+
+    return red_bars_near_ema >= min_red_bars
+
+
+def is_bounce_and_fail_short(
+    df: pd.DataFrame,
+    atr_multiple: float = 1.0,
+    lookback: int = 5,
+    min_green_bars: int = 1,
+) -> bool:
+    """Detect a rally-and-fail pattern for short continuation.
+
+    Requires:
+    1. At least ``min_green_bars`` green bars in the lookback window (evidence
+       of a counter-trend rally).
+    2. One of those green bars reached within ``atr_multiple * ATR`` of EMA20
+       or EMA50 (rally touched dynamic resistance).
+    3. The final bar is red (close < open), confirming the rally failed.
+    """
+    if len(df) < lookback + 1:
+        return False
+
+    window = df.iloc[-(lookback + 1):-1]
+    last = df.iloc[-1]
+
+    if last["close"] >= last["open"]:
+        return False
+
+    green_bars_near_ema = 0
+    for _, bar in window.iterrows():
+        if bar["close"] <= bar["open"]:
+            continue
+        atr = bar.get("atr14")
+        ema20 = bar.get("ema20")
+        ema50 = bar.get("ema50")
+        high = bar.get("high")
+        if any(pd.isna(v) for v in (atr, ema20, ema50, high)) or atr <= 0:
+            continue
+        band = atr_multiple * atr
+        for ema in (ema20, ema50):
+            if high >= ema - band:
+                green_bars_near_ema += 1
+                break
+
+    return green_bars_near_ema >= min_green_bars
+
+
+def is_flag_breakout(
+    df: pd.DataFrame,
+    flag_bars: int = 4,
+    max_range_atr: float = 1.5,
+) -> bool:
+    """Detect a bullish flag breakout — tight consolidation followed by an
+    upside break with volume.
+
+    1. The ``flag_bars`` bars before the current bar have a narrow total range
+       (high-low spread < ``max_range_atr * ATR``).
+    2. Today's bar breaks above the flag high.
+    3. Today's volume exceeds the 20-day average (rel_volume >= 1.0).
+    """
+    needed = flag_bars + 1
+    if len(df) < needed:
+        return False
+
+    last = df.iloc[-1]
+    flag = df.iloc[-needed:-1]
+
+    atr = last.get("atr14")
+    rel_vol = last.get("rel_volume")
+    if pd.isna(atr) or atr <= 0 or pd.isna(rel_vol):
+        return False
+
+    flag_high = flag["high"].max()
+    flag_low = flag["low"].min()
+    flag_range = flag_high - flag_low
+
+    if flag_range > max_range_atr * atr:
+        return False
+
+    return bool(last["close"] > flag_high and rel_vol >= 1.0)
+
+
+def is_flag_breakdown(
+    df: pd.DataFrame,
+    flag_bars: int = 4,
+    max_range_atr: float = 1.5,
+) -> bool:
+    """Detect a bearish flag breakdown — tight consolidation followed by a
+    downside break with volume.
+
+    1. The ``flag_bars`` bars before the current bar have a narrow total range
+       (high-low spread < ``max_range_atr * ATR``).
+    2. Today's bar breaks below the flag low.
+    3. Today's volume exceeds the 20-day average (rel_volume >= 1.0).
+    """
+    needed = flag_bars + 1
+    if len(df) < needed:
+        return False
+
+    last = df.iloc[-1]
+    flag = df.iloc[-needed:-1]
+
+    atr = last.get("atr14")
+    rel_vol = last.get("rel_volume")
+    if pd.isna(atr) or atr <= 0 or pd.isna(rel_vol):
+        return False
+
+    flag_high = flag["high"].max()
+    flag_low = flag["low"].min()
+    flag_range = flag_high - flag_low
+
+    if flag_range > max_range_atr * atr:
+        return False
+
+    return bool(last["close"] < flag_low and rel_vol >= 1.0)
+
+
+MIN_ROOM_ATR = 1.0
+
+
+def has_room_to_target_long(df: pd.DataFrame, resistance: float) -> bool:
+    """Reject longs that are already within MIN_ROOM_ATR of resistance."""
+    if df.empty:
+        return False
+    last = df.iloc[-1]
+    atr = last.get("atr14")
+    close = last.get("close")
+    if pd.isna(atr) or pd.isna(close) or atr <= 0:
+        return False
+    return bool((resistance - close) / atr >= MIN_ROOM_ATR)
+
+
+def has_room_to_target_short(df: pd.DataFrame, support: float) -> bool:
+    """Reject shorts that are already within MIN_ROOM_ATR of support."""
+    if df.empty:
+        return False
+    last = df.iloc[-1]
+    atr = last.get("atr14")
+    close = last.get("close")
+    if pd.isna(atr) or pd.isna(close) or atr <= 0:
+        return False
+    return bool((close - support) / atr >= MIN_ROOM_ATR)
 
 
 def evaluate_long_setup(df: pd.DataFrame) -> dict:
@@ -207,26 +427,28 @@ def is_pullback_to_resistance(
     df: pd.DataFrame,
     resistance_level: float,
     atr_multiple: float = 0.25,
+    lookback: int = 5,
 ) -> bool:
+    """Check whether any of the last ``lookback`` bars pulled back into the
+    resistance zone and failed there.
     """
-    Check whether the latest candle pulled back into the resistance zone and failed there.
-    """
-    if df.empty:
+    if len(df) < lookback:
         return False
 
-    last = df.iloc[-1]
-    atr = last["atr14"]
+    window = df.iloc[-lookback:]
 
-    if pd.isna(atr) or atr <= 0:
-        return False
+    for _, bar in window.iterrows():
+        atr = bar["atr14"]
+        if pd.isna(atr) or atr <= 0:
+            continue
 
-    zone_low = resistance_level - atr_multiple * atr
-    zone_high = resistance_level + atr_multiple * atr
+        zone_low = resistance_level - atr_multiple * atr
+        zone_high = resistance_level + atr_multiple * atr
 
-    touched_zone = last["high"] >= zone_low
-    closed_below_zone_high = last["close"] < zone_high
+        if bar["high"] >= zone_low and bar["close"] < zone_high:
+            return True
 
-    return bool(touched_zone and closed_below_zone_high)
+    return False
 
 
 def bearish_strong_close(df: pd.DataFrame, threshold: float = 0.25) -> bool:

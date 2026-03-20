@@ -1,0 +1,41 @@
+name: Hourly signal scan
+
+on:
+  schedule:
+    # Every hour on the hour, Mon-Fri, UTC 14-21.
+    # Covers US market hours in both EDT (14-20) and EST (15-21).
+    - cron: "0 14-21 * * 1-5"
+  workflow_dispatch:
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run pipeline
+        env:
+          UNUSUAL_WHALES_API_KEY: ${{ secrets.UNUSUAL_WHALES_API_KEY }}
+        run: python -m app.main
+
+      - name: Commit data changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/raw_flow/ data/trade_log.csv data/positions.json data/watchlist.json || true
+          git diff --cached --quiet && echo "No data changes to commit" && exit 0
+          git commit -m "auto: hourly scan $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          git push

@@ -1,5 +1,7 @@
 """Price-derived features: OHLCV fetch, cleaning, and technical indicators."""
 
+from __future__ import annotations
+
 from datetime import datetime, timedelta
 
 import pandas as pd
@@ -18,11 +20,38 @@ RENAME_MAP = {
 OHLCV_COLS = ["open", "high", "low", "close", "volume"]
 
 
+def _fetch_intraday_bar(ticker: str) -> pd.DataFrame | None:
+    """Fetch today's partial daily bar if the market session is active."""
+    try:
+        df = yf.download(
+            ticker,
+            period="1d",
+            interval="1d",
+            auto_adjust=False,
+            progress=False,
+        )
+        if df.empty:
+            return None
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.droplevel("Ticker")
+        missing = [c for c in RAW_OHLCV_COLS if c not in df.columns]
+        if missing:
+            return None
+        return df[RAW_OHLCV_COLS].rename(columns=RENAME_MAP)
+    except Exception:
+        return None
+
+
 def fetch_ohlcv(
     ticker: str,
     lookback_days: int = OHLCV_LOOKBACK_DAYS,
+    include_partial: bool = True,
 ) -> pd.DataFrame:
-    """Download daily OHLCV from Yahoo Finance for a ticker."""
+    """Download daily OHLCV from Yahoo Finance for a ticker.
+
+    If ``include_partial`` is True and the market session is active, today's
+    incomplete bar is appended so volume-based checks can use live data.
+    """
     end = datetime.today()
     start = end - timedelta(days=lookback_days)
 
@@ -44,7 +73,18 @@ def fetch_ohlcv(
     if missing:
         raise ValueError(f"Missing expected OHLCV columns for {ticker}: {missing}")
 
-    return df[RAW_OHLCV_COLS].rename(columns=RENAME_MAP)
+    df = df[RAW_OHLCV_COLS].rename(columns=RENAME_MAP)
+
+    if include_partial:
+        partial = _fetch_intraday_bar(ticker)
+        if partial is not None:
+            partial.index = pd.DatetimeIndex(partial.index)
+            df.index = pd.DatetimeIndex(df.index)
+            today = partial.index[0].normalize()
+            if today not in df.index.normalize():
+                df = pd.concat([df, partial])
+
+    return df
 
 
 def clean_ohlcv(df: pd.DataFrame) -> pd.DataFrame:

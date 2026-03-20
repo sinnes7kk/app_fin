@@ -1,9 +1,11 @@
+import argparse
+
+from app.config import MAX_POSITIONS
 from app.signals.pipeline import run_flow_to_price_pipeline
+from app.signals.positions import open_positions, update_positions
 
 
-def main() -> None:
-    out = run_flow_to_price_pipeline(flow_limit=500, top_n=20, min_premium=50_000)
-
+def _print_signals(out: dict) -> None:
     signals_df = out["signals_df"]
     rejected_df = out["rejected_df"]
     wl = out["watchlist"]
@@ -43,6 +45,113 @@ def main() -> None:
     print(f"  Still watching:    {wl['still_watching_count']}")
     print(f"  New rejects added: {wl['new_rejects_added']}")
     print(f"  Current total:     {wl['current_count']}")
+
+
+def _print_positions(open_result: dict, update_result: dict) -> None:
+    from app.config import PORTFOLIO_CAPITAL
+
+    print()
+    print("=" * 60)
+    print("POSITION TRACKER")
+    print("=" * 60)
+
+    new_positions = open_result.get("opened", [])
+    rotated = open_result.get("rotated_out", [])
+
+    if rotated:
+        print(f"\n  Rotated out {len(rotated)} position(s):")
+        for c in rotated:
+            r_str = f"{c['r_multiple']:+.1f}R"
+            pnl_str = f"{c['pnl_pct']:+.2%}"
+            dollar_str = f"${c.get('pnl_dollar', 0):+,.0f}"
+            print(f"    {c['direction']:5s} {c['ticker']:6s}  {pnl_str} ({dollar_str})  {r_str}  "
+                  f"held {c['days_held']}d  → replaced by higher conviction")
+
+    if new_positions:
+        print(f"\n  Opened {len(new_positions)} new position(s):")
+        for p in new_positions:
+            print(f"    {p['direction']:5s} {p['ticker']:6s}  entry={p['entry_price']:.2f}"
+                  f"  stop={p['initial_stop']:.2f}  T1={p['target_1']:.2f}  T2={p['target_2']:.2f}"
+                  f"  |  {p['shares']} shares  risk={p['risk_pct']:.1%}  ${p['position_value']:,.0f}")
+    else:
+        print("\n  No new positions opened (all signals already in book or none generated)")
+
+    for msg in update_result.get("partial_fills", []):
+        print(f"  PARTIAL: {msg}")
+
+    closed = update_result.get("closed", [])
+    if closed:
+        print(f"\n  Closed {len(closed)} position(s):")
+        for c in closed:
+            r_str = f"{c['r_multiple']:+.1f}R"
+            pnl_str = f"{c['pnl_pct']:+.2%}"
+            dollar_str = f"${c.get('pnl_dollar', 0):+,.0f}"
+            reason = c["exit_reason"]
+            trail = f" [{c['trail_method']}]" if c["trail_method"] else ""
+            print(f"    {c['direction']:5s} {c['ticker']:6s}  {pnl_str} ({dollar_str})  {r_str}  "
+                  f"held {c['days_held']}d  reason={reason}{trail}")
+    else:
+        print("\n  No positions closed today")
+
+    still_open = update_result.get("still_open", [])
+    if still_open:
+        total_heat = sum(p.get("risk_dollar", 0) for p in still_open) / PORTFOLIO_CAPITAL
+        total_value = sum(p.get("position_value", 0) for p in still_open)
+        print(f"\n  Open positions ({len(still_open)}/{MAX_POSITIONS})  "
+              f"portfolio heat: {total_heat:.1%}  exposure: ${total_value:,.0f}")
+        for p in still_open:
+            risk = p["risk_per_share"]
+            close_approx = p["best_price"]
+            if p["direction"] == "LONG":
+                ur = (close_approx - p["entry_price"]) / risk if risk > 0 else 0.0
+            else:
+                ur = (p["entry_price"] - close_approx) / risk if risk > 0 else 0.0
+            partial_tag = " [T1 filled]" if p["partial_filled"] else ""
+            shares = p.get("shares", 0)
+            print(f"    {p['direction']:5s} {p['ticker']:6s}  {shares:>4} shares  day {p['days_held']}  "
+                  f"stop={p['active_stop']:.2f}  ~{ur:+.1f}R{partial_tag}")
+    else:
+        print("\n  No open positions")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="app_fin signal pipeline")
+    parser.add_argument("--scan-only", action="store_true", help="Run scanner without position management")
+    parser.add_argument("--update-only", action="store_true", help="Only update existing positions (skip scanning)")
+    parser.add_argument("--backtest", action="store_true", help="Run replay backtest over archived flow")
+    parser.add_argument("--start", type=str, help="Backtest start date (YYYY-MM-DD)")
+    parser.add_argument("--end", type=str, help="Backtest end date (YYYY-MM-DD)")
+    args = parser.parse_args()
+
+    if args.backtest:
+        from app.backtest.engine import print_summary, run_backtest, save_backtest_results
+
+        start = args.start or "2020-01-01"
+        end = args.end or "2099-12-31"
+        result = run_backtest(start_date=start, end_date=end)
+        print_summary(result)
+        if result.trade_log:
+            path = save_backtest_results(result)
+            print(f"\n  Trade log saved to {path}")
+        return
+
+    if args.update_only:
+        print("Updating existing positions...")
+        result = update_positions()
+        _print_positions({"opened": [], "rotated_out": [], "skipped": []}, result)
+        return
+
+    out = run_flow_to_price_pipeline(flow_limit=500, top_n=20, min_premium=50_000)
+    _print_signals(out)
+
+    if args.scan_only:
+        return
+
+    results = out["results"]
+    open_result = open_positions(results)
+
+    update_result = update_positions()
+    _print_positions(open_result, update_result)
 
 
 if __name__ == "__main__":

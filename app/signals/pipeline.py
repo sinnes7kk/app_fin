@@ -10,13 +10,20 @@ import pandas as pd
 from app.features.flow_features import build_flow_feature_table, rank_flow_candidates
 from app.features.price_features import clean_ohlcv, compute_features, fetch_ohlcv
 from app.signals.scoring import score_long_setup, score_short_setup
-from app.signals.trade_plan import build_long_trade_plan, build_short_trade_plan
+from app.signals.trade_plan import (
+    MIN_RR,
+    build_long_trade_plan,
+    build_short_trade_plan,
+)
 from app.vendors.unusual_whales import (
     fetch_flow_for_tickers,
     fetch_flow_raw,
     fetch_uw_alerts,
     normalize_flow_response,
 )
+
+
+NON_EQUITY_TICKERS = {"SPXW", "SPXE", "NDXP", "RUTW", "VIX", "VIXW"}
 
 
 def minmax_scale(series: pd.Series, target_max: float = 10.0) -> pd.Series:
@@ -40,6 +47,31 @@ def has_strong_bearish_flow(row, min_ratio: float = 1.5) -> bool:
     return row["bearish_premium"] > row["bullish_premium"] * min_ratio
 
 
+MAX_SAME_DIRECTION = 5
+DIRECTION_ESCALATION_SCORE = 1.5
+
+
+def apply_directional_balance(results: list[dict]) -> list[dict]:
+    """Limit directional concentration by requiring progressively higher
+    conviction for additional same-direction signals beyond MAX_SAME_DIRECTION."""
+    results = sorted(results, key=lambda x: x["final_score"], reverse=True)
+
+    counts: dict[str, int] = {"LONG": 0, "SHORT": 0}
+    balanced: list[dict] = []
+
+    for r in results:
+        d = r["direction"]
+        counts[d] = counts.get(d, 0) + 1
+        excess = counts[d] - MAX_SAME_DIRECTION
+        if excess > 0:
+            min_required = 5.0 + excess * DIRECTION_ESCALATION_SCORE
+            if r["final_score"] < min_required:
+                continue
+        balanced.append(r)
+
+    return balanced
+
+
 def dedupe_final_results(results: list[dict]) -> list[dict]:
     """Keep only the highest-scoring direction per ticker."""
     best_by_ticker: dict[str, dict] = {}
@@ -51,12 +83,14 @@ def dedupe_final_results(results: list[dict]) -> list[dict]:
 
 
 LONG_ALL_REASONS = {
-    "trend_aligned", "pullback_to_support",
+    "trend_aligned", "not_extended", "room_to_target",
+    "bounce_and_fail", "flag_breakout", "pullback_to_support",
     "bullish_strong_close", "bullish_rejection_wick",
     "healthy_pullback_volume", "confirmation_volume",
 }
 SHORT_ALL_REASONS = {
-    "trend_aligned", "pullback_to_resistance",
+    "trend_aligned", "not_extended", "room_to_target",
+    "bounce_and_fail", "flag_breakdown", "pullback_to_resistance",
     "bearish_strong_close", "bearish_rejection_wick",
     "healthy_pullback_volume", "confirmation_volume",
 }
@@ -123,6 +157,14 @@ def run_price_validation_for_bullish_candidates(bullish_df) -> tuple[list[dict],
 
             trade_plan = build_long_trade_plan(df, price_signal)
 
+            if trade_plan["rr_ratio"] < MIN_RR:
+                rejected.append(_build_rejection_row(
+                    ticker, "LONG", flow_raw, price_signal, LONG_ALL_REASONS,
+                    reject_reason=f"poor_rr ({trade_plan['rr_ratio']:.1f}:1)",
+                    flow_score_scaled=flow_scaled,
+                ))
+                continue
+
             accepted.append({
                 "ticker": ticker,
                 "direction": "LONG",
@@ -134,6 +176,7 @@ def run_price_validation_for_bullish_candidates(bullish_df) -> tuple[list[dict],
                 "stop_price": trade_plan["stop_price"],
                 "target_1": trade_plan["target_1"],
                 "target_2": trade_plan["target_2"],
+                "rr_ratio": trade_plan["rr_ratio"],
                 "time_stop_days": trade_plan["time_stop_days"],
                 "source": "fresh",
                 "trade_plan": trade_plan,
@@ -189,6 +232,14 @@ def run_price_validation_for_bearish_candidates(bearish_df) -> tuple[list[dict],
 
             trade_plan = build_short_trade_plan(df, price_signal)
 
+            if trade_plan["rr_ratio"] < MIN_RR:
+                rejected.append(_build_rejection_row(
+                    ticker, "SHORT", flow_raw, price_signal, SHORT_ALL_REASONS,
+                    reject_reason=f"poor_rr ({trade_plan['rr_ratio']:.1f}:1)",
+                    flow_score_scaled=flow_scaled,
+                ))
+                continue
+
             accepted.append({
                 "ticker": ticker,
                 "direction": "SHORT",
@@ -200,6 +251,7 @@ def run_price_validation_for_bearish_candidates(bearish_df) -> tuple[list[dict],
                 "stop_price": trade_plan["stop_price"],
                 "target_1": trade_plan["target_1"],
                 "target_2": trade_plan["target_2"],
+                "rr_ratio": trade_plan["rr_ratio"],
                 "time_stop_days": trade_plan["time_stop_days"],
                 "source": "fresh",
                 "trade_plan": trade_plan,
@@ -285,9 +337,13 @@ def run_flow_to_price_pipeline(
     payload = fetch_flow_raw(limit=flow_limit)
     normalized = normalize_flow_response(payload)
 
+    if not normalized.empty:
+        normalized = normalized[~normalized["ticker"].isin(NON_EQUITY_TICKERS)]
+
     alert_stats = {"alert_tickers": 0, "new_tickers": 0}
     if use_uw_alerts:
-        alert_tickers = fetch_uw_alerts(hours_back=alert_hours_back)
+        alert_tickers = [t for t in fetch_uw_alerts(hours_back=alert_hours_back)
+                         if t not in NON_EQUITY_TICKERS]
         alert_stats["alert_tickers"] = len(alert_tickers)
 
         existing_tickers = set(normalized["ticker"].unique()) if not normalized.empty else set()
@@ -298,6 +354,11 @@ def run_flow_to_price_pipeline(
             alert_flow = fetch_flow_for_tickers(new_tickers)
             if not alert_flow.empty:
                 normalized = pd.concat([normalized, alert_flow], ignore_index=True)
+
+    if save and not normalized.empty:
+        raw_flow_dir = DATA_ROOT / "raw_flow"
+        raw_flow_dir.mkdir(parents=True, exist_ok=True)
+        normalized.to_csv(raw_flow_dir / f"raw_flow_{_run_stamp()}.csv", index=False)
 
     feature_table = build_flow_feature_table(normalized, min_premium=min_premium)
     ranked = rank_flow_candidates(feature_table, top_n=top_n)
@@ -323,6 +384,7 @@ def run_flow_to_price_pipeline(
     final_results = fresh_results + promoted
     final_results = dedupe_final_results(final_results)
     final_results = sorted(final_results, key=lambda x: x["final_score"], reverse=True)
+    final_results = apply_directional_balance(final_results)
 
     signals_df = results_to_dataframe(final_results)
 
@@ -387,6 +449,7 @@ SIGNAL_COLUMNS = [
     "stop_price",
     "target_1",
     "target_2",
+    "rr_ratio",
     "time_stop_days",
     "source",
 ]

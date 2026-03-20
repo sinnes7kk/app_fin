@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import numpy as np
 import pandas as pd
 
@@ -63,8 +65,33 @@ def add_volume_oi_ratio(df: pd.DataFrame) -> pd.DataFrame:
     oi = pd.to_numeric(out["open_interest"], errors="coerce")
     vol = pd.to_numeric(out["volume"], errors="coerce")
 
-    out["volume_oi_ratio"] = vol / oi.replace(0, pd.NA)
+    ratio = vol / oi.replace(0, float("nan"))
+    out["volume_oi_ratio"] = ratio.astype("float64")
 
+    return out
+
+
+RECENCY_HALF_LIFE_HOURS = 6.0
+
+
+def add_recency_weight(df: pd.DataFrame) -> pd.DataFrame:
+    """Apply exponential time-decay to premiums so recent flow matters more.
+
+    Half-life is RECENCY_HALF_LIFE_HOURS — a trade 6 hours old contributes
+    half the premium of an identical trade placed right now.
+    """
+    if df.empty or "event_ts" not in df.columns:
+        out = df.copy()
+        out["recency_weight"] = 1.0
+        return out
+
+    out = df.copy()
+    now = pd.Timestamp(datetime.now(tz=timezone.utc))
+    age_hours = (now - out["event_ts"]).dt.total_seconds() / 3600
+    age_hours = age_hours.clip(lower=0)
+    decay = np.exp(-np.log(2) * age_hours / RECENCY_HALF_LIFE_HOURS)
+    out["recency_weight"] = decay
+    out["premium"] = out["premium"] * decay
     return out
 
 
@@ -97,6 +124,50 @@ def _dte_score(dte: float) -> float:
     if 90 < dte <= 150:
         return 0.7
     return 0.3
+
+
+def _norm01(series: pd.Series) -> pd.Series:
+    """Min-max normalize a series to 0–1. Returns 0.5 for constant input."""
+    mn, mx = series.min(), series.max()
+    if mx == mn:
+        return pd.Series(0.5, index=series.index)
+    return (series - mn) / (mx - mn)
+
+
+# Weights sum to 1.0 — adjust here to re-prioritize.
+_FLOW_WEIGHTS = {
+    "premium":       0.30,
+    "premium_per_trade": 0.15,
+    "vol_oi":        0.20,
+    "repeat":        0.15,
+    "sweep":         0.10,
+    "dte":           0.05,
+    "concentration": 0.05,
+}
+
+
+def _weighted_flow_score(
+    agg: pd.DataFrame,
+    *,
+    premium_col: str,
+    ppt_col: str,
+    vol_oi_col: str,
+    repeat_col: str,
+    sweep_col: str,
+    concentration_col: str,
+    dte_col: str,
+) -> pd.Series:
+    """Build a directional flow score from normalized 0–1 components."""
+    w = _FLOW_WEIGHTS
+    return (
+        w["premium"]          * _norm01(np.log1p(agg[premium_col]))
+        + w["premium_per_trade"] * _norm01(np.log1p(agg[ppt_col]))
+        + w["vol_oi"]           * _norm01(agg[vol_oi_col].fillna(0))
+        + w["repeat"]           * _norm01(agg[repeat_col])
+        + w["sweep"]            * _norm01(agg[sweep_col])
+        + w["dte"]              * _norm01(agg[dte_col])
+        + w["concentration"]    * _norm01(agg[concentration_col])
+    )
 
 
 def aggregate_flow_by_ticker(df: pd.DataFrame) -> pd.DataFrame:
@@ -196,6 +267,9 @@ def aggregate_flow_by_ticker(df: pd.DataFrame) -> pd.DataFrame:
     out["bullish_trade_premium_component"] = out["premium"].where(out["direction"] == "LONG", np.nan)
     out["bearish_trade_premium_component"] = out["premium"].where(out["direction"] == "SHORT", np.nan)
 
+    out["bullish_repeat_component"] = (out["direction"] == "LONG").astype(int)
+    out["bearish_repeat_component"] = (out["direction"] == "SHORT").astype(int)
+
     grouped = out.groupby("ticker", dropna=False)
 
     agg = grouped.agg(
@@ -216,6 +290,8 @@ def aggregate_flow_by_ticker(df: pd.DataFrame) -> pd.DataFrame:
         bearish_sweep_premium=("bearish_sweep_premium_component", "sum"),
         bullish_max_trade_premium=("bullish_trade_premium_component", "max"),
         bearish_max_trade_premium=("bearish_trade_premium_component", "max"),
+        bullish_repeat_count=("bullish_repeat_component", "sum"),
+        bearish_repeat_count=("bearish_repeat_component", "sum"),
     ).reset_index()
 
     # Fill direction-specific nulls
@@ -233,6 +309,8 @@ def aggregate_flow_by_ticker(df: pd.DataFrame) -> pd.DataFrame:
         "bearish_sweep_premium",
         "bullish_max_trade_premium",
         "bearish_max_trade_premium",
+        "bullish_repeat_count",
+        "bearish_repeat_count",
     ]
     agg[fill_zero_cols] = agg[fill_zero_cols].fillna(0)
 
@@ -290,33 +368,28 @@ def aggregate_flow_by_ticker(df: pd.DataFrame) -> pd.DataFrame:
         if col in agg.columns:
             agg[col] = agg[col].round(2)
 
-    # Directional scores
-    # Favor:
-    # - larger but log-scaled directional premium
-    # - higher directional vol/oi
-    # - repeat flow
-    # - sweep participation
-    # - good DTE
-    # - larger premium per trade
-    # - moderate concentration (single huge print helpful, but not everything)
-    agg["bullish_score"] = (
-        0.35 * np.log1p(agg["bullish_premium"])
-        + 0.15 * np.log1p(agg["bullish_premium_per_trade"])
-        + 0.20 * agg["bullish_vol_oi"].fillna(0)
-        + 0.15 * agg["repeat_flow_count"]
-        + 0.10 * agg["bullish_sweep_count"]
-        + 0.05 * agg["dte_score"]
-        + 0.05 * agg["bullish_concentration"]
+    # Directional scores — each component normalized to 0–1 within the
+    # current batch so weights reflect true relative importance.
+    agg["bullish_score"] = _weighted_flow_score(
+        agg,
+        premium_col="bullish_premium",
+        ppt_col="bullish_premium_per_trade",
+        vol_oi_col="bullish_vol_oi",
+        repeat_col="bullish_repeat_count",
+        sweep_col="bullish_sweep_count",
+        concentration_col="bullish_concentration",
+        dte_col="dte_score",
     )
 
-    agg["bearish_score"] = (
-        0.35 * np.log1p(agg["bearish_premium"])
-        + 0.15 * np.log1p(agg["bearish_premium_per_trade"])
-        + 0.20 * agg["bearish_vol_oi"].fillna(0)
-        + 0.15 * agg["repeat_flow_count"]
-        + 0.10 * agg["bearish_sweep_count"]
-        + 0.05 * agg["dte_score"]
-        + 0.05 * agg["bearish_concentration"]
+    agg["bearish_score"] = _weighted_flow_score(
+        agg,
+        premium_col="bearish_premium",
+        ppt_col="bearish_premium_per_trade",
+        vol_oi_col="bearish_vol_oi",
+        repeat_col="bearish_repeat_count",
+        sweep_col="bearish_sweep_count",
+        concentration_col="bearish_concentration",
+        dte_col="dte_score",
     )
 
     return agg
@@ -385,6 +458,7 @@ def build_flow_feature_table(
         require_ask_side=require_ask_side,
     )
 
+    filtered = add_recency_weight(filtered)
     filtered = add_volume_oi_ratio(filtered)
     filtered = add_repeat_flow_count(filtered)
 
