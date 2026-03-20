@@ -23,5 +23,6 @@ build/
 .vscode/
 .DS_Store
 
-# Data (uncomment if you do not want raw/derived data in git)
-# data/
+# Data — keep directory structure (.gitkeep) but exclude run outputs
+data/**/*.csv
+data/watchlist.json

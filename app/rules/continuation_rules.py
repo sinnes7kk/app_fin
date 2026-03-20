@@ -201,3 +201,119 @@ def evaluate_long_setup(df: pd.DataFrame) -> dict:
         "candle_ok": candle_ok,
         "confirmation_volume_ok": confirmation_volume_ok,
     }
+
+
+def is_pullback_to_resistance(
+    df: pd.DataFrame,
+    resistance_level: float,
+    atr_multiple: float = 0.25,
+) -> bool:
+    """
+    Check whether the latest candle pulled back into the resistance zone and failed there.
+    """
+    if df.empty:
+        return False
+
+    last = df.iloc[-1]
+    atr = last["atr14"]
+
+    if pd.isna(atr) or atr <= 0:
+        return False
+
+    zone_low = resistance_level - atr_multiple * atr
+    zone_high = resistance_level + atr_multiple * atr
+
+    touched_zone = last["high"] >= zone_low
+    closed_below_zone_high = last["close"] < zone_high
+
+    return bool(touched_zone and closed_below_zone_high)
+
+
+def bearish_strong_close(df: pd.DataFrame, threshold: float = 0.25) -> bool:
+    """
+    Check whether the latest candle closes strongly near its low.
+    Threshold 0.25 means the close is in the bottom 25% of the candle range.
+    """
+    if df.empty:
+        return False
+
+    last = df.iloc[-1]
+    candle_range = last["high"] - last["low"]
+
+    if candle_range <= 0:
+        return False
+
+    if last["close"] >= last["open"]:
+        return False
+
+    close_position = (last["close"] - last["low"]) / candle_range
+    return bool(close_position <= threshold)
+
+
+def bearish_rejection_wick(df: pd.DataFrame, wick_body_ratio: float = 1.5) -> bool:
+    """
+    Check whether the latest candle has a bearish upper rejection wick.
+    """
+    if df.empty:
+        return False
+
+    last = df.iloc[-1]
+
+    body = abs(last["close"] - last["open"])
+    upper_wick = last["high"] - max(last["open"], last["close"])
+    lower_wick = min(last["open"], last["close"]) - last["low"]
+    candle_range = last["high"] - last["low"]
+
+    if candle_range <= 0:
+        return False
+
+    if body == 0:
+        body = 1e-9
+
+    close_below_mid = last["close"] < (last["low"] + candle_range * 0.5)
+
+    return bool(
+        upper_wick >= wick_body_ratio * body
+        and upper_wick > lower_wick
+        and close_below_mid
+    )
+
+
+def evaluate_short_setup(df: pd.DataFrame) -> dict:
+    """
+    Evaluate a simple short swing continuation setup.
+
+    Conditions:
+    - daily downtrend
+    - pullback to resistance
+    - healthy pullback volume
+    - bearish confirmation candle
+    - confirmation bar volume expansion
+    """
+    trend = detect_trend(df)
+    levels = find_support_resistance(df)
+
+    pullback_ok = is_pullback_to_resistance(df, levels["resistance"])
+    pullback_volume_ok = is_healthy_pullback_volume(df)
+
+    candle_ok = bearish_strong_close(df) or bearish_rejection_wick(df)
+    confirmation_volume_ok = has_volume_confirmation(df)
+
+    is_valid = (
+        trend["trend"] == "SHORT"
+        and pullback_ok
+        and pullback_volume_ok
+        and candle_ok
+        and confirmation_volume_ok
+    )
+
+    return {
+        "is_valid": is_valid,
+        "trend": trend["trend"],
+        "support": levels["support"],
+        "resistance": levels["resistance"],
+        "pullback_ok": pullback_ok,
+        "pullback_volume_ok": pullback_volume_ok,
+        "candle_ok": candle_ok,
+        "confirmation_volume_ok": confirmation_volume_ok,
+    }
