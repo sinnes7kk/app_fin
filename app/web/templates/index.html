@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>app_fin dashboard</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+</head>
+<body>
+  <header>
+    <h1>app_fin</h1>
+    <span class="meta">Local dashboard — data from <code>data/</code> + live UW alerts on demand</span>
+  </header>
+
+  <nav class="tabs" role="tablist">
+    <button type="button" class="active" data-tab="signals" role="tab" aria-selected="true">Final signals</button>
+    <button type="button" data-tab="candidates" role="tab">Candidates</button>
+    <button type="button" data-tab="positions" role="tab">Open positions</button>
+    <button type="button" data-tab="watchlist" role="tab">Watchlist</button>
+    <button type="button" data-tab="alerts" role="tab">UW alerts</button>
+    <button type="button" data-tab="rejected" role="tab">Rejected</button>
+    <button type="button" data-tab="flow" role="tab">Flow features</button>
+    <button type="button" data-tab="trades" role="tab">Trade log</button>
+  </nav>
+
+  <main>
+    <section id="panel-signals" class="panel active" role="tabpanel">
+      <h2>Final signals</h2>
+      {% if signals_src %}<p class="src">Source: {{ signals_src }}</p>{% endif %}
+      {{ signals_html | safe }}
+    </section>
+
+    <section id="panel-candidates" class="panel" role="tabpanel">
+      <h2>Ranked candidates</h2>
+      <div class="subgrid two">
+        <div>
+          <h2>Bullish</h2>
+          {% if bull_src %}<p class="src">{{ bull_src }}</p>{% endif %}
+          {{ bull_html | safe }}
+        </div>
+        <div>
+          <h2>Bearish</h2>
+          {% if bear_src %}<p class="src">{{ bear_src }}</p>{% endif %}
+          {{ bear_html | safe }}
+        </div>
+      </div>
+    </section>
+
+    <section id="panel-positions" class="panel" role="tabpanel">
+      <h2>Open positions</h2>
+      <p class="src">data/positions.json</p>
+      {{ positions_html | safe }}
+    </section>
+
+    <section id="panel-watchlist" class="panel" role="tabpanel">
+      <h2>Watchlist</h2>
+      <p class="src">data/watchlist.json — rejected flow names still tracked</p>
+      {{ watchlist_html | safe }}
+    </section>
+
+    <section id="panel-alerts" class="panel" role="tabpanel">
+      <h2>Unusual Whales — sweep + vol &gt; OI (24h)</h2>
+      <div class="toolbar">
+        <button type="button" id="btn-load-alerts">Load / refresh alerts</button>
+        <a class="btn secondary" href="/?live_alerts=1">Open with alerts preloaded</a>
+        <span id="alerts-status">{% if live_alerts_loaded %}Loaded {{ alerts_count }} raw rows.{% else %}Not loaded — click to fetch (uses API key).{% endif %}</span>
+      </div>
+      <div id="alerts-table-wrap">
+        {{ alerts_html | safe }}
+      </div>
+    </section>
+
+    <section id="panel-rejected" class="panel" role="tabpanel">
+      <h2>Rejected candidates</h2>
+      {% if rejected_src %}<p class="src">{{ rejected_src }} (truncated)</p>{% endif %}
+      {{ rejected_html | safe }}
+    </section>
+
+    <section id="panel-flow" class="panel" role="tabpanel">
+      <h2>Flow feature table</h2>
+      {% if flow_src %}<p class="src">{{ flow_src }} (truncated)</p>{% endif %}
+      {{ flow_html | safe }}
+    </section>
+
+    <section id="panel-trades" class="panel" role="tabpanel">
+      <h2>Trade log (recent)</h2>
+      <p class="src">data/trade_log.csv — last 80 rows</p>
+      {{ trades_html | safe }}
+    </section>
+  </main>
+
+  <script>
+    (function () {
+      var tabs = document.querySelectorAll("nav.tabs button[data-tab]");
+      var panels = document.querySelectorAll("main section.panel");
+      tabs.forEach(function (btn) {
+        btn.addEventListener("click", function () {
+          var id = btn.getAttribute("data-tab");
+          tabs.forEach(function (b) {
+            b.classList.toggle("active", b === btn);
+            b.setAttribute("aria-selected", b === btn ? "true" : "false");
+          });
+          panels.forEach(function (p) {
+            p.classList.toggle("active", p.id === "panel-" + id);
+          });
+        });
+      });
+
+      var btnAlerts = document.getElementById("btn-load-alerts");
+      var wrap = document.getElementById("alerts-table-wrap");
+      var status = document.getElementById("alerts-status");
+      if (btnAlerts && wrap) {
+        btnAlerts.addEventListener("click", function () {
+          status.textContent = "Loading…";
+          fetch("/api/alerts?hours=24&limit=150")
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+              if (!data.ok) {
+                status.textContent = "Error: " + (data.error || "unknown");
+                return;
+              }
+              if (!data.rows || !data.rows.length) {
+                wrap.innerHTML = "<p class=\"empty\">No alert rows returned.</p>";
+                status.textContent = "0 rows.";
+                return;
+              }
+              var cols = Object.keys(data.rows[0]);
+              var esc = function (s) {
+                var d = document.createElement("div");
+                d.textContent = s == null ? "—" : String(s);
+                return d.innerHTML;
+              };
+              var th = cols.map(function (c) { return "<th>" + esc(c) + "</th>"; }).join("");
+              var trs = data.rows.map(function (row) {
+                return "<tr>" + cols.map(function (c) {
+                  return "<td>" + esc(row[c]) + "</td>";
+                }).join("") + "</tr>";
+              }).join("");
+              wrap.innerHTML = "<table class=\"data\"><thead><tr>" + th + "</tr></thead><tbody>" + trs + "</tbody></table>";
+              status.textContent = data.count + " rows.";
+            })
+            .catch(function (e) {
+              status.textContent = "Request failed: " + e;
+            });
+        });
+      }
+    })();
+  </script>
+</body>
+</html>

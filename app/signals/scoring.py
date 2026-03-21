@@ -15,6 +15,8 @@ from app.rules.continuation_rules import (
     is_flag_breakdown,
     is_pullback_to_support,
     is_pullback_to_resistance,
+    is_structural_breakout,
+    is_structural_breakdown,
     bullish_strong_close,
     bullish_rejection_wick,
     bearish_strong_close,
@@ -24,6 +26,7 @@ from app.rules.continuation_rules import (
 )
 
 MAX_DISTANCE_FROM_EMA20_ATR = 2.0
+BREAKOUT_MAX_DISTANCE_ATR = 4.0
 
 
 def is_not_extended(df: pd.DataFrame, max_distance_atr: float = MAX_DISTANCE_FROM_EMA20_ATR) -> bool:
@@ -51,6 +54,8 @@ def _build_result(
     score: int,
     support: float,
     resistance: float,
+    structural_support: float,
+    structural_resistance: float,
     state: str,
     reasons: list[str],
     checks_passed: list[str],
@@ -67,6 +72,8 @@ def _build_result(
         "checks_failed": checks_failed,
         "support": support,
         "resistance": resistance,
+        "structural_support": structural_support,
+        "structural_resistance": structural_resistance,
     }
 
 
@@ -77,12 +84,16 @@ def score_long_setup(df: pd.DataFrame) -> dict:
 
     trend_ok = trend["trend"] == "LONG"
     not_extended_ok = is_not_extended(df)
-    room_ok = has_room_to_target_long(df, levels["resistance"])
+    room_ok = has_room_to_target_long(df, levels["structural_resistance"])
 
     bounce_fail = is_bounce_and_fail_long(df)
     flag = is_flag_breakout(df)
     pullback_to_level = is_pullback_to_support(df, levels["support"])
-    continuation_ok = bounce_fail or flag or pullback_to_level
+    structural_bo = is_structural_breakout(df, levels["structural_resistance"])
+    continuation_ok = bounce_fail or flag or pullback_to_level or structural_bo
+
+    if structural_bo and not not_extended_ok:
+        not_extended_ok = is_not_extended(df, max_distance_atr=BREAKOUT_MAX_DISTANCE_ATR)
 
     strong_close = bullish_strong_close(df)
     rejection_wick = bullish_rejection_wick(df)
@@ -109,7 +120,7 @@ def score_long_setup(df: pd.DataFrame) -> dict:
     else:
         checks_failed.append("not_extended")
 
-    if room_ok:
+    if room_ok or structural_bo:
         score += 1
         reasons.append("room_to_target")
         checks_passed.append("room_to_target")
@@ -118,7 +129,9 @@ def score_long_setup(df: pd.DataFrame) -> dict:
 
     if continuation_ok:
         score += 2
-        if bounce_fail:
+        if structural_bo:
+            label = "structural_breakout"
+        elif bounce_fail:
             label = "bounce_and_fail"
         elif flag:
             label = "flag_breakout"
@@ -161,7 +174,7 @@ def score_long_setup(df: pd.DataFrame) -> dict:
         checks_failed.append("confirmation_volume")
 
     soft_count = sum([
-        room_ok,
+        room_ok or structural_bo,
         continuation_ok,
         candle_ok,
         pullback_volume_ok,
@@ -170,6 +183,10 @@ def score_long_setup(df: pd.DataFrame) -> dict:
 
     if not trend_ok or not not_extended_ok:
         state = "REJECT"
+    elif structural_bo:
+        state = "SIGNAL" if soft_count >= 3 and score >= 7 else "WATCHLIST"
+    elif not room_ok:
+        state = "WATCHLIST" if soft_count >= 2 and score >= 5 else "REJECT"
     elif soft_count >= 3 and score >= 7:
         state = "SIGNAL"
     elif soft_count >= 2 and score >= 5:
@@ -182,6 +199,8 @@ def score_long_setup(df: pd.DataFrame) -> dict:
         score=score,
         support=levels["support"],
         resistance=levels["resistance"],
+        structural_support=levels["structural_support"],
+        structural_resistance=levels["structural_resistance"],
         state=state,
         reasons=reasons,
         checks_passed=checks_passed,
@@ -196,12 +215,16 @@ def score_short_setup(df: pd.DataFrame) -> dict:
 
     trend_ok = trend["trend"] == "SHORT"
     not_extended_ok = is_not_extended(df)
-    room_ok = has_room_to_target_short(df, levels["support"])
+    room_ok = has_room_to_target_short(df, levels["structural_support"])
 
     bounce_fail = is_bounce_and_fail_short(df)
     flag = is_flag_breakdown(df)
     pullback_to_level = is_pullback_to_resistance(df, levels["resistance"])
-    continuation_ok = bounce_fail or flag or pullback_to_level
+    structural_bd = is_structural_breakdown(df, levels["structural_support"])
+    continuation_ok = bounce_fail or flag or pullback_to_level or structural_bd
+
+    if structural_bd and not not_extended_ok:
+        not_extended_ok = is_not_extended(df, max_distance_atr=BREAKOUT_MAX_DISTANCE_ATR)
 
     strong_close = bearish_strong_close(df)
     rejection_wick = bearish_rejection_wick(df)
@@ -228,7 +251,7 @@ def score_short_setup(df: pd.DataFrame) -> dict:
     else:
         checks_failed.append("not_extended")
 
-    if room_ok:
+    if room_ok or structural_bd:
         score += 1
         reasons.append("room_to_target")
         checks_passed.append("room_to_target")
@@ -237,7 +260,9 @@ def score_short_setup(df: pd.DataFrame) -> dict:
 
     if continuation_ok:
         score += 2
-        if bounce_fail:
+        if structural_bd:
+            label = "structural_breakdown"
+        elif bounce_fail:
             label = "bounce_and_fail"
         elif flag:
             label = "flag_breakdown"
@@ -280,7 +305,7 @@ def score_short_setup(df: pd.DataFrame) -> dict:
         checks_failed.append("confirmation_volume")
 
     soft_count = sum([
-        room_ok,
+        room_ok or structural_bd,
         continuation_ok,
         candle_ok,
         pullback_volume_ok,
@@ -289,6 +314,10 @@ def score_short_setup(df: pd.DataFrame) -> dict:
 
     if not trend_ok or not not_extended_ok:
         state = "REJECT"
+    elif structural_bd:
+        state = "SIGNAL" if soft_count >= 3 and score >= 7 else "WATCHLIST"
+    elif not room_ok:
+        state = "WATCHLIST" if soft_count >= 2 and score >= 5 else "REJECT"
     elif soft_count >= 3 and score >= 7:
         state = "SIGNAL"
     elif soft_count >= 2 and score >= 5:
@@ -301,6 +330,8 @@ def score_short_setup(df: pd.DataFrame) -> dict:
         score=score,
         support=levels["support"],
         resistance=levels["resistance"],
+        structural_support=levels["structural_support"],
+        structural_resistance=levels["structural_resistance"],
         state=state,
         reasons=reasons,
         checks_passed=checks_passed,

@@ -20,7 +20,7 @@ def _cap_stop(entry: float, raw_stop: float, direction: str) -> float:
 
 
 def build_long_trade_plan(df: pd.DataFrame, scored_signal: dict) -> dict:
-    """Build a long trade plan using S/R-based targets with R:R filtering."""
+    """Build a long trade plan using structural S/R-based targets with R:R filtering."""
     if not scored_signal.get("is_valid", False):
         raise ValueError("Cannot build long trade plan for invalid signal")
 
@@ -30,7 +30,7 @@ def build_long_trade_plan(df: pd.DataFrame, scored_signal: dict) -> dict:
     atr = float(last["atr14"])
     latest_low = float(last["low"])
     support = float(scored_signal["support"])
-    resistance = float(scored_signal["resistance"])
+    structural_resistance = float(scored_signal.get("structural_resistance", scored_signal["resistance"]))
 
     entry_zone_low = entry_price - 0.25 * atr
     entry_zone_high = entry_price + 0.25 * atr
@@ -43,8 +43,8 @@ def build_long_trade_plan(df: pd.DataFrame, scored_signal: dict) -> dict:
         raise ValueError("Invalid long trade plan: non-positive risk per share")
 
     t1_rmultiple = entry_price + 2.0 * risk_per_share
-    if resistance > entry_price + MIN_RR * risk_per_share:
-        target_1 = resistance
+    if structural_resistance > entry_price + MIN_RR * risk_per_share:
+        target_1 = structural_resistance
     else:
         target_1 = t1_rmultiple
     target_2 = entry_price + 3.0 * risk_per_share
@@ -65,13 +65,13 @@ def build_long_trade_plan(df: pd.DataFrame, scored_signal: dict) -> dict:
         "rr_ratio": round(rr_ratio, 2),
         "time_stop_days": MAX_HOLD_DAYS,
         "support": round(support, 2),
-        "resistance": round(resistance, 2),
+        "resistance": round(structural_resistance, 2),
         "reasons": scored_signal["reasons"],
     }
 
 
 def build_short_trade_plan(df: pd.DataFrame, scored_signal: dict) -> dict:
-    """Build a short trade plan using S/R-based targets with R:R filtering."""
+    """Build a short trade plan using structural S/R-based targets with R:R filtering."""
     if not scored_signal.get("is_valid", False):
         raise ValueError("Cannot build short trade plan for invalid signal")
 
@@ -80,8 +80,8 @@ def build_short_trade_plan(df: pd.DataFrame, scored_signal: dict) -> dict:
     entry_price = float(last["close"])
     atr = float(last["atr14"])
     latest_high = float(last["high"])
-    support = float(scored_signal["support"])
     resistance = float(scored_signal["resistance"])
+    structural_support = float(scored_signal.get("structural_support", scored_signal["support"]))
 
     entry_zone_low = entry_price - 0.25 * atr
     entry_zone_high = entry_price + 0.25 * atr
@@ -94,8 +94,8 @@ def build_short_trade_plan(df: pd.DataFrame, scored_signal: dict) -> dict:
         raise ValueError("Invalid short trade plan: non-positive risk per share")
 
     t1_rmultiple = entry_price - 2.0 * risk_per_share
-    if support < entry_price - MIN_RR * risk_per_share:
-        target_1 = support
+    if structural_support < entry_price - MIN_RR * risk_per_share:
+        target_1 = structural_support
     else:
         target_1 = t1_rmultiple
     target_2 = entry_price - 3.0 * risk_per_share
@@ -115,7 +115,7 @@ def build_short_trade_plan(df: pd.DataFrame, scored_signal: dict) -> dict:
         "target_2": round(target_2, 2),
         "rr_ratio": round(rr_ratio, 2),
         "time_stop_days": MAX_HOLD_DAYS,
-        "support": round(support, 2),
+        "support": round(structural_support, 2),
         "resistance": round(resistance, 2),
         "reasons": scored_signal["reasons"],
     }

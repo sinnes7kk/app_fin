@@ -85,12 +85,14 @@ def dedupe_final_results(results: list[dict]) -> list[dict]:
 LONG_ALL_REASONS = {
     "trend_aligned", "not_extended", "room_to_target",
     "bounce_and_fail", "flag_breakout", "pullback_to_support",
+    "structural_breakout",
     "bullish_strong_close", "bullish_rejection_wick",
     "healthy_pullback_volume", "confirmation_volume",
 }
 SHORT_ALL_REASONS = {
     "trend_aligned", "not_extended", "room_to_target",
     "bounce_and_fail", "flag_breakdown", "pullback_to_resistance",
+    "structural_breakdown",
     "bearish_strong_close", "bearish_rejection_wick",
     "healthy_pullback_volume", "confirmation_volume",
 }

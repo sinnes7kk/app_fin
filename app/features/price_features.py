@@ -87,6 +87,38 @@ def fetch_ohlcv(
     return df
 
 
+def fetch_addv(ticker: str, lookback_days: int = 40) -> float | None:
+    """Average daily dollar volume (close * 20-day volume MA).
+
+    Uses a lightweight 40-day download so the 20-day rolling mean is stable.
+    Returns None on any failure so callers can fall back gracefully.
+    """
+    try:
+        end = datetime.today()
+        start = end - timedelta(days=lookback_days)
+        df = yf.download(
+            ticker,
+            start=start.strftime("%Y-%m-%d"),
+            end=end.strftime("%Y-%m-%d"),
+            auto_adjust=False,
+            progress=False,
+        )
+        if df.empty:
+            return None
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.droplevel("Ticker")
+        close = pd.to_numeric(df["Close"], errors="coerce")
+        vol = pd.to_numeric(df["Volume"], errors="coerce")
+        vol_ma = vol.rolling(20).mean()
+        last_close = close.iloc[-1]
+        last_vol_ma = vol_ma.iloc[-1]
+        if pd.isna(last_close) or pd.isna(last_vol_ma) or last_vol_ma <= 0:
+            return None
+        return float(last_close * last_vol_ma)
+    except Exception:
+        return None
+
+
 def clean_ohlcv(df: pd.DataFrame) -> pd.DataFrame:
     """Drop NaN rows, enforce types, and sort by date ascending."""
     df = df.copy()

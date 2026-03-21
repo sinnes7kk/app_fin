@@ -1,1 +1,28 @@
-[]
+[
+  {
+    "ticker": "GLNG",
+    "direction": "LONG",
+    "entry_price": 52.67,
+    "entry_date": "2026-03-21",
+    "initial_stop": 46.35,
+    "risk_per_share": 6.32,
+    "best_price": 53.36,
+    "days_held": 1,
+    "trail_atr": 48.06,
+    "trail_ema": 46.31,
+    "trail_hybrid": 46.35,
+    "active_stop": 48.06,
+    "target_1": 65.31,
+    "target_2": 71.63,
+    "partial_filled": false,
+    "final_score": 9.2,
+    "flow_score_scaled": 10.0,
+    "source": "fresh",
+    "partial_pnl_pct": 0.0,
+    "risk_pct": 0.03,
+    "risk_dollar": 297.04,
+    "shares": 47,
+    "position_value": 2475.49,
+    "unrealized_r": -0.0
+  }
+]

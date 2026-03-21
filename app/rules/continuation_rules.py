@@ -21,12 +21,16 @@ def detect_trend(df: pd.DataFrame) -> dict:
     return {"trend": "NEUTRAL", "is_valid": False}
 
 
-def find_support_resistance(df: pd.DataFrame, lookback: int = 20) -> dict:
-    """
-    Find simple rolling support and resistance levels.
+STRUCTURAL_LOOKBACK = 60
 
-    For V1, this uses prior bars only so the current candle does not define
-    today's support/resistance level too heavily.
+
+def find_support_resistance(df: pd.DataFrame, lookback: int = 20) -> dict:
+    """Find tactical (20-bar) and structural (60-bar) S/R levels.
+
+    Tactical levels are used for pullback detection and entry timing.
+    Structural levels capture major swing highs/lows that institutional
+    traders watch, used for room-to-target checks and trade plan targets.
+    Both exclude the current bar to avoid self-referencing.
     """
     if len(df) < lookback + 1:
         raise ValueError(
@@ -37,9 +41,16 @@ def find_support_resistance(df: pd.DataFrame, lookback: int = 20) -> dict:
     support = recent["low"].min()
     resistance = recent["high"].max()
 
+    struct_bars = min(STRUCTURAL_LOOKBACK, len(df) - 1)
+    structural = df.iloc[-(struct_bars + 1) : -1]
+    structural_support = structural["low"].min()
+    structural_resistance = structural["high"].max()
+
     return {
         "support": float(support),
         "resistance": float(resistance),
+        "structural_support": float(structural_support),
+        "structural_resistance": float(structural_resistance),
     }
 
 
@@ -356,11 +367,57 @@ def is_flag_breakdown(
     return bool(last["close"] < flag_low and rel_vol >= 1.0)
 
 
+def is_structural_breakout(
+    df: pd.DataFrame,
+    structural_resistance: float,
+    lookback: int = 2,
+) -> bool:
+    """Detect a confirmed close above 60-bar structural resistance with volume.
+
+    A breakout is valid when any of the last ``lookback`` bars closed above
+    the structural resistance level on above-average volume.
+    """
+    if len(df) < lookback:
+        return False
+
+    window = df.iloc[-lookback:]
+    for _, bar in window.iterrows():
+        rel_vol = bar.get("rel_volume")
+        if pd.isna(rel_vol):
+            continue
+        if bar["close"] > structural_resistance and rel_vol >= 1.0:
+            return True
+    return False
+
+
+def is_structural_breakdown(
+    df: pd.DataFrame,
+    structural_support: float,
+    lookback: int = 2,
+) -> bool:
+    """Detect a confirmed close below 60-bar structural support with volume.
+
+    A breakdown is valid when any of the last ``lookback`` bars closed below
+    the structural support level on above-average volume.
+    """
+    if len(df) < lookback:
+        return False
+
+    window = df.iloc[-lookback:]
+    for _, bar in window.iterrows():
+        rel_vol = bar.get("rel_volume")
+        if pd.isna(rel_vol):
+            continue
+        if bar["close"] < structural_support and rel_vol >= 1.0:
+            return True
+    return False
+
+
 MIN_ROOM_ATR = 1.0
 
 
 def has_room_to_target_long(df: pd.DataFrame, resistance: float) -> bool:
-    """Reject longs that are already within MIN_ROOM_ATR of resistance."""
+    """Reject longs that are already within MIN_ROOM_ATR of structural resistance."""
     if df.empty:
         return False
     last = df.iloc[-1]
@@ -372,7 +429,7 @@ def has_room_to_target_long(df: pd.DataFrame, resistance: float) -> bool:
 
 
 def has_room_to_target_short(df: pd.DataFrame, support: float) -> bool:
-    """Reject shorts that are already within MIN_ROOM_ATR of support."""
+    """Reject shorts that are already within MIN_ROOM_ATR of structural support."""
     if df.empty:
         return False
     last = df.iloc[-1]

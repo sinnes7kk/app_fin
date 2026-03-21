@@ -121,7 +121,18 @@ def main() -> None:
     parser.add_argument("--backtest", action="store_true", help="Run replay backtest over archived flow")
     parser.add_argument("--start", type=str, help="Backtest start date (YYYY-MM-DD)")
     parser.add_argument("--end", type=str, help="Backtest end date (YYYY-MM-DD)")
+    parser.add_argument(
+        "--serve",
+        action="store_true",
+        help="Start local HTTP dashboard (default http://127.0.0.1:5050)",
+    )
     args = parser.parse_args()
+
+    if args.serve:
+        from app.web.server import main as serve_dashboard
+
+        serve_dashboard()
+        return
 
     if args.backtest:
         from app.backtest.engine import print_summary, run_backtest, save_backtest_results

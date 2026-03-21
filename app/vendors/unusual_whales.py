@@ -203,6 +203,30 @@ def fetch_uw_alerts(limit: int = 200, hours_back: int = 24) -> list[str]:
     return sorted(tickers)
 
 
+def fetch_recent_alert_flow(limit: int = 150, hours_back: int = 24) -> pd.DataFrame:
+    """Return normalized flow rows for recent UW sweep + vol>Oi alerts (for UI / research)."""
+    newer_than = (
+        datetime.now(tz=timezone.utc) - timedelta(hours=hours_back)
+    ).strftime("%Y-%m-%dT%H:%M:%SZ")
+    params: dict = {
+        "limit": limit,
+        "is_sweep": "true",
+        "vol_greater_oi": "true",
+        "newer_than": newer_than,
+    }
+    try:
+        resp = requests.get(
+            FLOW_ALERTS_ENDPOINT,
+            headers=_headers(),
+            params=params,
+            timeout=30,
+        )
+        resp.raise_for_status()
+        return normalize_flow_response(resp.json())
+    except Exception:
+        return pd.DataFrame()
+
+
 def fetch_flow_for_tickers(
     tickers: list[str],
     limit_per_ticker: int = 50,

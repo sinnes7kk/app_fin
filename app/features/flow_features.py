@@ -7,6 +7,8 @@ from datetime import datetime, timezone
 import numpy as np
 import pandas as pd
 
+from app.features.price_features import fetch_addv
+
 
 def filter_qualifying_flow(
     df: pd.DataFrame,
@@ -136,20 +138,20 @@ def _norm01(series: pd.Series) -> pd.Series:
 
 # Weights sum to 1.0 — adjust here to re-prioritize.
 _FLOW_WEIGHTS = {
-    "premium":       0.30,
+    "flow_intensity":    0.30,
     "premium_per_trade": 0.15,
-    "vol_oi":        0.20,
-    "repeat":        0.15,
-    "sweep":         0.10,
-    "dte":           0.05,
-    "concentration": 0.05,
+    "vol_oi":            0.20,
+    "repeat":            0.15,
+    "sweep":             0.10,
+    "dte":               0.05,
+    "concentration":     0.05,
 }
 
 
 def _weighted_flow_score(
     agg: pd.DataFrame,
     *,
-    premium_col: str,
+    flow_intensity_col: str,
     ppt_col: str,
     vol_oi_col: str,
     repeat_col: str,
@@ -160,7 +162,7 @@ def _weighted_flow_score(
     """Build a directional flow score from normalized 0–1 components."""
     w = _FLOW_WEIGHTS
     return (
-        w["premium"]          * _norm01(np.log1p(agg[premium_col]))
+        w["flow_intensity"]     * _norm01(agg[flow_intensity_col].fillna(0))
         + w["premium_per_trade"] * _norm01(np.log1p(agg[ppt_col]))
         + w["vol_oi"]           * _norm01(agg[vol_oi_col].fillna(0))
         + w["repeat"]           * _norm01(agg[repeat_col])
@@ -212,6 +214,9 @@ def aggregate_flow_by_ticker(df: pd.DataFrame) -> pd.DataFrame:
                 "flow_imbalance_ratio",
                 "dominant_direction",
                 "dte_score",
+                "addv",
+                "bullish_flow_intensity",
+                "bearish_flow_intensity",
                 "bullish_score",
                 "bearish_score",
             ]
@@ -354,6 +359,15 @@ def aggregate_flow_by_ticker(df: pd.DataFrame) -> pd.DataFrame:
     # DTE score
     agg["dte_score"] = agg["avg_dte"].apply(_dte_score)
 
+    # ADDV and flow intensity — normalizes premium by stock size
+    agg["addv"] = agg["ticker"].apply(fetch_addv)
+    addv_safe = agg["addv"].replace(0, float("nan"))
+    agg["bullish_flow_intensity"] = agg["bullish_premium"] / addv_safe
+    agg["bearish_flow_intensity"] = agg["bearish_premium"] / addv_safe
+    agg[["bullish_flow_intensity", "bearish_flow_intensity"]] = (
+        agg[["bullish_flow_intensity", "bearish_flow_intensity"]].fillna(0.0)
+    )
+
     # Round selected columns
     round_cols = [
         "avg_dte",
@@ -363,16 +377,18 @@ def aggregate_flow_by_ticker(df: pd.DataFrame) -> pd.DataFrame:
         "bullish_concentration",
         "bearish_concentration",
         "dte_score",
+        "bullish_flow_intensity",
+        "bearish_flow_intensity",
     ]
     for col in round_cols:
         if col in agg.columns:
-            agg[col] = agg[col].round(2)
+            agg[col] = agg[col].round(6)
 
     # Directional scores — each component normalized to 0–1 within the
     # current batch so weights reflect true relative importance.
     agg["bullish_score"] = _weighted_flow_score(
         agg,
-        premium_col="bullish_premium",
+        flow_intensity_col="bullish_flow_intensity",
         ppt_col="bullish_premium_per_trade",
         vol_oi_col="bullish_vol_oi",
         repeat_col="bullish_repeat_count",
@@ -383,7 +399,7 @@ def aggregate_flow_by_ticker(df: pd.DataFrame) -> pd.DataFrame:
 
     agg["bearish_score"] = _weighted_flow_score(
         agg,
-        premium_col="bearish_premium",
+        flow_intensity_col="bearish_flow_intensity",
         ppt_col="bearish_premium_per_trade",
         vol_oi_col="bearish_vol_oi",
         repeat_col="bearish_repeat_count",
