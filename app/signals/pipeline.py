@@ -8,8 +8,10 @@ from pathlib import Path
 import pandas as pd
 
 from app.features.flow_features import build_flow_feature_table, rank_flow_candidates
+from app.features.options_context import clear_context_cache, fetch_options_context
 from app.features.price_features import clean_ohlcv, compute_features, fetch_ohlcv
 from app.signals.scoring import score_long_setup, score_short_setup
+from app.config import WALL_PROXIMITY_REJECT_ATR, WALL_PROXIMITY_REJECT_PCT
 from app.signals.trade_plan import (
     MIN_RR,
     build_long_trade_plan,
@@ -24,6 +26,20 @@ from app.vendors.unusual_whales import (
 
 
 NON_EQUITY_TICKERS = {"SPXW", "SPXE", "NDXP", "RUTW", "VIX", "VIXW"}
+
+CONTINUATION_PATTERNS = {
+    "structural_breakout", "structural_breakdown",
+    "bounce_and_fail", "flag_breakout", "flag_breakdown",
+    "pullback_to_support", "pullback_to_resistance",
+}
+
+
+def _extract_pattern(reasons: list[str]) -> str:
+    """Extract the continuation pattern name from a scoring reasons list."""
+    for r in reasons:
+        if r in CONTINUATION_PATTERNS:
+            return r
+    return "unknown"
 
 
 def minmax_scale(series: pd.Series, target_max: float = 10.0) -> pd.Series:
@@ -80,6 +96,25 @@ def dedupe_final_results(results: list[dict]) -> list[dict]:
         if ticker not in best_by_ticker or result["final_score"] > best_by_ticker[ticker]["final_score"]:
             best_by_ticker[ticker] = result
     return list(best_by_ticker.values())
+
+
+def _attach_price_checks_to_ranked(
+    df: pd.DataFrame, accepted: list[dict], rejected: list[dict]
+) -> pd.DataFrame:
+    """Add checks_passed / checks_failed from validation outcomes to ranked candidate rows."""
+    if df.empty:
+        return df
+    meta: dict[str, tuple[str, str]] = {}
+    for r in accepted:
+        meta[r["ticker"]] = (r.get("checks_passed", "none"), r.get("checks_failed", "none"))
+    for r in rejected:
+        t = r["ticker"]
+        if t not in meta:
+            meta[t] = (r.get("checks_passed", "none"), r.get("checks_failed", "none"))
+    out = df.copy()
+    out["checks_passed"] = out["ticker"].map(lambda t: meta.get(t, ("", ""))[0])
+    out["checks_failed"] = out["ticker"].map(lambda t: meta.get(t, ("", ""))[1])
+    return out
 
 
 LONG_ALL_REASONS = {
@@ -147,7 +182,10 @@ def run_price_validation_for_bullish_candidates(bullish_df) -> tuple[list[dict],
             df = clean_ohlcv(df)
             df = compute_features(df)
 
-            price_signal = score_long_setup(df)
+            spot = float(df.iloc[-1]["close"])
+            opts_ctx = fetch_options_context(ticker, spot)
+
+            price_signal = score_long_setup(df, options_ctx=opts_ctx)
             price_signal["ticker"] = ticker
 
             if not price_signal["is_valid"]:
@@ -157,7 +195,20 @@ def run_price_validation_for_bullish_candidates(bullish_df) -> tuple[list[dict],
                 ))
                 continue
 
-            trade_plan = build_long_trade_plan(df, price_signal)
+            atr = float(df.iloc[-1]["atr14"])
+            call_wall = opts_ctx.get("nearest_call_wall")
+            if call_wall and call_wall > spot and atr > 0:
+                wall_dist_pct = (call_wall - spot) / spot
+                wall_dist_atr = (call_wall - spot) / atr
+                if wall_dist_pct < WALL_PROXIMITY_REJECT_PCT and wall_dist_atr < WALL_PROXIMITY_REJECT_ATR:
+                    rejected.append(_build_rejection_row(
+                        ticker, "LONG", flow_raw, price_signal, LONG_ALL_REASONS,
+                        reject_reason=f"wall_proximity ({wall_dist_pct:.1%}, {wall_dist_atr:.1f} ATR to call wall)",
+                        flow_score_scaled=flow_scaled,
+                    ))
+                    continue
+
+            trade_plan = build_long_trade_plan(df, price_signal, options_ctx=opts_ctx)
 
             if trade_plan["rr_ratio"] < MIN_RR:
                 rejected.append(_build_rejection_row(
@@ -180,10 +231,27 @@ def run_price_validation_for_bullish_candidates(bullish_df) -> tuple[list[dict],
                 "target_2": trade_plan["target_2"],
                 "rr_ratio": trade_plan["rr_ratio"],
                 "time_stop_days": trade_plan["time_stop_days"],
+                "checks_passed": ", ".join(sorted(price_signal.get("checks_passed", []))) or "none",
+                "checks_failed": ", ".join(sorted(price_signal.get("checks_failed", []))) or "none",
+                "pattern": _extract_pattern(price_signal.get("reasons", [])),
+                "gamma_regime": opts_ctx.get("gamma_regime"),
+                "net_gex": opts_ctx.get("net_gex"),
+                "gamma_flip_level_estimate": opts_ctx.get("gamma_flip_level_estimate"),
+                "nearest_call_wall": opts_ctx.get("nearest_call_wall"),
+                "nearest_put_wall": opts_ctx.get("nearest_put_wall"),
+                "distance_to_call_wall_pct": opts_ctx.get("distance_to_call_wall_pct"),
+                "distance_to_put_wall_pct": opts_ctx.get("distance_to_put_wall_pct"),
+                "ticker_call_oi": opts_ctx.get("ticker_call_oi"),
+                "ticker_put_oi": opts_ctx.get("ticker_put_oi"),
+                "ticker_put_call_ratio": opts_ctx.get("ticker_put_call_ratio"),
+                "near_term_oi": opts_ctx.get("near_term_oi"),
+                "swing_dte_oi": opts_ctx.get("swing_dte_oi"),
+                "long_dated_oi": opts_ctx.get("long_dated_oi"),
                 "source": "fresh",
                 "trade_plan": trade_plan,
                 "flow_snapshot": row.to_dict(),
                 "price_snapshot": price_signal,
+                "options_context": opts_ctx,
             })
 
         except Exception as e:
@@ -222,7 +290,10 @@ def run_price_validation_for_bearish_candidates(bearish_df) -> tuple[list[dict],
             df = clean_ohlcv(df)
             df = compute_features(df)
 
-            price_signal = score_short_setup(df)
+            spot = float(df.iloc[-1]["close"])
+            opts_ctx = fetch_options_context(ticker, spot)
+
+            price_signal = score_short_setup(df, options_ctx=opts_ctx)
             price_signal["ticker"] = ticker
 
             if not price_signal["is_valid"]:
@@ -232,7 +303,20 @@ def run_price_validation_for_bearish_candidates(bearish_df) -> tuple[list[dict],
                 ))
                 continue
 
-            trade_plan = build_short_trade_plan(df, price_signal)
+            atr = float(df.iloc[-1]["atr14"])
+            put_wall = opts_ctx.get("nearest_put_wall")
+            if put_wall and put_wall < spot and atr > 0:
+                wall_dist_pct = (spot - put_wall) / spot
+                wall_dist_atr = (spot - put_wall) / atr
+                if wall_dist_pct < WALL_PROXIMITY_REJECT_PCT and wall_dist_atr < WALL_PROXIMITY_REJECT_ATR:
+                    rejected.append(_build_rejection_row(
+                        ticker, "SHORT", flow_raw, price_signal, SHORT_ALL_REASONS,
+                        reject_reason=f"wall_proximity ({wall_dist_pct:.1%}, {wall_dist_atr:.1f} ATR to put wall)",
+                        flow_score_scaled=flow_scaled,
+                    ))
+                    continue
+
+            trade_plan = build_short_trade_plan(df, price_signal, options_ctx=opts_ctx)
 
             if trade_plan["rr_ratio"] < MIN_RR:
                 rejected.append(_build_rejection_row(
@@ -255,10 +339,27 @@ def run_price_validation_for_bearish_candidates(bearish_df) -> tuple[list[dict],
                 "target_2": trade_plan["target_2"],
                 "rr_ratio": trade_plan["rr_ratio"],
                 "time_stop_days": trade_plan["time_stop_days"],
+                "checks_passed": ", ".join(sorted(price_signal.get("checks_passed", []))) or "none",
+                "checks_failed": ", ".join(sorted(price_signal.get("checks_failed", []))) or "none",
+                "pattern": _extract_pattern(price_signal.get("reasons", [])),
+                "gamma_regime": opts_ctx.get("gamma_regime"),
+                "net_gex": opts_ctx.get("net_gex"),
+                "gamma_flip_level_estimate": opts_ctx.get("gamma_flip_level_estimate"),
+                "nearest_call_wall": opts_ctx.get("nearest_call_wall"),
+                "nearest_put_wall": opts_ctx.get("nearest_put_wall"),
+                "distance_to_call_wall_pct": opts_ctx.get("distance_to_call_wall_pct"),
+                "distance_to_put_wall_pct": opts_ctx.get("distance_to_put_wall_pct"),
+                "ticker_call_oi": opts_ctx.get("ticker_call_oi"),
+                "ticker_put_oi": opts_ctx.get("ticker_put_oi"),
+                "ticker_put_call_ratio": opts_ctx.get("ticker_put_call_ratio"),
+                "near_term_oi": opts_ctx.get("near_term_oi"),
+                "swing_dte_oi": opts_ctx.get("swing_dte_oi"),
+                "long_dated_oi": opts_ctx.get("long_dated_oi"),
                 "source": "fresh",
                 "trade_plan": trade_plan,
                 "flow_snapshot": row.to_dict(),
                 "price_snapshot": price_signal,
+                "options_context": opts_ctx,
             })
 
         except Exception as e:
@@ -333,6 +434,8 @@ def run_flow_to_price_pipeline(
         save_watchlist,
     )
 
+    clear_context_cache()
+
     prev_watchlist = load_watchlist()
     active_watchlist, expired_watchlist = prune_expired(prev_watchlist)
 
@@ -374,6 +477,9 @@ def run_flow_to_price_pipeline(
 
     bull_accepted, bull_rejected = run_price_validation_for_bullish_candidates(ranked["bullish"])
     bear_accepted, bear_rejected = run_price_validation_for_bearish_candidates(ranked["bearish"])
+
+    ranked["bullish"] = _attach_price_checks_to_ranked(ranked["bullish"], bull_accepted, bull_rejected)
+    ranked["bearish"] = _attach_price_checks_to_ranked(ranked["bearish"], bear_accepted, bear_rejected)
 
     fresh_results = bull_accepted + bear_accepted
     all_rejected = bull_rejected + bear_rejected
@@ -443,10 +549,24 @@ REJECTED_COLUMNS = [
 SIGNAL_COLUMNS = [
     "ticker",
     "direction",
+    "pattern",
     "flow_score_raw",
     "flow_score_scaled",
     "price_score",
     "final_score",
+    "gamma_regime",
+    "net_gex",
+    "gamma_flip_level_estimate",
+    "nearest_call_wall",
+    "nearest_put_wall",
+    "distance_to_call_wall_pct",
+    "distance_to_put_wall_pct",
+    "ticker_call_oi",
+    "ticker_put_oi",
+    "ticker_put_call_ratio",
+    "near_term_oi",
+    "swing_dte_oi",
+    "long_dated_oi",
     "entry_price",
     "stop_price",
     "target_1",
@@ -454,6 +574,8 @@ SIGNAL_COLUMNS = [
     "rr_ratio",
     "time_stop_days",
     "source",
+    "checks_passed",
+    "checks_failed",
 ]
 
 

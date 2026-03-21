@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import csv
 import json
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -19,16 +19,28 @@ from app.config import (
     ROTATION_SCORE_MARGIN,
     SIZING_TIERS,
 )
+from app.features.options_context import fetch_options_context
 from app.features.price_features import compute_features, fetch_ohlcv
 from app.signals.trade_plan import compute_trailing_stops
 
 DATA_DIR = Path(__file__).resolve().parents[2] / "data"
 POSITIONS_PATH = DATA_DIR / "positions.json"
 TRADE_LOG_PATH = DATA_DIR / "trade_log.csv"
+EQUITY_CURVE_PATH = DATA_DIR / "equity_curve.csv"
+
+EQUITY_CURVE_COLUMNS = [
+    "date",
+    "portfolio_value",
+    "cash",
+    "positions_value",
+    "open_count",
+    "daily_realized_pnl",
+]
 
 TRADE_LOG_COLUMNS = [
     "ticker",
     "direction",
+    "pattern",
     "entry_date",
     "exit_date",
     "entry_price",
@@ -68,6 +80,42 @@ def _append_trade_log(rows: list[dict]) -> None:
         if write_header:
             writer.writeheader()
         writer.writerows(rows)
+
+
+def _append_equity_curve(
+    still_open: list[dict],
+    realized_pnl: float,
+) -> None:
+    """Append one row to the equity curve CSV with today's portfolio snapshot."""
+    positions_value = 0.0
+    for pos in still_open:
+        price = pos.get("best_price", pos["entry_price"])
+        shares = pos.get("shares", 0)
+        if pos["direction"] == "LONG":
+            positions_value += shares * price
+        else:
+            positions_value += shares * (2 * pos["entry_price"] - price)
+
+    invested = sum(p.get("position_value", 0.0) for p in still_open)
+    cash = PORTFOLIO_CAPITAL - invested
+    portfolio_value = cash + positions_value
+
+    row = {
+        "date": str(date.today()),
+        "portfolio_value": round(portfolio_value, 2),
+        "cash": round(cash, 2),
+        "positions_value": round(positions_value, 2),
+        "open_count": len(still_open),
+        "daily_realized_pnl": round(realized_pnl, 2),
+    }
+
+    EQUITY_CURVE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    write_header = not EQUITY_CURVE_PATH.exists()
+    with open(EQUITY_CURVE_PATH, "a", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=EQUITY_CURVE_COLUMNS, extrasaction="ignore")
+        if write_header:
+            writer.writeheader()
+        writer.writerow(row)
 
 
 def _risk_pct_for_score(score: float) -> float:
@@ -119,6 +167,20 @@ def _find_replaceable(existing: list[dict], new_score: float) -> dict | None:
     return min(candidates, key=lambda p: p["final_score"])
 
 
+def _normalize_checks_snapshot(sig: dict, key: str) -> str | None:
+    """String snapshot for dashboard chips (matches pipeline CSV format)."""
+    v = sig.get(key)
+    if v is None:
+        return None
+    if isinstance(v, float) and v != v:  # NaN
+        return None
+    if isinstance(v, list):
+        joined = ", ".join(sorted(str(x) for x in v))
+        return joined if joined else "none"
+    s = str(v).strip()
+    return s if s else None
+
+
 def _build_position(sig: dict, risk_pct: float) -> dict | None:
     """Size a signal and return a position dict, or None if sizing fails."""
     risk_per_share = (
@@ -142,6 +204,7 @@ def _build_position(sig: dict, risk_pct: float) -> dict | None:
         "direction": sig["direction"],
         "entry_price": sig["entry_price"],
         "entry_date": str(date.today()),
+        "opened_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
         "initial_stop": sig["stop_price"],
         "risk_per_share": risk_per_share,
         "best_price": sig["entry_price"],
@@ -155,7 +218,17 @@ def _build_position(sig: dict, risk_pct: float) -> dict | None:
         "partial_filled": False,
         "final_score": sig["final_score"],
         "flow_score_scaled": sig.get("flow_score_scaled", 0.0),
+        "price_score": sig.get("price_score"),
+        "pattern": sig.get("pattern", "unknown"),
+        "checks_passed": _normalize_checks_snapshot(sig, "checks_passed"),
+        "checks_failed": _normalize_checks_snapshot(sig, "checks_failed"),
+        "flow_score_raw": sig.get("flow_score_raw"),
         "source": sig.get("source", "fresh"),
+        "gamma_regime": sig.get("gamma_regime"),
+        "net_gex": sig.get("net_gex"),
+        "nearest_call_wall": sig.get("nearest_call_wall"),
+        "nearest_put_wall": sig.get("nearest_put_wall"),
+        "gamma_flip_level_estimate": sig.get("gamma_flip_level_estimate"),
         "partial_pnl_pct": 0.0,
         "risk_pct": risk_pct,
         "risk_dollar": round(actual_risk_dollar, 2),
@@ -255,6 +328,7 @@ def close_position(pos: dict, exit_price: float, exit_reason: str, trail_method:
     return {
         "ticker": pos["ticker"],
         "direction": direction,
+        "pattern": pos.get("pattern", "unknown"),
         "entry_date": pos["entry_date"],
         "exit_date": str(date.today()),
         "entry_price": entry,
@@ -375,10 +449,22 @@ def update_positions() -> dict:
             continue
 
         bar = df.iloc[-1]
+        close = float(bar["close"])
         pos["days_held"] += 1
 
-        # Compute fresh trailing stops (always, so the stored levels are current)
-        trail_update = compute_trailing_stops(pos, df)
+        try:
+            opts_ctx = fetch_options_context(ticker, close)
+        except Exception:
+            opts_ctx = None
+
+        if opts_ctx and opts_ctx.get("options_context_available"):
+            pos["gamma_regime"] = opts_ctx.get("gamma_regime")
+            pos["net_gex"] = opts_ctx.get("net_gex")
+            pos["nearest_call_wall"] = opts_ctx.get("nearest_call_wall")
+            pos["nearest_put_wall"] = opts_ctx.get("nearest_put_wall")
+            pos["gamma_flip_level_estimate"] = opts_ctx.get("gamma_flip_level_estimate")
+
+        trail_update = compute_trailing_stops(pos, df, options_ctx=opts_ctx)
         pos.update(trail_update)
 
         # Don't check exits on entry day — give the trade at least one full bar
@@ -409,6 +495,9 @@ def update_positions() -> dict:
 
     _save_positions(still_open)
     _append_trade_log(closed_rows)
+
+    realized_pnl = sum(r.get("pnl_dollar", 0.0) for r in closed_rows)
+    _append_equity_curve(still_open, realized_pnl)
 
     return {
         "closed": closed_rows,

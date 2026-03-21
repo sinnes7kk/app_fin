@@ -349,11 +349,11 @@ def aggregate_flow_by_ticker(df: pd.DataFrame) -> pd.DataFrame:
         0.0,
     )
 
-    # Flow imbalance ratio
+    # Flow imbalance ratio (capped at 99 to avoid inf when one side is zero)
     agg["flow_imbalance_ratio"] = np.where(
         agg["bearish_premium"] > 0,
-        agg["bullish_premium"] / agg["bearish_premium"],
-        np.where(agg["bullish_premium"] > 0, np.inf, 1.0),
+        np.minimum(agg["bullish_premium"] / agg["bearish_premium"], 99.0),
+        np.where(agg["bullish_premium"] > 0, 99.0, 1.0),
     )
 
     # DTE score

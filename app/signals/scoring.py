@@ -28,6 +28,98 @@ from app.rules.continuation_rules import (
 MAX_DISTANCE_FROM_EMA20_ATR = 2.0
 BREAKOUT_MAX_DISTANCE_ATR = 4.0
 
+# Options context thresholds
+CALL_WALL_CLOSE_PCT = 2.0   # penalize longs if call wall within this %
+CALL_WALL_CLEAR_PCT = 5.0   # boost longs if call wall farther than this %
+PUT_WALL_CLOSE_PCT = 2.0    # penalize shorts if put wall within this %
+PUT_WALL_CLEAR_PCT = 5.0    # boost shorts if put wall farther than this %
+
+
+def apply_options_context_adjustment(
+    score: int,
+    direction: str,
+    ctx: dict,
+    spot: float | None = None,
+) -> tuple[int, list[str]]:
+    """Apply up to +2 / -2 score points based on options gamma/OI context.
+
+    Returns (adjusted_score, list_of_reasons).  Skips entirely when the
+    context is unavailable or all-None, returning the score unchanged.
+    """
+    if not ctx.get("options_context_available"):
+        return score, []
+
+    adj = 0
+    reasons: list[str] = []
+    regime = ctx.get("gamma_regime", "NEUTRAL")
+    flip = ctx.get("gamma_flip_level_estimate")
+    dist_call = ctx.get("distance_to_call_wall_pct")
+    dist_put = ctx.get("distance_to_put_wall_pct")
+    near_oi = ctx.get("near_term_oi") or 0
+    swing_oi = ctx.get("swing_dte_oi") or 0
+
+    if direction == "LONG":
+        # Boost: negative gamma or above flip -> dealer hedging amplifies moves up
+        if regime == "NEGATIVE" or (flip is not None and spot is not None and spot > flip):
+            adj += 1
+            reasons.append("gamma_tailwind")
+
+        # Boost: call wall far above -> room to run
+        if dist_call is not None and dist_call > CALL_WALL_CLEAR_PCT:
+            adj += 1
+            reasons.append("call_wall_clear")
+
+        # Penalize: positive gamma and chasing (dealer hedging dampens moves)
+        if regime == "POSITIVE" and (flip is not None and spot is not None and spot > flip):
+            adj -= 1
+            reasons.append("gamma_headwind")
+
+        # Penalize: call wall very close overhead
+        if dist_call is not None and dist_call < CALL_WALL_CLOSE_PCT:
+            adj -= 1
+            reasons.append("call_wall_near")
+
+        # DTE structure: swing > near-term is positive conviction
+        if swing_oi > near_oi and near_oi > 0:
+            adj += 1
+            reasons.append("swing_dte_dominant")
+        elif near_oi > swing_oi and swing_oi > 0:
+            adj -= 1
+            reasons.append("short_dated_noise")
+
+    else:  # SHORT
+        # Boost: negative gamma -> downside can extend
+        if regime == "NEGATIVE":
+            adj += 1
+            reasons.append("gamma_tailwind")
+
+        # Boost: put wall far below -> room to fall
+        if dist_put is not None and dist_put > PUT_WALL_CLEAR_PCT:
+            adj += 1
+            reasons.append("put_wall_clear")
+
+        # Penalize: positive gamma -> price likely to pin/mean-revert
+        if regime == "POSITIVE":
+            adj -= 1
+            reasons.append("gamma_headwind")
+
+        # Penalize: strong put wall just below price
+        if dist_put is not None and dist_put < PUT_WALL_CLOSE_PCT:
+            adj -= 1
+            reasons.append("put_wall_near")
+
+        # DTE structure
+        if swing_oi > near_oi and near_oi > 0:
+            adj += 1
+            reasons.append("swing_dte_dominant")
+        elif near_oi > swing_oi and swing_oi > 0:
+            adj -= 1
+            reasons.append("short_dated_noise")
+
+    adj = max(-2, min(2, adj))
+    adjusted = max(0, min(10, score + adj))
+    return adjusted, reasons
+
 
 def is_not_extended(df: pd.DataFrame, max_distance_atr: float = MAX_DISTANCE_FROM_EMA20_ATR) -> bool:
     """
@@ -77,7 +169,7 @@ def _build_result(
     }
 
 
-def score_long_setup(df: pd.DataFrame) -> dict:
+def score_long_setup(df: pd.DataFrame, options_ctx: dict | None = None) -> dict:
     """Score a long continuation setup on a 0-10 scale with SIGNAL/WATCHLIST/REJECT state."""
     trend = detect_trend(df)
     levels = find_support_resistance(df)
@@ -173,6 +265,12 @@ def score_long_setup(df: pd.DataFrame) -> dict:
     else:
         checks_failed.append("confirmation_volume")
 
+    if options_ctx:
+        spot = float(df.iloc[-1]["close"])
+        score, gamma_reasons = apply_options_context_adjustment(score, "LONG", options_ctx, spot)
+        reasons.extend(gamma_reasons)
+        checks_passed.extend(gamma_reasons)
+
     soft_count = sum([
         room_ok or structural_bo,
         continuation_ok,
@@ -208,7 +306,7 @@ def score_long_setup(df: pd.DataFrame) -> dict:
     )
 
 
-def score_short_setup(df: pd.DataFrame) -> dict:
+def score_short_setup(df: pd.DataFrame, options_ctx: dict | None = None) -> dict:
     """Score a short continuation setup on a 0-10 scale with SIGNAL/WATCHLIST/REJECT state."""
     trend = detect_trend(df)
     levels = find_support_resistance(df)
@@ -303,6 +401,12 @@ def score_short_setup(df: pd.DataFrame) -> dict:
         checks_passed.append("confirmation_volume")
     else:
         checks_failed.append("confirmation_volume")
+
+    if options_ctx:
+        spot = float(df.iloc[-1]["close"])
+        score, gamma_reasons = apply_options_context_adjustment(score, "SHORT", options_ctx, spot)
+        reasons.extend(gamma_reasons)
+        checks_passed.extend(gamma_reasons)
 
     soft_count = sum([
         room_ok or structural_bd,

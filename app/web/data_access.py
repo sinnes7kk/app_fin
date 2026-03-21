@@ -72,12 +72,26 @@ def load_watchlist() -> list[dict]:
     return read_json_list(DATA_ROOT / "watchlist.json")
 
 
-def load_trade_log_tail(n: int = 100) -> pd.DataFrame:
+def load_trade_log() -> pd.DataFrame:
     p = DATA_ROOT / "trade_log.csv"
     if not p.is_file():
         return pd.DataFrame()
     try:
-        df = pd.read_csv(p)
-        return df.tail(n) if len(df) > n else df
+        return pd.read_csv(p)
+    except Exception:
+        return pd.DataFrame()
+
+
+def load_trade_log_tail(n: int = 100) -> pd.DataFrame:
+    df = load_trade_log()
+    return df.tail(n) if len(df) > n else df
+
+
+def load_equity_curve() -> pd.DataFrame:
+    p = DATA_ROOT / "equity_curve.csv"
+    if not p.is_file():
+        return pd.DataFrame()
+    try:
+        return pd.read_csv(p)
     except Exception:
         return pd.DataFrame()

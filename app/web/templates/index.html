@@ -10,17 +10,18 @@
   <header>
     <h1>app_fin</h1>
     <span class="meta">Local dashboard — data from <code>data/</code> + live UW alerts on demand</span>
+    <span class="timestamp">{{ last_updated }}</span>
   </header>
 
-  <nav class="tabs" role="tablist">
+  <nav class="tabs pills" role="tablist">
     <button type="button" class="active" data-tab="signals" role="tab" aria-selected="true">Final signals</button>
     <button type="button" data-tab="candidates" role="tab">Candidates</button>
     <button type="button" data-tab="positions" role="tab">Open positions</button>
-    <button type="button" data-tab="watchlist" role="tab">Watchlist</button>
+    <button type="button" data-tab="rejected" role="tab">Rejected / Watchlist</button>
     <button type="button" data-tab="alerts" role="tab">UW alerts</button>
-    <button type="button" data-tab="rejected" role="tab">Rejected</button>
     <button type="button" data-tab="flow" role="tab">Flow features</button>
     <button type="button" data-tab="trades" role="tab">Trade log</button>
+    <button type="button" data-tab="performance" role="tab">Performance</button>
   </nav>
 
   <main>
@@ -28,34 +29,52 @@
       <h2>Final signals</h2>
       {% if signals_src %}<p class="src">Source: {{ signals_src }}</p>{% endif %}
       {{ signals_html | safe }}
+      <div id="detail-signals" class="detail-panel" style="display:none"></div>
     </section>
 
     <section id="panel-candidates" class="panel" role="tabpanel">
-      <h2>Ranked candidates</h2>
-      <div class="subgrid two">
-        <div>
-          <h2>Bullish</h2>
-          {% if bull_src %}<p class="src">{{ bull_src }}</p>{% endif %}
-          {{ bull_html | safe }}
-        </div>
-        <div>
-          <h2>Bearish</h2>
-          {% if bear_src %}<p class="src">{{ bear_src }}</p>{% endif %}
-          {{ bear_html | safe }}
+      <div class="panel-header">
+        <h2>Ranked candidates</h2>
+        <div id="candidates-pills" class="pill-group" role="group" aria-label="Candidate side">
+          <button type="button" class="active" data-cand-side="bullish" aria-pressed="true">Bullish</button>
+          <button type="button" data-cand-side="bearish" aria-pressed="false">Bearish</button>
         </div>
       </div>
+      <div id="candidates-bullish" class="candidates-view">
+        {% if bull_src %}<p class="src">{{ bull_src }}</p>{% endif %}
+        {{ bull_html | safe }}
+      </div>
+      <div id="candidates-bearish" class="candidates-view" style="display:none">
+        {% if bear_src %}<p class="src">{{ bear_src }}</p>{% endif %}
+        {{ bear_html | safe }}
+      </div>
+      <div id="detail-candidates" class="detail-panel" style="display:none"></div>
     </section>
 
     <section id="panel-positions" class="panel" role="tabpanel">
       <h2>Open positions</h2>
       <p class="src">data/positions.json</p>
       {{ positions_html | safe }}
+      <div id="detail-positions" class="detail-panel" style="display:none"></div>
     </section>
 
-    <section id="panel-watchlist" class="panel" role="tabpanel">
-      <h2>Watchlist</h2>
-      <p class="src">data/watchlist.json — rejected flow names still tracked</p>
-      {{ watchlist_html | safe }}
+    <section id="panel-rejected" class="panel" role="tabpanel">
+      <div class="panel-header">
+        <h2>Rejected / Watchlist</h2>
+        <div id="rejected-pills" class="pill-group" role="group" aria-label="Rejected or watchlist">
+          <button type="button" class="active" data-rej-view="rejected" aria-pressed="true">Rejected</button>
+          <button type="button" data-rej-view="watchlist" aria-pressed="false">Watchlist</button>
+        </div>
+      </div>
+      <div id="rejected-view" class="rejected-view">
+        {% if rejected_src %}<p class="src">{{ rejected_src }} (truncated)</p>{% endif %}
+        {{ rejected_html | safe }}
+      </div>
+      <div id="watchlist-view" class="rejected-view" style="display:none">
+        <p class="src">data/watchlist.json — rejected flow names still tracked</p>
+        {{ watchlist_html | safe }}
+      </div>
+      <div id="detail-rejected" class="detail-panel" style="display:none"></div>
     </section>
 
     <section id="panel-alerts" class="panel" role="tabpanel">
@@ -70,12 +89,6 @@
       </div>
     </section>
 
-    <section id="panel-rejected" class="panel" role="tabpanel">
-      <h2>Rejected candidates</h2>
-      {% if rejected_src %}<p class="src">{{ rejected_src }} (truncated)</p>{% endif %}
-      {{ rejected_html | safe }}
-    </section>
-
     <section id="panel-flow" class="panel" role="tabpanel">
       <h2>Flow feature table</h2>
       {% if flow_src %}<p class="src">{{ flow_src }} (truncated)</p>{% endif %}
@@ -87,14 +100,560 @@
       <p class="src">data/trade_log.csv — last 80 rows</p>
       {{ trades_html | safe }}
     </section>
+
+    <section id="panel-performance" class="panel" role="tabpanel">
+      <h2>Performance analytics</h2>
+      {% if not perf.has_data %}
+        <p class="empty">No closed trades yet. Performance data will appear after positions are closed.</p>
+      {% else %}
+
+      <div class="perf-grid">
+        <div class="perf-card">
+          <span class="perf-label">Total trades</span>
+          <span class="perf-value">{{ perf.total_trades }}</span>
+        </div>
+        <div class="perf-card">
+          <span class="perf-label">Win rate</span>
+          <span class="perf-value">{{ perf.win_rate }}%</span>
+        </div>
+        <div class="perf-card">
+          <span class="perf-label">Avg R-multiple</span>
+          <span class="perf-value {{ 'positive' if perf.avg_r > 0 else 'negative' }}">{{ perf.avg_r }}R</span>
+        </div>
+        <div class="perf-card">
+          <span class="perf-label">Total P&amp;L</span>
+          <span class="perf-value {{ 'positive' if perf.total_pnl > 0 else 'negative' }}">${{ perf.total_pnl }}</span>
+        </div>
+        <div class="perf-card">
+          <span class="perf-label">Profit factor</span>
+          <span class="perf-value">{{ perf.profit_factor }}</span>
+        </div>
+        <div class="perf-card">
+          <span class="perf-label">Avg days held</span>
+          <span class="perf-value">{{ perf.avg_days_held }}</span>
+        </div>
+        <div class="perf-card">
+          <span class="perf-label">Best trade</span>
+          <span class="perf-value positive">${{ perf.best_trade }}</span>
+        </div>
+        <div class="perf-card">
+          <span class="perf-label">Worst trade</span>
+          <span class="perf-value negative">${{ perf.worst_trade }}</span>
+        </div>
+      </div>
+
+      <div class="subgrid three">
+        {% if perf.by_pattern %}
+        <div>
+          <h3>By pattern</h3>
+          <table class="data compact">
+            <thead><tr><th>Pattern</th><th>Trades</th><th>Win %</th><th>Avg R</th><th>P&amp;L</th></tr></thead>
+            <tbody>
+            {% for name, s in perf.by_pattern.items() %}
+              <tr>
+                <td>{{ name }}</td><td>{{ s.trades }}</td>
+                <td>{{ s.win_rate }}%</td>
+                <td class="{{ 'positive' if s.avg_r > 0 else 'negative' }}">{{ s.avg_r }}R</td>
+                <td class="{{ 'positive' if s.total_pnl > 0 else 'negative' }}">${{ s.total_pnl }}</td>
+              </tr>
+            {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% endif %}
+
+        <div>
+          <h3>By direction</h3>
+          <table class="data compact">
+            <thead><tr><th>Direction</th><th>Trades</th><th>Win %</th><th>Avg R</th><th>P&amp;L</th></tr></thead>
+            <tbody>
+            {% for name, s in perf.by_direction.items() %}
+              <tr>
+                <td>{{ name }}</td><td>{{ s.trades }}</td>
+                <td>{{ s.win_rate }}%</td>
+                <td class="{{ 'positive' if s.avg_r > 0 else 'negative' }}">{{ s.avg_r }}R</td>
+                <td class="{{ 'positive' if s.total_pnl > 0 else 'negative' }}">${{ s.total_pnl }}</td>
+              </tr>
+            {% endfor %}
+            </tbody>
+          </table>
+        </div>
+
+        {% if perf.by_score_tier %}
+        <div>
+          <h3>By score tier</h3>
+          <table class="data compact">
+            <thead><tr><th>Score</th><th>Trades</th><th>Win %</th><th>Avg R</th><th>P&amp;L</th></tr></thead>
+            <tbody>
+            {% for name, s in perf.by_score_tier.items() %}
+              <tr>
+                <td>{{ name }}</td><td>{{ s.trades }}</td>
+                <td>{{ s.win_rate }}%</td>
+                <td class="{{ 'positive' if s.avg_r > 0 else 'negative' }}">{{ s.avg_r }}R</td>
+                <td class="{{ 'positive' if s.total_pnl > 0 else 'negative' }}">${{ s.total_pnl }}</td>
+              </tr>
+            {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% endif %}
+
+        {% if perf.by_exit_reason %}
+        <div>
+          <h3>By exit reason</h3>
+          <table class="data compact">
+            <thead><tr><th>Exit reason</th><th>Trades</th><th>Win %</th><th>Avg R</th><th>P&amp;L</th></tr></thead>
+            <tbody>
+            {% for name, s in perf.by_exit_reason.items() %}
+              <tr>
+                <td>{{ name }}</td><td>{{ s.trades }}</td>
+                <td>{{ s.win_rate }}%</td>
+                <td class="{{ 'positive' if s.avg_r > 0 else 'negative' }}">{{ s.avg_r }}R</td>
+                <td class="{{ 'positive' if s.total_pnl > 0 else 'negative' }}">${{ s.total_pnl }}</td>
+              </tr>
+            {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% endif %}
+      </div>
+
+      {% if perf.equity_curve %}
+      <h3>Equity curve</h3>
+      <div class="chart-wrap">
+        <canvas id="equity-chart" height="220"></canvas>
+      </div>
+      {% endif %}
+
+      {% endif %}
+    </section>
   </main>
 
   <script>
+    var TABLE_PAGE_SIZE = {{ table_page_size | default(7, true) }};
+
+    /* ── Detail data injected from server ── */
+    var DETAIL_DATA = {
+      signals: {{ signals_detail | default([], true) | tojson }},
+      bull: {{ bull_detail | default([], true) | tojson }},
+      bear: {{ bear_detail | default([], true) | tojson }},
+      rejected: {{ rejected_detail | default([], true) | tojson }},
+      watchlist: {{ watchlist_detail | default([], true) | tojson }}
+    };
+
+    var POSITIONS_DETAIL = {{ positions_detail | default([], true) | tojson }};
+
+    function escHtml(s) {
+      var d = document.createElement("div");
+      d.textContent = s == null ? "" : String(s);
+      return d.innerHTML;
+    }
+
+    function indexByTicker(arr) {
+      var m = {};
+      for (var i = 0; i < arr.length; i++) {
+        if (arr[i].ticker) m[arr[i].ticker] = arr[i];
+      }
+      return m;
+    }
+
+    var IDX = {
+      signals: indexByTicker(DETAIL_DATA.signals),
+      bull: indexByTicker(DETAIL_DATA.bull),
+      bear: indexByTicker(DETAIL_DATA.bear),
+      rejected: indexByTicker(DETAIL_DATA.rejected),
+      watchlist: indexByTicker(DETAIL_DATA.watchlist)
+    };
+
+    var POSITIONS_IDX = indexByTicker(POSITIONS_DETAIL);
+
+    function fmt(v) {
+      if (v === "" || v === null || v === undefined) return "—";
+      if (typeof v === "number") return Number.isInteger(v) ? v.toLocaleString() : v.toFixed(2);
+      return String(v);
+    }
+
+    function fmtAddv(v) {
+      if (v === "" || v === null || v === undefined) return "—";
+      var n = Number(v);
+      if (!isFinite(n)) return String(v);
+      var ax = Math.abs(n);
+      if (ax >= 1e9) return (n / 1e9).toFixed(2) + "B";
+      if (ax >= 1e6) return (n / 1e6).toFixed(2) + "M";
+      if (ax >= 1e3) return (n / 1e3).toFixed(2) + "K";
+      return n.toFixed(0);
+    }
+
+    function detailSection(title, pairs) {
+      var rows = pairs.filter(function (p) { return p[1] !== "" && p[1] !== null && p[1] !== undefined; });
+      if (!rows.length) return "";
+      var html = '<div class="detail-section"><h4>' + escHtml(title) + '</h4><dl class="detail-grid">';
+      for (var i = 0; i < rows.length; i++) {
+        html += "<dt>" + escHtml(rows[i][0]) + "</dt><dd>" + fmt(rows[i][1]) + "</dd>";
+      }
+      return html + "</dl></div>";
+    }
+
+    function mergeDetailRow(d, ticker, kind) {
+      var sig = IDX.signals[ticker] || {};
+      if (kind === "signal") return Object.assign({}, d);
+      var m = Object.assign({}, sig, d);
+      if (kind === "rejected" || kind === "watchlist") {
+        function fillIfEmpty(key) {
+          var v = m[key];
+          var empty = v === undefined || v === null || String(v).trim() === "";
+          var sv = sig[key];
+          if (empty && sv !== undefined && sv !== null && String(sv).trim() !== "") {
+            m[key] = sv;
+          }
+        }
+        fillIfEmpty("checks_passed");
+        fillIfEmpty("checks_failed");
+        fillIfEmpty("pattern");
+        fillIfEmpty("price_score");
+      }
+      return m;
+    }
+
+    function fmtConvictionHtml(v) {
+      if (v === "" || v === null || v === undefined) return "—";
+      var n = Number(v);
+      if (!isFinite(n)) return escHtml(String(v));
+      var t = n.toFixed(2);
+      if (n >= 7.5) return '<span class="positive">' + t + "</span>";
+      if (n < 5) return '<span class="negative">' + t + "</span>";
+      return t;
+    }
+
+    function detailSectionRaw(title, pairs) {
+      var rows = pairs.filter(function (p) { return p[1] !== "" && p[1] !== null && p[1] !== undefined; });
+      if (!rows.length) return "";
+      var html = '<div class="detail-section"><h4>' + escHtml(title) + '</h4><dl class="detail-grid">';
+      for (var i = 0; i < rows.length; i++) {
+        html += "<dt>" + escHtml(rows[i][0]) + "</dt><dd>" + rows[i][1] + "</dd>";
+      }
+      return html + "</dl></div>";
+    }
+
+    function buildConvictionDl(m) {
+      var blocks = [];
+      var scorePairs = [
+        ["Flow score (raw)", fmtConvictionHtml(m.flow_score_raw)],
+        ["Flow score (scaled)", fmtConvictionHtml(m.flow_score_scaled)],
+        ["Price score", fmtConvictionHtml(m.price_score)],
+        ["Final score", fmtConvictionHtml(m.final_score)],
+        ["Bullish score", fmtConvictionHtml(m.bullish_score)],
+        ["Bearish score", fmtConvictionHtml(m.bearish_score)],
+        ["Bullish flow intensity", fmtConvictionHtml(m.bullish_flow_intensity)],
+        ["Bearish flow intensity", fmtConvictionHtml(m.bearish_flow_intensity)],
+        ["Imbalance ratio", escHtml(fmt(m.flow_imbalance_ratio))],
+        ["Total premium", escHtml(fmt(m.total_premium))],
+        ["Flow prints (#)", escHtml(fmt(m.total_count))],
+        ["Avg DTE", escHtml(fmt(m.avg_dte))],
+        ["DTE score", fmtConvictionHtml(m.dte_score)],
+        ["ADDV ($)", escHtml(fmtAddv(m.addv))]
+      ];
+      var raw = detailSectionRaw("Conviction & flow", scorePairs);
+      if (raw) blocks.push(raw);
+      return blocks.length ? blocks.join("") : '<p class="empty">No conviction metrics on this row.</p>';
+    }
+
+    function buildGammaDl(m) {
+      var block = detailSection("Gamma levels", [
+        ["Gamma regime", m.gamma_regime],
+        ["Net GEX", m.net_gex],
+        ["Gamma flip estimate", m.gamma_flip_level_estimate],
+        ["Nearest call wall", m.nearest_call_wall],
+        ["Nearest put wall", m.nearest_put_wall],
+        ["Dist to call wall %", m.distance_to_call_wall_pct],
+        ["Dist to put wall %", m.distance_to_put_wall_pct]
+      ]);
+      return block || '<p class="empty">No gamma fields (merged from Final signals when available).</p>';
+    }
+
+    function buildOptionsDl(m) {
+      var block = detailSection("Options data", [
+        ["Call OI", m.ticker_call_oi],
+        ["Put OI", m.ticker_put_oi],
+        ["P/C ratio", m.ticker_put_call_ratio],
+        ["Near-term OI", m.near_term_oi],
+        ["Swing DTE OI", m.swing_dte_oi],
+        ["Long-dated OI", m.long_dated_oi]
+      ]);
+      return block || '<p class="empty">No options OI fields (merged from Final signals when available).</p>';
+    }
+
+    function detailChipBlock(title, csv, chipKind) {
+      if (csv === null || csv === undefined || String(csv).trim() === "") return "";
+      var raw = String(csv).trim();
+      if (chipKind === "fail" && raw.toLowerCase() === "none") return "";
+      var items = raw.split(",").map(function (x) { return x.trim(); }).filter(Boolean);
+      var chips = items.map(function (x) {
+        var lower = x.toLowerCase();
+        var isPlaceholderNone = lower === "none";
+        var cls = "detail-chip";
+        if (isPlaceholderNone) cls += " detail-chip-muted";
+        else if (chipKind === "pass") cls += " detail-chip-pass";
+        else if (chipKind === "fail") cls += " detail-chip-fail";
+        return '<span class="' + cls + '">' + escHtml(x) + "</span>";
+      }).join("");
+      return (
+        '<div class="detail-chip-group"><h4>' + escHtml(title) + '</h4><div class="detail-chips">' + chips + "</div></div>"
+      );
+    }
+
+    function buildPriceActionDl(m) {
+      var parts = [];
+      var ctx = detailSection("Price action", [
+        ["Pattern", m.pattern],
+        ["Time stop (days)", m.time_stop_days],
+        ["Reject reason", m.reject_reason]
+      ]);
+      if (ctx) parts.push(ctx);
+      var scores = detailSectionRaw("Scores", [
+        ["Flow score (raw)", fmtConvictionHtml(m.flow_score_raw)],
+        ["Price score", fmtConvictionHtml(m.price_score)]
+      ]);
+      if (scores) parts.push(scores);
+      var cp = detailChipBlock("Checks passed", m.checks_passed, "pass");
+      if (cp) parts.push(cp);
+      var cf = detailChipBlock("Checks failed / not satisfied", m.checks_failed, "fail");
+      if (cf) parts.push(cf);
+      if (!cp && !cf) {
+        parts.push(
+          '<p class="empty detail-price-hint">No check tags on this row. Run <code>python -m app.main --scan-only</code> so CSVs include <code>checks_passed</code> / <code>checks_failed</code>. Open positions store those fields when the position is opened.</p>'
+        );
+      }
+      var joined = parts.join("");
+      return joined || '<p class="empty">No price-validation breakdown for this row.</p>';
+    }
+
+    function buildPlanDl(m) {
+      var block = detailSection("Plan & risk", [
+        ["Entry", m.entry_price],
+        ["Stop", m.stop_price],
+        ["Target 1", m.target_1],
+        ["Target 2", m.target_2],
+        ["R:R", m.rr_ratio],
+        ["Time stop (days)", m.time_stop_days],
+        ["Source", m.source]
+      ]);
+      return block || '<p class="empty">No trade plan (needs a final signal or promoted row).</p>';
+    }
+
+    function buildPositionDl(ticker) {
+      var p = POSITIONS_IDX[ticker];
+      if (!p) return '<p class="empty">No open position for this ticker.</p>';
+      var t12 = fmt(p.target_1) + " / " + fmt(p.target_2);
+      var thesis = detailSection("Thesis", [
+        ["Pattern / setup", p.pattern],
+        ["Why (source)", p.source]
+      ]);
+      var risk = detailSection("Risk & targets", [
+        ["Entry", p.entry_price],
+        ["Opened at", p.opened_at || p.entry_date],
+        ["Active stop", p.active_stop],
+        ["Initial stop", p.initial_stop],
+        ["Targets", t12],
+        ["Shares", p.shares],
+        ["Unrealized R", p.unrealized_r]
+      ]);
+      var conv = detailSectionRaw("Conviction at open", [
+        ["Final score", fmtConvictionHtml(p.final_score)],
+        ["Flow (scaled)", fmtConvictionHtml(p.flow_score_scaled)],
+        ["Price score", fmtConvictionHtml(p.price_score)]
+      ]);
+      var snap = detailSection("Gamma snapshot (at open)", [
+        ["Gamma regime", p.gamma_regime],
+        ["Net GEX", p.net_gex],
+        ["Γ flip est.", p.gamma_flip_level_estimate],
+        ["Call wall", p.nearest_call_wall],
+        ["Put wall", p.nearest_put_wall]
+      ]);
+      return (thesis + risk + conv + snap) || '<p class="empty">No position fields.</p>';
+    }
+
+    function subtabBarHtml() {
+      var ids = ["conviction", "gamma", "price", "options", "plan", "position"];
+      var labels = {
+        conviction: "Conviction",
+        gamma: "Gamma",
+        price: "Price action",
+        options: "Options",
+        plan: "Plan",
+        position: "Position"
+      };
+      return (
+        '<div class="detail-subtabs" role="tablist">' +
+        ids
+          .map(function (id, i) {
+            var active = i === 0;
+            return (
+              '<button type="button" class="detail-subtab' +
+              (active ? " active" : "") +
+              '" role="tab" aria-selected="' +
+              (active ? "true" : "false") +
+              '" data-subtab="' +
+              id +
+              '">' +
+              labels[id] +
+              "</button>"
+            );
+          })
+          .join("") +
+        "</div>"
+      );
+    }
+
+    function detailPanelsHtml(m, ticker) {
+      return (
+        '<div class="detail-subtab-panel active" data-panel="conviction">' +
+        buildConvictionDl(m) +
+        "</div>" +
+        '<div class="detail-subtab-panel" data-panel="gamma">' +
+        buildGammaDl(m) +
+        "</div>" +
+        '<div class="detail-subtab-panel" data-panel="price">' +
+        buildPriceActionDl(m) +
+        "</div>" +
+        '<div class="detail-subtab-panel" data-panel="options">' +
+        buildOptionsDl(m) +
+        "</div>" +
+        '<div class="detail-subtab-panel" data-panel="plan">' +
+        buildPlanDl(m) +
+        "</div>" +
+        '<div class="detail-subtab-panel" data-panel="position">' +
+        buildPositionDl(ticker) +
+        "</div>"
+      );
+    }
+
+    function bindDetailSubtabs(panel) {
+      var bar = panel.querySelector(".detail-subtabs");
+      if (!bar) return;
+      bar.addEventListener("click", function (e) {
+        var btn = e.target.closest("[data-subtab]");
+        if (!btn || !bar.contains(btn)) return;
+        var id = btn.getAttribute("data-subtab");
+        bar.querySelectorAll("[data-subtab]").forEach(function (b) {
+          var on = b === btn;
+          b.classList.toggle("active", on);
+          b.setAttribute("aria-selected", on ? "true" : "false");
+        });
+        panel.querySelectorAll(".detail-subtab-panel").forEach(function (p) {
+          var on = p.getAttribute("data-panel") === id;
+          p.classList.toggle("active", on);
+        });
+      });
+    }
+
+    function wrapDetailModal(innerHtml) {
+      return (
+        '<div class="detail-modal-backdrop" role="presentation" aria-hidden="true"></div>' +
+        '<div class="detail-modal-content" role="dialog" aria-modal="true">' +
+        innerHtml +
+        "</div>"
+      );
+    }
+
+    function closeTickerDetailModal(panel) {
+      if (!panel) return;
+      panel.classList.remove("detail-panel--modal-open");
+      panel.style.display = "none";
+      panel.setAttribute("data-ticker", "");
+      document.body.style.overflow = "";
+    }
+
+    function attachModalClose(panel) {
+      var backdrop = panel.querySelector(".detail-modal-backdrop");
+      if (backdrop) {
+        backdrop.addEventListener("click", function () {
+          closeTickerDetailModal(panel);
+        });
+      }
+      var closeBtn = panel.querySelector(".detail-close");
+      if (closeBtn) {
+        closeBtn.addEventListener("click", function () {
+          closeTickerDetailModal(panel);
+        });
+      }
+    }
+
+    document.addEventListener("keydown", function (e) {
+      if (e.key !== "Escape") return;
+      var open = document.querySelector(".detail-panel.detail-panel--modal-open");
+      if (!open) return;
+      e.preventDefault();
+      closeTickerDetailModal(open);
+    });
+
+    function showDetail(panelId, ticker, kind, idx) {
+      var panel = document.getElementById(panelId);
+      if (!panel) return;
+
+      if (panel.classList.contains("detail-panel--modal-open") && panel.getAttribute("data-ticker") === ticker) {
+        closeTickerDetailModal(panel);
+        return;
+      }
+
+      document.querySelectorAll(".detail-panel.detail-panel--modal-open").forEach(function (p) {
+        closeTickerDetailModal(p);
+      });
+
+      var d = idx[ticker];
+      if (!d) {
+        panel.innerHTML = wrapDetailModal(
+          '<div class="detail-header"><span class="detail-ticker">' +
+            escHtml(ticker) +
+            '</span><button type="button" class="detail-close" aria-label="Close">&times;</button></div>' +
+            '<p class="empty">No detail for ' +
+            escHtml(ticker) +
+            ".</p>"
+        );
+        attachModalClose(panel);
+      } else {
+        var m = mergeDetailRow(d, ticker, kind);
+        var body =
+          '<div class="detail-subtabs-wrap">' +
+          subtabBarHtml() +
+          '<div class="detail-subtab-panels">' +
+          detailPanelsHtml(m, ticker) +
+          "</div></div>";
+        var inner =
+          '<div class="detail-header"><span class="detail-ticker">' +
+          escHtml(ticker) +
+          '</span><button type="button" class="detail-close" aria-label="Close">&times;</button></div>' +
+          '<div class="detail-body">' +
+          body +
+          "</div>";
+        panel.innerHTML = wrapDetailModal(inner);
+        bindDetailSubtabs(panel);
+        attachModalClose(panel);
+      }
+      panel.setAttribute("data-ticker", ticker);
+      panel.classList.add("detail-panel--modal-open");
+      panel.style.display = "flex";
+      document.body.style.overflow = "hidden";
+    }
+
+    function wirePanelCardClicks(container, panelId, kind, idx) {
+      if (!container) return;
+      container.addEventListener("click", function (e) {
+        var head = e.target.closest(".data-card-head");
+        if (!head) return;
+        var card = head.closest("article.data-card--interactive");
+        if (!card || !container.contains(card)) return;
+        var ticker = card.getAttribute("data-ticker");
+        if (ticker) showDetail(panelId, ticker, kind, idx);
+      });
+    }
+
     (function () {
       var tabs = document.querySelectorAll("nav.tabs button[data-tab]");
       var panels = document.querySelectorAll("main section.panel");
       tabs.forEach(function (btn) {
         btn.addEventListener("click", function () {
+          document.querySelectorAll(".detail-panel.detail-panel--modal-open").forEach(closeTickerDetailModal);
           var id = btn.getAttribute("data-tab");
           tabs.forEach(function (b) {
             b.classList.toggle("active", b === btn);
@@ -106,10 +665,173 @@
         });
       });
 
+      var candPills = document.getElementById("candidates-pills");
+      if (candPills) {
+        candPills.addEventListener("click", function (e) {
+          var btn = e.target.closest("[data-cand-side]");
+          if (!btn || !candPills.contains(btn)) return;
+          var side = btn.getAttribute("data-cand-side");
+          candPills.querySelectorAll("[data-cand-side]").forEach(function (b) {
+            var on = b === btn;
+            b.classList.toggle("active", on);
+            b.setAttribute("aria-pressed", on ? "true" : "false");
+          });
+          var bullEl = document.getElementById("candidates-bullish");
+          var bearEl = document.getElementById("candidates-bearish");
+          if (bullEl) bullEl.style.display = side === "bullish" ? "" : "none";
+          if (bearEl) bearEl.style.display = side === "bearish" ? "" : "none";
+        });
+      }
+
+      var rejPills = document.getElementById("rejected-pills");
+      if (rejPills) {
+        rejPills.addEventListener("click", function (e) {
+          var btn = e.target.closest("[data-rej-view]");
+          if (!btn || !rejPills.contains(btn)) return;
+          var view = btn.getAttribute("data-rej-view");
+          rejPills.querySelectorAll("[data-rej-view]").forEach(function (b) {
+            var on = b === btn;
+            b.classList.toggle("active", on);
+            b.setAttribute("aria-pressed", on ? "true" : "false");
+          });
+          var rejV = document.getElementById("rejected-view");
+          var wlV = document.getElementById("watchlist-view");
+          if (rejV) rejV.style.display = view === "rejected" ? "" : "none";
+          if (wlV) wlV.style.display = view === "watchlist" ? "" : "none";
+        });
+      }
+
+      var sigPanel = document.getElementById("panel-signals");
+      var candPanel = document.getElementById("panel-candidates");
+      var rejPanel = document.getElementById("rejected-view");
+      var wlPanel = document.getElementById("watchlist-view");
+      var posPanel = document.getElementById("panel-positions");
+
+      if (sigPanel) {
+        wirePanelCardClicks(sigPanel, "detail-signals", "signal", IDX.signals);
+      }
+      if (candPanel) {
+        var candIdx = {};
+        for (var kb in IDX.bull) candIdx[kb] = IDX.bull[kb];
+        for (var kbe in IDX.bear) candIdx[kbe] = IDX.bear[kbe];
+        wirePanelCardClicks(candPanel, "detail-candidates", "candidate", candIdx);
+      }
+      if (rejPanel) {
+        wirePanelCardClicks(rejPanel, "detail-rejected", "rejected", IDX.rejected);
+      }
+      if (wlPanel) {
+        wirePanelCardClicks(wlPanel, "detail-rejected", "watchlist", IDX.watchlist);
+      }
+      if (posPanel) {
+        wirePanelCardClicks(posPanel, "detail-positions", "position", POSITIONS_IDX);
+      }
+    })();
+
+    /* ── Alert loader (paginated client-side) ── */
+    (function () {
       var btnAlerts = document.getElementById("btn-load-alerts");
       var wrap = document.getElementById("alerts-table-wrap");
       var status = document.getElementById("alerts-status");
+      var alertsCache = null;
+
+      function fmtMoneyShort(n) {
+        if (n === "" || n == null || n === undefined) return "—";
+        var x = Number(n);
+        if (!isFinite(x)) return escHtml(String(n));
+        var ax = Math.abs(x);
+        if (ax >= 1e9) return "$" + (x / 1e9).toFixed(2) + "B";
+        if (ax >= 1e6) return "$" + (x / 1e6).toFixed(2) + "M";
+        if (ax >= 1e3) return "$" + (x / 1e3).toFixed(2) + "K";
+        return "$" + x.toFixed(2);
+      }
+
+      function alertsPagerHtml(page, totalPages, totalRows) {
+        var meta = '<span class="pager-meta">' + totalRows + " row" + (totalRows === 1 ? "" : "s") + "</span>";
+        if (totalPages <= 1) {
+          return '<div class="table-pager" role="navigation">' + meta + "</div>";
+        }
+        var prev = page > 1
+          ? '<button type="button" class="pager-btn" data-apage="' + (page - 1) + '">Prev</button>'
+          : '<span class="pager-btn disabled">Prev</span>';
+        var next = page < totalPages
+          ? '<button type="button" class="pager-btn" data-apage="' + (page + 1) + '">Next</button>'
+          : '<span class="pager-btn disabled">Next</span>';
+        var nums = [];
+        var maxShow = 12;
+        var i;
+        if (totalPages <= maxShow) {
+          for (i = 1; i <= totalPages; i++) {
+            if (i === page) {
+              nums.push('<span class="pager-num current" aria-current="page">' + i + "</span>");
+            } else {
+              nums.push('<button type="button" class="pager-num" data-apage="' + i + '">' + i + "</button>");
+            }
+          }
+        } else {
+          nums.push('<span class="pager-gap">Page ' + page + " / " + totalPages + "</span>");
+        }
+        return (
+          '<div class="table-pager" role="navigation">' +
+          meta +
+          '<div class="pager-controls">' + prev +
+          '<div class="pager-pages">' + nums.join(" ") + "</div>" + next +
+          "</div></div>"
+        );
+      }
+
+      function alertCardHtml(row) {
+        var t = row.ticker || "—";
+        var snip = [row.option_type, row.strike, row.expiration_date].filter(Boolean).join(" ");
+        var dir = row.direction ? '<span class="data-card-badges">' + escHtml(String(row.direction)) + "</span>" : "";
+        return (
+          '<article class="data-card">' +
+          '<header class="data-card-head"><span class="data-card-ticker">' +
+          escHtml(t) +
+          "</span>" +
+          dir +
+          "</header>" +
+          '<div class="data-card-body"><dl class="card-metrics">' +
+          "<dt>Premium</dt><dd>" +
+          fmtMoneyShort(row.premium) +
+          "</dd>" +
+          "<dt>Strike / expiry</dt><dd>" +
+          escHtml(snip || "—") +
+          "</dd>" +
+          "<dt>DTE</dt><dd>" +
+          escHtml(row.dte != null && row.dte !== "" ? String(row.dte) : "—") +
+          "</dd>" +
+          "</dl>" +
+          (row.event_ts
+            ? '<p class="data-card-meta">' + escHtml(String(row.event_ts)) + "</p>"
+            : "") +
+          "</div></article>"
+        );
+      }
+
+      function renderAlertsTable(rows, page) {
+        var ps = TABLE_PAGE_SIZE;
+        var total = rows.length;
+        var totalPages = Math.max(1, Math.ceil(total / ps));
+        if (page < 1) page = 1;
+        if (page > totalPages) page = totalPages;
+        var start = (page - 1) * ps;
+        var slice = rows.slice(start, start + ps);
+        var cards = slice.map(alertCardHtml).join("");
+        wrap.innerHTML =
+          '<div class="card-grid">' + cards + "</div>" + alertsPagerHtml(page, totalPages, total);
+      }
+
       if (btnAlerts && wrap) {
+        wrap.addEventListener("click", function (e) {
+          var t = e.target;
+          if (!t || !t.getAttribute) return;
+          var ap = t.getAttribute("data-apage");
+          if (ap == null || alertsCache == null) return;
+          e.preventDefault();
+          var p = parseInt(ap, 10);
+          if (!isNaN(p)) renderAlertsTable(alertsCache, p);
+        });
+
         btnAlerts.addEventListener("click", function () {
           status.textContent = "Loading…";
           fetch("/api/alerts?hours=24&limit=150")
@@ -120,29 +842,87 @@
                 return;
               }
               if (!data.rows || !data.rows.length) {
+                alertsCache = null;
                 wrap.innerHTML = "<p class=\"empty\">No alert rows returned.</p>";
                 status.textContent = "0 rows.";
                 return;
               }
-              var cols = Object.keys(data.rows[0]);
-              var esc = function (s) {
-                var d = document.createElement("div");
-                d.textContent = s == null ? "—" : String(s);
-                return d.innerHTML;
-              };
-              var th = cols.map(function (c) { return "<th>" + esc(c) + "</th>"; }).join("");
-              var trs = data.rows.map(function (row) {
-                return "<tr>" + cols.map(function (c) {
-                  return "<td>" + esc(row[c]) + "</td>";
-                }).join("") + "</tr>";
-              }).join("");
-              wrap.innerHTML = "<table class=\"data\"><thead><tr>" + th + "</tr></thead><tbody>" + trs + "</tbody></table>";
+              alertsCache = data.rows;
+              renderAlertsTable(alertsCache, 1);
               status.textContent = data.count + " rows.";
             })
             .catch(function (e) {
               status.textContent = "Request failed: " + e;
             });
         });
+      }
+    })();
+
+    /* ── Equity curve chart ── */
+    (function () {
+      var canvas = document.getElementById("equity-chart");
+      if (!canvas) return;
+      var data = {{ perf.equity_curve | default([], true) | tojson }};
+      if (!data || !data.length) return;
+
+      var dpr = window.devicePixelRatio || 1;
+      var rect = canvas.parentElement.getBoundingClientRect();
+      var W = rect.width;
+      var H = canvas.height;
+      canvas.width = W * dpr;
+      canvas.height = H * dpr;
+      canvas.style.width = W + "px";
+      canvas.style.height = H + "px";
+      var ctx = canvas.getContext("2d");
+      ctx.scale(dpr, dpr);
+
+      var vals = data.map(function (d) { return d.portfolio_value; });
+      var labels = data.map(function (d) { return d.date; });
+      var minV = Math.min.apply(null, vals);
+      var maxV = Math.max.apply(null, vals);
+      if (maxV === minV) { maxV = minV + 1; }
+
+      var pad = { top: 20, right: 20, bottom: 30, left: 60 };
+      var cw = W - pad.left - pad.right;
+      var ch = H - pad.top - pad.bottom;
+
+      function x(i) { return pad.left + (i / Math.max(vals.length - 1, 1)) * cw; }
+      function y(v) { return pad.top + ch - ((v - minV) / (maxV - minV)) * ch; }
+
+      ctx.strokeStyle = "#333";
+      ctx.lineWidth = 0.5;
+      for (var g = 0; g <= 4; g++) {
+        var gy = pad.top + (ch / 4) * g;
+        ctx.beginPath(); ctx.moveTo(pad.left, gy); ctx.lineTo(W - pad.right, gy); ctx.stroke();
+      }
+
+      ctx.strokeStyle = "#4fc3f7";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      for (var i = 0; i < vals.length; i++) {
+        if (i === 0) ctx.moveTo(x(i), y(vals[i]));
+        else ctx.lineTo(x(i), y(vals[i]));
+      }
+      ctx.stroke();
+
+      ctx.lineTo(x(vals.length - 1), pad.top + ch);
+      ctx.lineTo(x(0), pad.top + ch);
+      ctx.closePath();
+      ctx.fillStyle = "rgba(79,195,247,0.08)";
+      ctx.fill();
+
+      ctx.fillStyle = "#aaa";
+      ctx.font = "11px monospace";
+      ctx.textAlign = "right";
+      for (var g = 0; g <= 4; g++) {
+        var v = minV + ((maxV - minV) / 4) * (4 - g);
+        ctx.fillText("$" + v.toFixed(0), pad.left - 6, pad.top + (ch / 4) * g + 4);
+      }
+
+      ctx.textAlign = "center";
+      var step = Math.max(1, Math.floor(labels.length / 8));
+      for (var i = 0; i < labels.length; i += step) {
+        ctx.fillText(labels[i], x(i), H - 6);
       }
     })();
   </script>

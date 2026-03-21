@@ -12,9 +12,14 @@ import json
 from datetime import date, timedelta
 from pathlib import Path
 
-from app.config import WATCHLIST_TTL_DAYS
+from app.config import (
+    WALL_PROXIMITY_REJECT_ATR,
+    WALL_PROXIMITY_REJECT_PCT,
+    WATCHLIST_TTL_DAYS,
+)
+from app.features.options_context import fetch_options_context
 from app.features.price_features import clean_ohlcv, compute_features, fetch_ohlcv
-from app.signals.pipeline import combine_scores
+from app.signals.pipeline import _extract_pattern, combine_scores
 from app.signals.scoring import score_long_setup, score_short_setup
 from app.signals.trade_plan import build_long_trade_plan, build_short_trade_plan
 
@@ -83,7 +88,9 @@ def add_candidates(
             "flow_score_scaled": rej.get("flow_score_scaled", rej["flow_score_raw"]),
             "first_seen": today,
             "reject_reason": rej.get("reject_reason", "price_validation_failed"),
+            "checks_passed": rej.get("checks_passed", ""),
             "checks_failed": rej.get("checks_failed", ""),
+            "price_score": rej.get("price_score"),
         }
 
         if key not in keyed or new_entry["flow_score_raw"] > keyed[key]["flow_score_raw"]:
@@ -137,19 +144,49 @@ def reevaluate_watchlist(
             df = clean_ohlcv(df)
             df = compute_features(df)
 
+            spot = float(df.iloc[-1]["close"])
+            atr = float(df.iloc[-1]["atr14"])
+
+            try:
+                opts_ctx = fetch_options_context(ticker, spot)
+            except Exception:
+                opts_ctx = None
+
             if direction == "LONG":
-                price_signal = score_long_setup(df)
+                price_signal = score_long_setup(df, options_ctx=opts_ctx)
                 price_signal["ticker"] = ticker
                 all_reasons = LONG_ALL_REASONS
                 build_plan = build_long_trade_plan
             else:
-                price_signal = score_short_setup(df)
+                price_signal = score_short_setup(df, options_ctx=opts_ctx)
                 price_signal["ticker"] = ticker
                 all_reasons = SHORT_ALL_REASONS
                 build_plan = build_short_trade_plan
 
             if price_signal["is_valid"]:
-                trade_plan = build_plan(df, price_signal)
+                if opts_ctx and atr > 0:
+                    wall = (opts_ctx.get("nearest_call_wall") if direction == "LONG"
+                            else opts_ctx.get("nearest_put_wall"))
+                    wall_ok = (wall is not None
+                               and ((direction == "LONG" and wall > spot)
+                                    or (direction == "SHORT" and wall < spot)))
+                    if wall_ok:
+                        wd_pct = abs(wall - spot) / spot
+                        wd_atr = abs(wall - spot) / atr
+                        if wd_pct < WALL_PROXIMITY_REJECT_PCT and wd_atr < WALL_PROXIMITY_REJECT_ATR:
+                            rej = _build_rejection_row(
+                                ticker, direction, flow_raw, price_signal, all_reasons,
+                                reject_reason=f"wall_proximity ({wd_pct:.1%}, {wd_atr:.1f} ATR)",
+                            )
+                            updated = dict(entry)
+                            updated["checks_passed"] = rej["checks_passed"]
+                            updated["checks_failed"] = rej["checks_failed"]
+                            updated["reject_reason"] = rej["reject_reason"]
+                            still_watching.append(updated)
+                            watch_rejected.append(rej)
+                            continue
+
+                trade_plan = build_plan(df, price_signal, options_ctx=opts_ctx)
                 promoted.append({
                     "ticker": ticker,
                     "direction": direction,
@@ -161,24 +198,48 @@ def reevaluate_watchlist(
                     "stop_price": trade_plan["stop_price"],
                     "target_1": trade_plan["target_1"],
                     "target_2": trade_plan["target_2"],
+                    "rr_ratio": trade_plan["rr_ratio"],
                     "time_stop_days": trade_plan["time_stop_days"],
+                    "pattern": _extract_pattern(price_signal.get("reasons", [])),
+                    "checks_passed": ", ".join(sorted(price_signal.get("checks_passed", []))) or "none",
+                    "checks_failed": ", ".join(sorted(price_signal.get("checks_failed", []))) or "none",
+                    "gamma_regime": opts_ctx.get("gamma_regime") if opts_ctx else None,
+                    "net_gex": opts_ctx.get("net_gex") if opts_ctx else None,
+                    "gamma_flip_level_estimate": opts_ctx.get("gamma_flip_level_estimate") if opts_ctx else None,
+                    "nearest_call_wall": opts_ctx.get("nearest_call_wall") if opts_ctx else None,
+                    "nearest_put_wall": opts_ctx.get("nearest_put_wall") if opts_ctx else None,
+                    "distance_to_call_wall_pct": opts_ctx.get("distance_to_call_wall_pct") if opts_ctx else None,
+                    "distance_to_put_wall_pct": opts_ctx.get("distance_to_put_wall_pct") if opts_ctx else None,
                     "source": "watchlist",
                     "first_seen": entry["first_seen"],
                     "trade_plan": trade_plan,
                     "price_snapshot": price_signal,
+                    "options_context": opts_ctx,
                 })
             else:
-                still_watching.append(entry)
-                watch_rejected.append(_build_rejection_row(
+                rej = _build_rejection_row(
                     ticker, direction, flow_raw, price_signal, all_reasons,
                     reject_reason="watchlist_reeval_failed",
-                ))
+                )
+                updated = dict(entry)
+                updated["checks_passed"] = rej["checks_passed"]
+                updated["checks_failed"] = rej["checks_failed"]
+                updated["reject_reason"] = rej["reject_reason"]
+                if rej.get("price_score") is not None:
+                    updated["price_score"] = rej["price_score"]
+                still_watching.append(updated)
+                watch_rejected.append(rej)
 
         except Exception as e:
-            still_watching.append(entry)
-            watch_rejected.append(_build_rejection_row(
+            rej = _build_rejection_row(
                 ticker, direction, flow_raw, {}, set(),
                 reject_reason=f"watchlist_error: {e}",
-            ))
+            )
+            updated = dict(entry)
+            updated["checks_passed"] = rej["checks_passed"]
+            updated["checks_failed"] = rej["checks_failed"]
+            updated["reject_reason"] = rej["reject_reason"]
+            still_watching.append(updated)
+            watch_rejected.append(rej)
 
     return promoted, still_watching, watch_rejected
