@@ -77,7 +77,7 @@ class PriceCache:
 
 
 def _compute_features(df: pd.DataFrame) -> pd.DataFrame:
-    """Add EMA and ATR columns — mirrors app.features.price_features.compute_features."""
+    """Add EMA, ATR, ADX, and slope columns — mirrors price_features.compute_features."""
     df = df.copy()
     prev_close = df["close"].shift(1)
     true_range = pd.concat(
@@ -94,4 +94,19 @@ def _compute_features(df: pd.DataFrame) -> pd.DataFrame:
     df["ema50"] = df["close"].ewm(span=EMA_LONG, adjust=False).mean()
     df["vol_ma20"] = df["volume"].rolling(EMA_SHORT).mean()
     df["rel_volume"] = df["volume"] / df["vol_ma20"]
+
+    # ADX
+    plus_dm = df["high"].diff().clip(lower=0)
+    minus_dm = (-df["low"].diff()).clip(lower=0)
+    plus_dm = plus_dm.where(plus_dm > minus_dm, 0.0)
+    minus_dm = minus_dm.where(minus_dm > plus_dm, 0.0)
+    atr_smooth = df["atr14"]
+    plus_di = 100 * (plus_dm.ewm(alpha=1 / ATR_PERIOD, adjust=False).mean() / atr_smooth)
+    minus_di = 100 * (minus_dm.ewm(alpha=1 / ATR_PERIOD, adjust=False).mean() / atr_smooth)
+    dx = (plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, 1e-9) * 100
+    df["adx"] = dx.ewm(alpha=1 / ATR_PERIOD, adjust=False).mean()
+
+    # EMA slope
+    df["ema20_slope"] = df["ema20"].diff(5) / atr_smooth
+
     return df

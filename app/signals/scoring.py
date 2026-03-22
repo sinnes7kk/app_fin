@@ -1,9 +1,10 @@
-"""Conviction scoring for continuation setups."""
+"""Conviction scoring for continuation setups — continuous 0-10 scale."""
 
 from __future__ import annotations
 
 import pandas as pd
 
+from app.features.price_features import _session_elapsed_frac
 from app.rules.continuation_rules import (
     detect_trend,
     find_support_resistance,
@@ -15,135 +16,218 @@ from app.rules.continuation_rules import (
     is_flag_breakdown,
     is_pullback_to_support,
     is_pullback_to_resistance,
+    is_pullback_to_ema,
+    is_rally_to_ema,
+    is_retest_and_confirm_long,
+    is_retest_and_confirm_short,
     is_structural_breakout,
     is_structural_breakdown,
-    bullish_strong_close,
-    bullish_rejection_wick,
-    bearish_strong_close,
-    bearish_rejection_wick,
-    is_healthy_pullback_volume,
     has_volume_confirmation,
+    MIN_ROOM_ATR,
 )
 
 MAX_DISTANCE_FROM_EMA20_ATR = 2.0
 BREAKOUT_MAX_DISTANCE_ATR = 4.0
 
-# Options context thresholds
-CALL_WALL_CLOSE_PCT = 2.0   # penalize longs if call wall within this %
-CALL_WALL_CLEAR_PCT = 5.0   # boost longs if call wall farther than this %
-PUT_WALL_CLOSE_PCT = 2.0    # penalize shorts if put wall within this %
-PUT_WALL_CLEAR_PCT = 5.0    # boost shorts if put wall farther than this %
 
 
-def apply_options_context_adjustment(
-    score: int,
-    direction: str,
-    ctx: dict,
-    spot: float | None = None,
-) -> tuple[int, list[str]]:
-    """Apply up to +2 / -2 score points based on options gamma/OI context.
+# ---------------------------------------------------------------------------
+# Continuous component helpers
+# ---------------------------------------------------------------------------
 
-    Returns (adjusted_score, list_of_reasons).  Skips entirely when the
-    context is unavailable or all-None, returning the score unchanged.
-    """
-    if not ctx.get("options_context_available"):
-        return score, []
-
-    adj = 0
-    reasons: list[str] = []
-    regime = ctx.get("gamma_regime", "NEUTRAL")
-    flip = ctx.get("gamma_flip_level_estimate")
-    dist_call = ctx.get("distance_to_call_wall_pct")
-    dist_put = ctx.get("distance_to_put_wall_pct")
-    near_oi = ctx.get("near_term_oi") or 0
-    swing_oi = ctx.get("swing_dte_oi") or 0
-
-    if direction == "LONG":
-        # Boost: negative gamma or above flip -> dealer hedging amplifies moves up
-        if regime == "NEGATIVE" or (flip is not None and spot is not None and spot > flip):
-            adj += 1
-            reasons.append("gamma_tailwind")
-
-        # Boost: call wall far above -> room to run
-        if dist_call is not None and dist_call > CALL_WALL_CLEAR_PCT:
-            adj += 1
-            reasons.append("call_wall_clear")
-
-        # Penalize: positive gamma and chasing (dealer hedging dampens moves)
-        if regime == "POSITIVE" and (flip is not None and spot is not None and spot > flip):
-            adj -= 1
-            reasons.append("gamma_headwind")
-
-        # Penalize: call wall very close overhead
-        if dist_call is not None and dist_call < CALL_WALL_CLOSE_PCT:
-            adj -= 1
-            reasons.append("call_wall_near")
-
-        # DTE structure: swing > near-term is positive conviction
-        if swing_oi > near_oi and near_oi > 0:
-            adj += 1
-            reasons.append("swing_dte_dominant")
-        elif near_oi > swing_oi and swing_oi > 0:
-            adj -= 1
-            reasons.append("short_dated_noise")
-
-    else:  # SHORT
-        # Boost: negative gamma -> downside can extend
-        if regime == "NEGATIVE":
-            adj += 1
-            reasons.append("gamma_tailwind")
-
-        # Boost: put wall far below -> room to fall
-        if dist_put is not None and dist_put > PUT_WALL_CLEAR_PCT:
-            adj += 1
-            reasons.append("put_wall_clear")
-
-        # Penalize: positive gamma -> price likely to pin/mean-revert
-        if regime == "POSITIVE":
-            adj -= 1
-            reasons.append("gamma_headwind")
-
-        # Penalize: strong put wall just below price
-        if dist_put is not None and dist_put < PUT_WALL_CLOSE_PCT:
-            adj -= 1
-            reasons.append("put_wall_near")
-
-        # DTE structure
-        if swing_oi > near_oi and near_oi > 0:
-            adj += 1
-            reasons.append("swing_dte_dominant")
-        elif near_oi > swing_oi and swing_oi > 0:
-            adj -= 1
-            reasons.append("short_dated_noise")
-
-    adj = max(-2, min(2, adj))
-    adjusted = max(0, min(10, score + adj))
-    return adjusted, reasons
+def _clip(val: float, lo: float = 0.0, hi: float = 1.0) -> float:
+    return max(lo, min(hi, val))
 
 
-def is_not_extended(df: pd.DataFrame, max_distance_atr: float = MAX_DISTANCE_FROM_EMA20_ATR) -> bool:
-    """
-    Reject setups that are too far from the 20 EMA in ATR units.
-    """
+def _trend_score(trend_ok: bool, strength: float) -> float:
+    """0-2.5: direction must match, then scaled by strength."""
+    if not trend_ok:
+        return 0.0
+    return 1.25 + 1.25 * _clip(strength, 0.0, 1.0)
+
+
+def _extension_score(df: pd.DataFrame, max_distance_atr: float) -> tuple[bool, float]:
+    """Returns (hard_gate_passed, continuous 0-1 score)."""
     if df.empty:
-        return False
-
+        return False, 0.0
     last = df.iloc[-1]
     atr = last.get("atr14")
     ema20 = last.get("ema20")
     close = last.get("close")
-
     if pd.isna(atr) or pd.isna(ema20) or pd.isna(close) or atr <= 0:
-        return False
-
+        return False, 0.0
     distance = abs(close - ema20) / atr
-    return bool(distance <= max_distance_atr)
+    passed = distance <= max_distance_atr
+    score = _clip(1.0 - distance / max_distance_atr)
+    return passed, score
 
+
+def _room_score(df: pd.DataFrame, level: float, is_long: bool) -> float:
+    """0-1: fractional credit based on room in ATR units (0.5 floor, 3.0 ceiling)."""
+    if df.empty:
+        return 0.0
+    last = df.iloc[-1]
+    atr = last.get("atr14")
+    close = last.get("close")
+    if pd.isna(atr) or pd.isna(close) or atr <= 0:
+        return 0.0
+    room_atr = ((level - close) if is_long else (close - level)) / atr
+    return _clip((room_atr - 0.5) / 2.5)
+
+
+def _is_clean_trend(df: pd.DataFrame, is_long: bool, lookback: int = 10) -> bool:
+    """True when the stock is grinding directionally without a specific pattern.
+
+    Requires 6+ of the last 10 bars to print higher lows (longs) or
+    lower highs (shorts).
+    """
+    if len(df) < lookback + 1:
+        return False
+    window = df.iloc[-(lookback + 1):]
+    if is_long:
+        count = sum(
+            1 for i in range(1, len(window))
+            if float(window.iloc[i]["low"]) > float(window.iloc[i - 1]["low"])
+        )
+    else:
+        count = sum(
+            1 for i in range(1, len(window))
+            if float(window.iloc[i]["high"]) < float(window.iloc[i - 1]["high"])
+        )
+    return count >= 6
+
+
+def _pattern_score(
+    structural: bool, flag: bool, pullback: bool, ema: bool, bounce: bool,
+    confluence: bool = False, retest: bool = False, clean_trend: bool = False,
+) -> tuple[float, str]:
+    """0-2: differentiated credit by pattern quality. Returns (score, label)."""
+    if structural:
+        return 2.0, "structural"
+    if flag:
+        return 1.6, "flag"
+    if confluence:
+        return 1.6, "confluence"
+    if pullback:
+        return 1.4, "pullback"
+    if retest:
+        return 1.4, "retest"
+    if ema:
+        return 1.2, "ema"
+    if bounce:
+        return 1.0, "bounce"
+    if clean_trend:
+        return 0.8, "trend_cont"
+    return 0.0, ""
+
+
+def _pattern_candle_bonus(pattern_key: str, df: pd.DataFrame, is_long: bool) -> float:
+    """0-0.5: candle quality as a pattern amplifier.
+
+    Breakout/trend patterns reward a strong directional close.
+    Pullback/bounce patterns reward a rejection wick.
+    No pattern returns 0 — candle quality is meaningless without context.
+    """
+    if not pattern_key or df.empty:
+        return 0.0
+    last = df.iloc[-1]
+    candle_range = last["high"] - last["low"]
+    if candle_range <= 0:
+        return 0.0
+
+    if pattern_key in _BREAKOUT_PATTERNS:
+        close_pos = (last["close"] - last["low"]) / candle_range
+        if is_long:
+            return _clip((close_pos - 0.5) / 0.4) * 0.5 if last["close"] > last["open"] else 0.0
+        else:
+            return _clip((0.5 - close_pos) / 0.4) * 0.5 if last["close"] < last["open"] else 0.0
+
+    if pattern_key in _PULLBACK_PATTERNS:
+        body = abs(last["close"] - last["open"]) or 1e-9
+        if is_long:
+            wick = min(last["open"], last["close"]) - last["low"]
+            mid_ok = last["close"] > (last["low"] + candle_range * 0.5)
+        else:
+            wick = last["high"] - max(last["open"], last["close"])
+            mid_ok = last["close"] < (last["low"] + candle_range * 0.5)
+        if not mid_ok:
+            return 0.0
+        return _clip((wick / body - 0.5) / 2.0) * 0.5
+
+    return 0.0
+
+
+def _confirmation_volume_score(df: pd.DataFrame) -> float:
+    """0-1: high relative volume on the signal bar."""
+    if df.empty or "rel_volume" not in df.columns:
+        return 0.0
+    rel_vol = df.iloc[-1].get("rel_volume", 0)
+    if pd.isna(rel_vol):
+        return 0.0
+    return _clip((float(rel_vol) - 0.5) / 1.5)
+
+
+def _momentum_score(df: pd.DataFrame, is_long: bool, lookback: int = 5) -> float:
+    """0-1.5: signal bar's close position in the recent high-low range.
+
+    Close near the top of the 5-bar range rewards longs (directional energy
+    is upward). Close near the bottom rewards shorts.
+    """
+    if len(df) < lookback:
+        return 0.0
+    window = df.iloc[-lookback:]
+    high_n = float(window["high"].max())
+    low_n = float(window["low"].min())
+    rng = high_n - low_n
+    if rng <= 0:
+        return 0.0
+    pos = (float(df.iloc[-1]["close"]) - low_n) / rng
+    raw = _clip(pos) if is_long else _clip(1.0 - pos)
+    return raw * 1.5
+
+
+_BREAKOUT_PATTERNS = {"structural", "flag", "trend_cont"}
+_PULLBACK_PATTERNS = {"pullback", "ema", "confluence", "retest", "bounce"}
+
+
+def _pattern_volume_bonus(pattern_key: str, df: pd.DataFrame, lookback: int = 3) -> float:
+    """0-0.5: volume quality conditional on pattern type.
+
+    Breakout patterns reward high preceding volume (institutional conviction).
+    Pullback patterns reward low preceding volume (orderly profit-taking).
+    No pattern returns 0.
+    """
+    if not pattern_key or len(df) < lookback + 1 or "rel_volume" not in df.columns:
+        return 0.0
+    window = df.iloc[-(lookback + 1):-1]
+    avg_rel = window["rel_volume"].mean()
+    if pd.isna(avg_rel):
+        return 0.0
+
+    if pattern_key in _BREAKOUT_PATTERNS:
+        return _clip((avg_rel - 1.0) / 1.5) * 0.5
+    if pattern_key in _PULLBACK_PATTERNS:
+        return _clip((1.3 - avg_rel) / 0.6) * 0.5
+    return 0.0
+
+
+# ---------------------------------------------------------------------------
+# Legacy boolean gate wrappers (used by state machine and checks_passed/failed)
+# ---------------------------------------------------------------------------
+
+def is_not_extended(df: pd.DataFrame, max_distance_atr: float = MAX_DISTANCE_FROM_EMA20_ATR) -> bool:
+    passed, _ = _extension_score(df, max_distance_atr)
+    return passed
+
+
+# ---------------------------------------------------------------------------
+# Result builder
+# ---------------------------------------------------------------------------
 
 def _build_result(
     *,
     direction: str,
-    score: int,
+    score: float,
     support: float,
     resistance: float,
     structural_support: float,
@@ -152,10 +236,11 @@ def _build_result(
     reasons: list[str],
     checks_passed: list[str],
     checks_failed: list[str],
+    components: dict | None = None,
 ) -> dict:
-    return {
+    result = {
         "direction": direction,
-        "score": score,
+        "score": round(score, 2),
         "max_score": 10,
         "is_valid": state == "SIGNAL",
         "state": state,
@@ -167,127 +252,168 @@ def _build_result(
         "structural_support": structural_support,
         "structural_resistance": structural_resistance,
     }
+    if components:
+        result["score_components"] = components
+    return result
 
 
-def score_long_setup(df: pd.DataFrame, options_ctx: dict | None = None) -> dict:
-    """Score a long continuation setup on a 0-10 scale with SIGNAL/WATCHLIST/REJECT state."""
+# ---------------------------------------------------------------------------
+# Main scoring functions — continuous 0-10
+# ---------------------------------------------------------------------------
+
+_LONG_PATTERN_LABELS = {
+    "structural": "structural_breakout",
+    "flag": "flag_breakout",
+    "confluence": "support_ema_confluence",
+    "pullback": "pullback_to_support",
+    "retest": "retest_and_confirm",
+    "ema": "ema_pullback",
+    "bounce": "bounce_and_fail",
+    "trend_cont": "trend_continuation",
+}
+
+_SHORT_PATTERN_LABELS = {
+    "structural": "structural_breakdown",
+    "flag": "flag_breakdown",
+    "confluence": "resistance_ema_confluence",
+    "pullback": "pullback_to_resistance",
+    "retest": "retest_and_confirm",
+    "ema": "ema_rally",
+    "bounce": "bounce_and_fail",
+    "trend_cont": "trend_continuation",
+}
+
+
+def score_long_setup(
+    df: pd.DataFrame,
+    options_ctx: dict | None = None,
+    signal_bar_offset: int = 0,
+) -> dict:
+    """Score a long continuation setup on a continuous 0-10 scale."""
     trend = detect_trend(df)
     levels = find_support_resistance(df)
 
     trend_ok = trend["trend"] == "LONG"
-    not_extended_ok = is_not_extended(df)
+    trend_neutral = trend["trend"] == "NEUTRAL"
+    trend_opposite = trend["trend"] == "SHORT"
+    trend_strength = trend.get("strength", 0.0)
+
+    structural_bo = is_structural_breakout(df, levels["structural_high"])
+    max_dist = BREAKOUT_MAX_DISTANCE_ATR if structural_bo else MAX_DISTANCE_FROM_EMA20_ATR
+    not_extended_ok, ext_sc = _extension_score(df, max_dist)
+
     room_ok = has_room_to_target_long(df, levels["structural_resistance"])
+    room_sc = _room_score(df, levels["structural_resistance"], is_long=True)
 
     bounce_fail = is_bounce_and_fail_long(df)
     flag = is_flag_breakout(df)
-    pullback_to_level = is_pullback_to_support(df, levels["support"])
-    structural_bo = is_structural_breakout(df, levels["structural_resistance"])
-    continuation_ok = bounce_fail or flag or pullback_to_level or structural_bo
+    if levels["structural_support_touches"] >= 2:
+        pullback_to_level = is_pullback_to_support(df, levels["structural_support"], atr_multiple=0.5)
+    else:
+        pullback_to_level = False
+    ema_pullback = is_pullback_to_ema(df)
+    retest_confirm = is_retest_and_confirm_long(
+        df, levels["structural_support"], levels["structural_support_touches"],
+    )
+    pullback_ema_confluence = pullback_to_level and ema_pullback
+    clean_trend = _is_clean_trend(df, is_long=True)
+    continuation_ok = (
+        bounce_fail or flag or pullback_to_level or structural_bo
+        or ema_pullback or retest_confirm or clean_trend
+    )
+    pattern_sc, pattern_key = _pattern_score(
+        structural_bo, flag, pullback_to_level, ema_pullback, bounce_fail,
+        confluence=pullback_ema_confluence, retest=retest_confirm,
+        clean_trend=clean_trend,
+    )
+    vol_quality = _pattern_volume_bonus(pattern_key, df)
 
-    if structural_bo and not not_extended_ok:
-        not_extended_ok = is_not_extended(df, max_distance_atr=BREAKOUT_MAX_DISTANCE_ATR)
+    candle_df = df.iloc[:-1] if signal_bar_offset and len(df) > 1 else df
+    candle_bonus = _pattern_candle_bonus(pattern_key, candle_df, is_long=True)
+    if signal_bar_offset and len(df) > 1:
+        today_bonus = _pattern_candle_bonus(pattern_key, df, is_long=True)
+        frac = _session_elapsed_frac() or 1.0
+        discount = min(1.0, frac + 0.3)
+        candle_bonus = max(candle_bonus, today_bonus * discount)
 
-    strong_close = bullish_strong_close(df)
-    rejection_wick = bullish_rejection_wick(df)
-    candle_ok = strong_close or rejection_wick
-    pullback_volume_ok = is_healthy_pullback_volume(df)
-    confirmation_volume_ok = has_volume_confirmation(df)
+    intraday = signal_bar_offset and len(df) > 1 and df.iloc[-1].get("is_intraday", False)
+    conf_vol_df = df if intraday else candle_df
+    confirmation_volume_ok = has_volume_confirmation(conf_vol_df)
+    vol_conf_sc = _confirmation_volume_score(conf_vol_df)
 
-    score = 0
+    momentum_sc = _momentum_score(df, is_long=True)
+    trend_sc = _trend_score(trend_ok, trend_strength)
+
+    score = trend_sc + ext_sc + room_sc + pattern_sc + vol_quality + candle_bonus + momentum_sc + vol_conf_sc
+    score = min(10.0, score)
+
     reasons: list[str] = []
     checks_passed: list[str] = []
     checks_failed: list[str] = []
 
     if trend_ok:
-        score += 3
+        if trend_strength >= 0.5:
+            reasons.append("strong_trend")
         reasons.append("trend_aligned")
         checks_passed.append("trend_aligned")
     else:
         checks_failed.append("trend_aligned")
 
     if not_extended_ok:
-        score += 1
         reasons.append("not_extended")
         checks_passed.append("not_extended")
     else:
         checks_failed.append("not_extended")
 
     if room_ok or structural_bo:
-        score += 1
         reasons.append("room_to_target")
         checks_passed.append("room_to_target")
     else:
         checks_failed.append("room_to_target")
 
     if continuation_ok:
-        score += 2
-        if structural_bo:
-            label = "structural_breakout"
-        elif bounce_fail:
-            label = "bounce_and_fail"
-        elif flag:
-            label = "flag_breakout"
-        else:
-            label = "pullback_to_support"
+        label = _LONG_PATTERN_LABELS.get(pattern_key, "unknown")
         reasons.append(label)
         checks_passed.append(label)
     else:
         checks_failed.append("continuation_pattern")
 
-    candle_points = 0
-    if strong_close:
-        candle_points += 1
-        reasons.append("bullish_strong_close")
-        checks_passed.append("bullish_strong_close")
-    else:
-        checks_failed.append("bullish_strong_close")
-
-    if rejection_wick:
-        candle_points += 1
-        reasons.append("bullish_rejection_wick")
-        checks_passed.append("bullish_rejection_wick")
-    else:
-        checks_failed.append("bullish_rejection_wick")
-
-    score += min(candle_points, 1)
-
-    if pullback_volume_ok:
-        score += 1
-        reasons.append("healthy_pullback_volume")
-        checks_passed.append("healthy_pullback_volume")
-    else:
-        checks_failed.append("healthy_pullback_volume")
+    if vol_quality > 0:
+        vol_label = "breakout_volume" if pattern_key in _BREAKOUT_PATTERNS else "pullback_volume"
+        reasons.append(vol_label)
+        checks_passed.append(vol_label)
+    elif pattern_key:
+        vol_label = "breakout_volume" if pattern_key in _BREAKOUT_PATTERNS else "pullback_volume"
+        checks_failed.append(vol_label)
 
     if confirmation_volume_ok:
-        score += 1
         reasons.append("confirmation_volume")
         checks_passed.append("confirmation_volume")
     else:
         checks_failed.append("confirmation_volume")
 
-    if options_ctx:
-        spot = float(df.iloc[-1]["close"])
-        score, gamma_reasons = apply_options_context_adjustment(score, "LONG", options_ctx, spot)
-        reasons.extend(gamma_reasons)
-        checks_passed.extend(gamma_reasons)
+    if momentum_sc >= 0.6:
+        reasons.append("momentum_aligned")
+        checks_passed.append("momentum_aligned")
+    else:
+        checks_failed.append("momentum_aligned")
 
-    soft_count = sum([
-        room_ok or structural_bo,
-        continuation_ok,
-        candle_ok,
-        pullback_volume_ok,
-        confirmation_volume_ok,
-    ])
+    components = {
+        "trend": round(trend_sc, 2),
+        "extension": round(ext_sc, 2),
+        "room": round(room_sc, 2),
+        "pattern": round(pattern_sc, 2),
+        "pattern_vol": round(vol_quality, 2),
+        "pattern_candle": round(candle_bonus, 2),
+        "momentum": round(momentum_sc, 2),
+        "confirm_vol": round(vol_conf_sc, 2),
+    }
 
-    if not trend_ok or not not_extended_ok:
+    if trend_opposite or not not_extended_ok:
         state = "REJECT"
-    elif structural_bo:
-        state = "SIGNAL" if soft_count >= 3 and score >= 7 else "WATCHLIST"
-    elif not room_ok:
-        state = "WATCHLIST" if soft_count >= 2 and score >= 5 else "REJECT"
-    elif soft_count >= 3 and score >= 7:
+    elif score >= 7.0:
         state = "SIGNAL"
-    elif soft_count >= 2 and score >= 5:
+    elif score >= 4.0:
         state = "WATCHLIST"
     else:
         state = "REJECT"
@@ -303,128 +429,140 @@ def score_long_setup(df: pd.DataFrame, options_ctx: dict | None = None) -> dict:
         reasons=reasons,
         checks_passed=checks_passed,
         checks_failed=checks_failed,
+        components=components,
     )
 
 
-def score_short_setup(df: pd.DataFrame, options_ctx: dict | None = None) -> dict:
-    """Score a short continuation setup on a 0-10 scale with SIGNAL/WATCHLIST/REJECT state."""
+def score_short_setup(
+    df: pd.DataFrame,
+    options_ctx: dict | None = None,
+    signal_bar_offset: int = 0,
+) -> dict:
+    """Score a short continuation setup on a continuous 0-10 scale."""
     trend = detect_trend(df)
     levels = find_support_resistance(df)
 
     trend_ok = trend["trend"] == "SHORT"
-    not_extended_ok = is_not_extended(df)
+    trend_neutral = trend["trend"] == "NEUTRAL"
+    trend_opposite = trend["trend"] == "LONG"
+    trend_strength = trend.get("strength", 0.0)
+
+    structural_bd = is_structural_breakdown(df, levels["structural_low"])
+    max_dist = BREAKOUT_MAX_DISTANCE_ATR if structural_bd else MAX_DISTANCE_FROM_EMA20_ATR
+    not_extended_ok, ext_sc = _extension_score(df, max_dist)
+
     room_ok = has_room_to_target_short(df, levels["structural_support"])
+    room_sc = _room_score(df, levels["structural_support"], is_long=False)
 
     bounce_fail = is_bounce_and_fail_short(df)
     flag = is_flag_breakdown(df)
-    pullback_to_level = is_pullback_to_resistance(df, levels["resistance"])
-    structural_bd = is_structural_breakdown(df, levels["structural_support"])
-    continuation_ok = bounce_fail or flag or pullback_to_level or structural_bd
+    if levels["structural_resistance_touches"] >= 2:
+        pullback_to_level = is_pullback_to_resistance(df, levels["structural_resistance"], atr_multiple=0.5)
+    else:
+        pullback_to_level = False
+    ema_rally = is_rally_to_ema(df)
+    retest_confirm = is_retest_and_confirm_short(
+        df, levels["structural_resistance"], levels["structural_resistance_touches"],
+    )
+    pullback_ema_confluence = pullback_to_level and ema_rally
+    clean_trend = _is_clean_trend(df, is_long=False)
+    continuation_ok = (
+        bounce_fail or flag or pullback_to_level or structural_bd
+        or ema_rally or retest_confirm or clean_trend
+    )
+    pattern_sc, pattern_key = _pattern_score(
+        structural_bd, flag, pullback_to_level, ema_rally, bounce_fail,
+        confluence=pullback_ema_confluence, retest=retest_confirm,
+        clean_trend=clean_trend,
+    )
+    vol_quality = _pattern_volume_bonus(pattern_key, df)
 
-    if structural_bd and not not_extended_ok:
-        not_extended_ok = is_not_extended(df, max_distance_atr=BREAKOUT_MAX_DISTANCE_ATR)
+    candle_df = df.iloc[:-1] if signal_bar_offset and len(df) > 1 else df
+    candle_bonus = _pattern_candle_bonus(pattern_key, candle_df, is_long=False)
+    if signal_bar_offset and len(df) > 1:
+        today_bonus = _pattern_candle_bonus(pattern_key, df, is_long=False)
+        frac = _session_elapsed_frac() or 1.0
+        discount = min(1.0, frac + 0.3)
+        candle_bonus = max(candle_bonus, today_bonus * discount)
 
-    strong_close = bearish_strong_close(df)
-    rejection_wick = bearish_rejection_wick(df)
-    candle_ok = strong_close or rejection_wick
-    pullback_volume_ok = is_healthy_pullback_volume(df)
-    confirmation_volume_ok = has_volume_confirmation(df)
+    intraday = signal_bar_offset and len(df) > 1 and df.iloc[-1].get("is_intraday", False)
+    conf_vol_df = df if intraday else candle_df
+    confirmation_volume_ok = has_volume_confirmation(conf_vol_df)
+    vol_conf_sc = _confirmation_volume_score(conf_vol_df)
 
-    score = 0
+    momentum_sc = _momentum_score(df, is_long=False)
+    trend_sc = _trend_score(trend_ok, trend_strength)
+
+    score = trend_sc + ext_sc + room_sc + pattern_sc + vol_quality + candle_bonus + momentum_sc + vol_conf_sc
+    score = min(10.0, score)
+
     reasons: list[str] = []
     checks_passed: list[str] = []
     checks_failed: list[str] = []
 
     if trend_ok:
-        score += 3
+        if trend_strength >= 0.5:
+            reasons.append("strong_trend")
         reasons.append("trend_aligned")
         checks_passed.append("trend_aligned")
     else:
         checks_failed.append("trend_aligned")
 
     if not_extended_ok:
-        score += 1
         reasons.append("not_extended")
         checks_passed.append("not_extended")
     else:
         checks_failed.append("not_extended")
 
     if room_ok or structural_bd:
-        score += 1
         reasons.append("room_to_target")
         checks_passed.append("room_to_target")
     else:
         checks_failed.append("room_to_target")
 
     if continuation_ok:
-        score += 2
-        if structural_bd:
-            label = "structural_breakdown"
-        elif bounce_fail:
-            label = "bounce_and_fail"
-        elif flag:
-            label = "flag_breakdown"
-        else:
-            label = "pullback_to_resistance"
+        label = _SHORT_PATTERN_LABELS.get(pattern_key, "unknown")
         reasons.append(label)
         checks_passed.append(label)
     else:
         checks_failed.append("continuation_pattern")
 
-    candle_points = 0
-    if strong_close:
-        candle_points += 1
-        reasons.append("bearish_strong_close")
-        checks_passed.append("bearish_strong_close")
-    else:
-        checks_failed.append("bearish_strong_close")
-
-    if rejection_wick:
-        candle_points += 1
-        reasons.append("bearish_rejection_wick")
-        checks_passed.append("bearish_rejection_wick")
-    else:
-        checks_failed.append("bearish_rejection_wick")
-
-    score += min(candle_points, 1)
-
-    if pullback_volume_ok:
-        score += 1
-        reasons.append("healthy_pullback_volume")
-        checks_passed.append("healthy_pullback_volume")
-    else:
-        checks_failed.append("healthy_pullback_volume")
+    if vol_quality > 0:
+        vol_label = "breakout_volume" if pattern_key in _BREAKOUT_PATTERNS else "pullback_volume"
+        reasons.append(vol_label)
+        checks_passed.append(vol_label)
+    elif pattern_key:
+        vol_label = "breakout_volume" if pattern_key in _BREAKOUT_PATTERNS else "pullback_volume"
+        checks_failed.append(vol_label)
 
     if confirmation_volume_ok:
-        score += 1
         reasons.append("confirmation_volume")
         checks_passed.append("confirmation_volume")
     else:
         checks_failed.append("confirmation_volume")
 
-    if options_ctx:
-        spot = float(df.iloc[-1]["close"])
-        score, gamma_reasons = apply_options_context_adjustment(score, "SHORT", options_ctx, spot)
-        reasons.extend(gamma_reasons)
-        checks_passed.extend(gamma_reasons)
+    if momentum_sc >= 0.6:
+        reasons.append("momentum_aligned")
+        checks_passed.append("momentum_aligned")
+    else:
+        checks_failed.append("momentum_aligned")
 
-    soft_count = sum([
-        room_ok or structural_bd,
-        continuation_ok,
-        candle_ok,
-        pullback_volume_ok,
-        confirmation_volume_ok,
-    ])
+    components = {
+        "trend": round(trend_sc, 2),
+        "extension": round(ext_sc, 2),
+        "room": round(room_sc, 2),
+        "pattern": round(pattern_sc, 2),
+        "pattern_vol": round(vol_quality, 2),
+        "pattern_candle": round(candle_bonus, 2),
+        "momentum": round(momentum_sc, 2),
+        "confirm_vol": round(vol_conf_sc, 2),
+    }
 
-    if not trend_ok or not not_extended_ok:
+    if trend_opposite or not not_extended_ok:
         state = "REJECT"
-    elif structural_bd:
-        state = "SIGNAL" if soft_count >= 3 and score >= 7 else "WATCHLIST"
-    elif not room_ok:
-        state = "WATCHLIST" if soft_count >= 2 and score >= 5 else "REJECT"
-    elif soft_count >= 3 and score >= 7:
+    elif score >= 7.0:
         state = "SIGNAL"
-    elif soft_count >= 2 and score >= 5:
+    elif score >= 4.0:
         state = "WATCHLIST"
     else:
         state = "REJECT"
@@ -440,4 +578,5 @@ def score_short_setup(df: pd.DataFrame, options_ctx: dict | None = None) -> dict
         reasons=reasons,
         checks_passed=checks_passed,
         checks_failed=checks_failed,
+        components=components,
     )

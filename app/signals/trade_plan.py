@@ -15,9 +15,44 @@ from app.config import (
     WALL_PROXIMITY_WARNING_ATR,
     WALL_PROXIMITY_WARNING_PCT,
 )
+from app.rules.continuation_rules import (
+    measured_move_breakout,
+    measured_move_breakdown,
+    measured_move_flag_long,
+    measured_move_flag_short,
+)
 
 MAX_STOP_PCT = 0.12
 MIN_RR = 2.0
+
+_FLAG_PATTERNS_LONG = {"flag_breakout"}
+_BREAKOUT_PATTERNS_LONG = {"structural_breakout"}
+_FLAG_PATTERNS_SHORT = {"flag_breakdown"}
+_BREAKOUT_PATTERNS_SHORT = {"structural_breakdown"}
+
+
+def _measured_move_long(
+    df: pd.DataFrame, reasons: list[str], structural_resistance: float,
+) -> float | None:
+    """Return a measured-move target for long patterns, or None."""
+    reason_set = set(reasons)
+    if reason_set & _FLAG_PATTERNS_LONG:
+        return measured_move_flag_long(df)
+    if reason_set & _BREAKOUT_PATTERNS_LONG:
+        return measured_move_breakout(df, structural_resistance)
+    return None
+
+
+def _measured_move_short(
+    df: pd.DataFrame, reasons: list[str], structural_support: float,
+) -> float | None:
+    """Return a measured-move target for short patterns, or None."""
+    reason_set = set(reasons)
+    if reason_set & _FLAG_PATTERNS_SHORT:
+        return measured_move_flag_short(df)
+    if reason_set & _BREAKOUT_PATTERNS_SHORT:
+        return measured_move_breakdown(df, structural_support)
+    return None
 
 WALL_TIGHTEN_ATR = 1.5
 
@@ -175,6 +210,7 @@ def build_long_trade_plan(
     df: pd.DataFrame,
     scored_signal: dict,
     options_ctx: dict | None = None,
+    signal_bar_offset: int = 0,
 ) -> dict:
     """Build a long trade plan using structural S/R-based targets with R:R filtering.
 
@@ -188,7 +224,8 @@ def build_long_trade_plan(
 
     entry_price = float(last["close"])
     atr = float(last["atr14"])
-    latest_low = float(last["low"])
+    anchor = df.iloc[-2] if signal_bar_offset and len(df) > 1 else last
+    latest_low = float(anchor["low"])
     support = float(scored_signal["support"])
     structural_resistance = float(scored_signal.get("structural_resistance", scored_signal["resistance"]))
 
@@ -211,9 +248,22 @@ def build_long_trade_plan(
         target_1 = t1_rmultiple
     target_2 = entry_price + 3.0 * risk_per_share * gamma_mult
 
+    # Pattern-specific measured move targets
+    reasons = scored_signal.get("reasons", [])
+    mm_target = _measured_move_long(df, reasons, structural_resistance)
+    mm_used = False
+    if mm_target is not None and mm_target > target_1:
+        target_2 = max(target_2, mm_target)
+        mm_used = True
+
     target_1, target_2, opts_block = _apply_wall_cap_long(
         entry_price, atr, target_1, target_2, options_ctx,
     )
+
+    if mm_used:
+        opts_block.setdefault("notes", []).append(
+            f"measured move target applied: {mm_target:.2f}"
+        )
 
     rr_ratio = (target_1 - entry_price) / risk_per_share
 
@@ -232,7 +282,7 @@ def build_long_trade_plan(
         "time_stop_days": MAX_HOLD_DAYS,
         "support": round(support, 2),
         "resistance": round(structural_resistance, 2),
-        "reasons": scored_signal["reasons"],
+        "reasons": reasons,
     }
     plan.update(opts_block)
     return plan
@@ -242,6 +292,7 @@ def build_short_trade_plan(
     df: pd.DataFrame,
     scored_signal: dict,
     options_ctx: dict | None = None,
+    signal_bar_offset: int = 0,
 ) -> dict:
     """Build a short trade plan using structural S/R-based targets with R:R filtering.
 
@@ -255,7 +306,8 @@ def build_short_trade_plan(
 
     entry_price = float(last["close"])
     atr = float(last["atr14"])
-    latest_high = float(last["high"])
+    anchor = df.iloc[-2] if signal_bar_offset and len(df) > 1 else last
+    latest_high = float(anchor["high"])
     resistance = float(scored_signal["resistance"])
     structural_support = float(scored_signal.get("structural_support", scored_signal["support"]))
 
@@ -278,9 +330,21 @@ def build_short_trade_plan(
         target_1 = t1_rmultiple
     target_2 = entry_price - 3.0 * risk_per_share * gamma_mult
 
+    reasons = scored_signal.get("reasons", [])
+    mm_target = _measured_move_short(df, reasons, structural_support)
+    mm_used = False
+    if mm_target is not None and mm_target < target_2:
+        target_2 = min(target_2, mm_target)
+        mm_used = True
+
     target_1, target_2, opts_block = _apply_wall_cap_short(
         entry_price, atr, target_1, target_2, options_ctx,
     )
+
+    if mm_used:
+        opts_block.setdefault("notes", []).append(
+            f"measured move target applied: {mm_target:.2f}"
+        )
 
     rr_ratio = (entry_price - target_1) / risk_per_share
 
@@ -299,7 +363,7 @@ def build_short_trade_plan(
         "time_stop_days": MAX_HOLD_DAYS,
         "support": round(structural_support, 2),
         "resistance": round(resistance, 2),
-        "reasons": scored_signal["reasons"],
+        "reasons": reasons,
     }
     plan.update(opts_block)
     return plan

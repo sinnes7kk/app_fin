@@ -20,12 +20,26 @@ from app.config import (
     ROTATION_SCORE_MARGIN,
     SIZING_TIERS,
 )
+
+# Slippage model: fixed basis points applied to every entry and exit
+SLIPPAGE_BPS = 10  # 10 bps each way (0.10%)
+
+
+def _apply_slippage(price: float, direction: str, is_entry: bool) -> float:
+    """Adjust a fill price for slippage.
+
+    Entries are penalized (buy higher / sell lower) and exits are penalized
+    (sell lower / cover higher).
+    """
+    mult = SLIPPAGE_BPS / 10_000
+    if direction == "LONG":
+        return price * (1 + mult) if is_entry else price * (1 - mult)
+    return price * (1 - mult) if is_entry else price * (1 + mult)
 from app.features.flow_features import build_flow_feature_table, rank_flow_candidates
 from app.signals.pipeline import (
     combine_scores,
     has_strong_bearish_flow,
     has_strong_bullish_flow,
-    minmax_scale,
 )
 from app.signals.positions import (
     TRADE_LOG_COLUMNS,
@@ -226,10 +240,10 @@ def _generate_signals(flow_df: pd.DataFrame, price_cache: PriceCache,
 
     if not ranked["bullish"].empty:
         ranked["bullish"]["bullish_score_raw"] = ranked["bullish"]["bullish_score"]
-        ranked["bullish"]["bullish_score"] = minmax_scale(ranked["bullish"]["bullish_score_raw"])
+        ranked["bullish"]["bullish_score"] = ranked["bullish"]["bullish_score_raw"] * 10
     if not ranked["bearish"].empty:
         ranked["bearish"]["bearish_score_raw"] = ranked["bearish"]["bearish_score"]
-        ranked["bearish"]["bearish_score"] = minmax_scale(ranked["bearish"]["bearish_score_raw"])
+        ranked["bearish"]["bearish_score"] = ranked["bearish"]["bearish_score_raw"] * 10
 
     signals: list[dict] = []
 
@@ -255,6 +269,7 @@ def _generate_signals(flow_df: pd.DataFrame, price_cache: PriceCache,
             if trade_plan["rr_ratio"] < MIN_RR:
                 continue
 
+            entry_slipped = _apply_slippage(trade_plan["entry_price"], "LONG", True)
             signals.append({
                 "ticker": ticker,
                 "direction": "LONG",
@@ -262,7 +277,7 @@ def _generate_signals(flow_df: pd.DataFrame, price_cache: PriceCache,
                 "flow_score_scaled": flow_scaled,
                 "price_score": float(price_signal["score"]),
                 "final_score": combine_scores(flow_scaled, float(price_signal["score"])),
-                "entry_price": trade_plan["entry_price"],
+                "entry_price": round(entry_slipped, 2),
                 "stop_price": trade_plan["stop_price"],
                 "target_1": trade_plan["target_1"],
                 "target_2": trade_plan["target_2"],
@@ -295,6 +310,7 @@ def _generate_signals(flow_df: pd.DataFrame, price_cache: PriceCache,
             if trade_plan["rr_ratio"] < MIN_RR:
                 continue
 
+            entry_slipped = _apply_slippage(trade_plan["entry_price"], "SHORT", True)
             signals.append({
                 "ticker": ticker,
                 "direction": "SHORT",
@@ -302,7 +318,7 @@ def _generate_signals(flow_df: pd.DataFrame, price_cache: PriceCache,
                 "flow_score_scaled": flow_scaled,
                 "price_score": float(price_signal["score"]),
                 "final_score": combine_scores(flow_scaled, float(price_signal["score"])),
-                "entry_price": trade_plan["entry_price"],
+                "entry_price": round(entry_slipped, 2),
                 "stop_price": trade_plan["stop_price"],
                 "target_1": trade_plan["target_1"],
                 "target_2": trade_plan["target_2"],
@@ -347,8 +363,11 @@ def _open_signals(signals: list[dict], positions: list[dict],
             victim = _find_replaceable(positions, score)
             if victim is None:
                 continue
-            exit_price = victim.get("best_price", victim["entry_price"])
-            log_row = _close_position_bt(victim, exit_price, "rotated_out", current_date)
+            exit_price = _apply_slippage(
+                victim.get("best_price", victim["entry_price"]),
+                victim["direction"], False,
+            )
+            log_row = _close_position_bt(victim, round(exit_price, 2), "rotated_out", current_date)
             rotated_out.append(log_row)
             heat -= victim.get("risk_dollar", 0.0) / PORTFOLIO_CAPITAL
             positions = [p for p in positions if not (
@@ -402,7 +421,8 @@ def _update_positions(positions: list[dict], price_cache: PriceCache,
 
         exit_reason, exit_price, trail_method = _check_exits(pos, bar)
         if exit_reason:
-            log_row = _close_position_bt(pos, exit_price, exit_reason, current_date, trail_method)
+            slipped_exit = _apply_slippage(exit_price, pos["direction"], False)
+            log_row = _close_position_bt(pos, round(slipped_exit, 2), exit_reason, current_date, trail_method)
             closed_rows.append(log_row)
         else:
             still_open.append(pos)
@@ -530,9 +550,10 @@ def run_backtest(
         for pos in positions:
             df = price_cache.get_as_of(pos["ticker"], last_date)
             if df is not None:
-                exit_price = float(df.iloc[-1]["close"])
+                raw_exit = float(df.iloc[-1]["close"])
             else:
-                exit_price = pos["entry_price"]
+                raw_exit = pos["entry_price"]
+            exit_price = round(_apply_slippage(raw_exit, pos["direction"], False), 2)
             log_row = _close_position_bt(pos, exit_price, "backtest_end", last_date)
             trade_log.append(log_row)
             realized_pnl += log_row["pnl_dollar"]
@@ -555,6 +576,57 @@ def save_backtest_results(result: BacktestResult) -> Path:
         writer.writerows(result.trade_log)
 
     return path
+
+
+def run_walk_forward(
+    start_date: str,
+    end_date: str,
+    train_days: int = 60,
+    test_days: int = 20,
+) -> BacktestResult:
+    """Walk-forward backtest: successive train/test windows.
+
+    Each window trains on ``train_days`` of data and tests on the next
+    ``test_days``.  Currently the "training" phase doesn't optimize parameters
+    (the system is rule-based), but the structure is in place for future
+    parameter tuning.  The test results are concatenated.
+    """
+    all_snapshots = _load_flow_snapshots(start_date, end_date)
+    if not all_snapshots:
+        return BacktestResult(summary={"error": "no flow snapshots available"})
+
+    all_dates = sorted(all_snapshots.keys())
+    combined_log: list[dict] = []
+    combined_equity: list[dict] = []
+
+    window_start = 0
+    fold = 0
+    while window_start + train_days < len(all_dates):
+        test_start_idx = window_start + train_days
+        test_end_idx = min(test_start_idx + test_days, len(all_dates))
+
+        train_dates = all_dates[window_start:test_start_idx]
+        test_dates = all_dates[test_start_idx:test_end_idx]
+
+        if not test_dates:
+            break
+
+        fold += 1
+        print(f"\n  [walk-forward fold {fold}] train {train_dates[0]}..{train_dates[-1]}  "
+              f"test {test_dates[0]}..{test_dates[-1]}")
+
+        result = run_backtest(
+            start_date=test_dates[0],
+            end_date=test_dates[-1],
+        )
+        combined_log.extend(result.trade_log)
+        combined_equity.extend(result.equity_curve)
+
+        window_start = test_start_idx
+
+    summary = _compute_summary(combined_log, combined_equity)
+    summary["folds"] = fold
+    return BacktestResult(trade_log=combined_log, equity_curve=combined_equity, summary=summary)
 
 
 def print_summary(result: BacktestResult) -> None:

@@ -11,11 +11,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
-import requests
-
-from app.config import UNUSUAL_WHALES_API_KEY
-
-BASE_URL = "https://api.unusualwhales.com/api"
+from app.vendors.unusual_whales import BASE_URL, _uw_request
 
 # Tunable: net_gex values inside this band are classified as NEUTRAL.
 # Start conservatively; tighten after observing real magnitudes per ticker.
@@ -27,13 +23,6 @@ _CONTEXT_CACHE: dict[str, dict] = {}
 def clear_context_cache() -> None:
     """Reset the per-run cache.  Call at the start of each pipeline run."""
     _CONTEXT_CACHE.clear()
-
-
-def _headers() -> dict:
-    return {
-        "Authorization": f"Bearer {UNUSUAL_WHALES_API_KEY}",
-        "Accept": "application/json",
-    }
 
 
 def _empty_context() -> dict:
@@ -54,6 +43,16 @@ def _empty_context() -> dict:
         "near_term_oi": None,
         "swing_dte_oi": None,
         "long_dated_oi": None,
+        # Aggregated daily options volume/premium
+        "daily_bullish_premium": None,
+        "daily_bearish_premium": None,
+        "daily_premium_bias": None,
+        "call_volume_today": None,
+        "put_volume_today": None,
+        "call_volume_vs_30d_avg": None,
+        "put_volume_vs_30d_avg": None,
+        "call_ask_bid_ratio": None,
+        "put_ask_bid_ratio": None,
     }
 
 
@@ -65,7 +64,7 @@ def _fetch_gex_context(ticker: str) -> dict | None:
     """Spot GEX by strike -> gamma regime, net GEX, flip level estimate."""
     url = f"{BASE_URL}/stock/{ticker}/spot-exposures/strike"
     try:
-        resp = requests.get(url, headers=_headers(), timeout=30)
+        resp = _uw_request(url)
         resp.raise_for_status()
         rows = resp.json().get("data", [])
     except Exception:
@@ -122,7 +121,7 @@ def _fetch_oi_walls(ticker: str, spot: float) -> dict | None:
     """OI per strike -> nearest call/put walls, distances, P/C ratio."""
     url = f"{BASE_URL}/stock/{ticker}/oi-per-strike"
     try:
-        resp = requests.get(url, headers=_headers(), timeout=30)
+        resp = _uw_request(url)
         resp.raise_for_status()
         rows = resp.json().get("data", [])
     except Exception:
@@ -177,7 +176,7 @@ def _fetch_expiry_context(ticker: str) -> dict | None:
     """Volume & OI per expiry -> DTE-bucketed OI totals."""
     url = f"{BASE_URL}/stock/{ticker}/option/volume-oi-expiry"
     try:
-        resp = requests.get(url, headers=_headers(), timeout=30)
+        resp = _uw_request(url)
         resp.raise_for_status()
         rows = resp.json().get("data", [])
     except Exception:
@@ -221,6 +220,55 @@ def _fetch_expiry_context(ticker: str) -> dict | None:
     }
 
 
+def _fetch_options_volume(ticker: str) -> dict | None:
+    """Aggregated daily options volume and premium from /options-volume.
+
+    Returns derived metrics for premium bias, volume unusualness, and
+    ask/bid aggressiveness ratios.  Requests the latest single day only.
+    """
+    url = f"{BASE_URL}/stock/{ticker}/options-volume"
+    try:
+        resp = _uw_request(url, params={"limit": 1})
+        resp.raise_for_status()
+        rows = resp.json().get("data", [])
+    except Exception:
+        return None
+
+    if not rows:
+        return None
+
+    r = rows[0]
+
+    def _float(key: str) -> float:
+        try:
+            return float(r.get(key, 0) or 0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    bull_prem = _float("bullish_premium")
+    bear_prem = _float("bearish_premium")
+    call_vol = _float("call_volume")
+    put_vol = _float("put_volume")
+    call_vol_avg = _float("avg_30_day_call_volume")
+    put_vol_avg = _float("avg_30_day_put_volume")
+    call_ask = _float("call_open_ask_vol")
+    call_bid = _float("call_open_bid_vol")
+    put_ask = _float("put_open_ask_vol")
+    put_bid = _float("put_open_bid_vol")
+
+    return {
+        "daily_bullish_premium": round(bull_prem, 2),
+        "daily_bearish_premium": round(bear_prem, 2),
+        "daily_premium_bias": round(bull_prem - bear_prem, 2),
+        "call_volume_today": round(call_vol),
+        "put_volume_today": round(put_vol),
+        "call_volume_vs_30d_avg": round(call_vol / call_vol_avg, 2) if call_vol_avg > 0 else None,
+        "put_volume_vs_30d_avg": round(put_vol / put_vol_avg, 2) if put_vol_avg > 0 else None,
+        "call_ask_bid_ratio": round(call_ask / call_bid, 2) if call_bid > 0 else None,
+        "put_ask_bid_ratio": round(put_ask / put_bid, 2) if put_bid > 0 else None,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -228,8 +276,9 @@ def _fetch_expiry_context(ticker: str) -> dict | None:
 def fetch_options_context(ticker: str, spot: float) -> dict:
     """Return a complete options context dict for *ticker* at *spot* price.
 
-    Results are cached per-run so each ticker triggers at most 3 API calls
-    across an entire pipeline execution.
+    Results are cached per-run so each ticker triggers at most 4 API calls
+    (spot GEX, OI/strike, OI/expiry, options volume) across an entire
+    pipeline execution.
     """
     if ticker in _CONTEXT_CACHE:
         return _CONTEXT_CACHE[ticker]
@@ -251,6 +300,11 @@ def fetch_options_context(ticker: str, spot: float) -> dict:
     if expiry is not None:
         ctx.update(expiry)
         sources.append("oi_expiry")
+
+    vol = _fetch_options_volume(ticker)
+    if vol is not None:
+        ctx.update(vol)
+        sources.append("options_volume")
 
     ctx["options_context_sources_used"] = sources
     ctx["options_context_available"] = len(sources) > 0

@@ -16,8 +16,6 @@ from app.web.data_access import (
     load_final_signals,
     load_flow_features,
     load_positions,
-    load_ranked_bearish,
-    load_ranked_bullish,
     load_rejected,
     load_trade_log,
     load_trade_log_tail,
@@ -374,6 +372,17 @@ def _int_query(name: str, default: int = 1) -> int:
         return default
 
 
+SORT_COLUMNS = {"final_score", "flow_score_scaled", "price_score", "options_context_score"}
+
+
+def _sort_df(df: pd.DataFrame, sort_key: str | None) -> pd.DataFrame:
+    if df.empty or not sort_key or sort_key not in SORT_COLUMNS:
+        return df
+    if sort_key not in df.columns:
+        return df
+    return df.sort_values(sort_key, ascending=False, na_position="last")
+
+
 def _paginate_slice(
     df: pd.DataFrame, page: int, per_page: int
 ) -> tuple[pd.DataFrame, int, int, int]:
@@ -505,11 +514,13 @@ def _data_card_article(
     metrics_html: str,
     extra_html: str = "",
     clickable: bool = False,
+    direction: str = "",
 ) -> str:
     tcls = "data-card-ticker ticker-link" if clickable else "data-card-ticker"
     icls = " data-card--interactive" if clickable else ""
+    dir_attr = f' data-direction="{html_escape(str(direction))}"' if direction else ""
     return (
-        f'<article class="data-card{icls}" data-ticker="{html_escape(str(ticker))}">'
+        f'<article class="data-card{icls}" data-ticker="{html_escape(str(ticker))}"{dir_attr}>'
         f'<header class="data-card-head"><span class="{tcls}">{html_escape(str(ticker))}</span>'
         f"{head_badges_html}</header>"
         f'<div class="data-card-body">{metrics_html}{extra_html}</div></article>'
@@ -560,73 +571,63 @@ def _signals_card_fragments(df: pd.DataFrame, *, clickable: bool = True) -> list
             if pat is not None and str(pat).strip() and str(pat) != "nan"
             else ""
         )
-        ep, sp, t1, rr = (
-            _fmt_card_num(_row_scalar(row, "entry_price"), 2),
-            _fmt_card_num(_row_scalar(row, "stop_price"), 2),
-            _fmt_card_num(_row_scalar(row, "target_1"), 2),
-            _fmt_card_num(_row_scalar(row, "rr_ratio"), 2),
-        )
-        plan_p = f'<p class="data-card-plan">Entry {ep} · Stop {sp} · T1 {t1} · R:R {rr}</p>'
-        ng = _row_scalar(row, "net_gex")
-        gf = _row_scalar(row, "gamma_flip_level_estimate")
-        gamma_sub = ""
-        if ng is not None or gf is not None:
-            gamma_sub = (
-                f'<p class="data-card-plan">GEX {_fmt_card_num(ng, 2)} · '
-                f'Flip {_fmt_card_num(gf, 2)}</p>'
-            )
-        src = _row_scalar(row, "source")
-        src_p = (
-            f'<p class="data-card-meta">{html_escape(str(src))}</p>'
-            if src is not None and str(src).strip()
-            else ""
-        )
+        ep = _fmt_card_num(_row_scalar(row, "entry_price"), 2)
+        t1 = _fmt_card_num(_row_scalar(row, "target_1"), 2)
+        rr = _fmt_card_num(_row_scalar(row, "rr_ratio"), 2)
+        plan_p = f'<p class="data-card-plan">Entry {ep} → T1 {t1} (R:R {rr})</p>'
         out.append(
             _data_card_article(
                 t,
                 head_badges_html=head,
                 metrics_html=metrics,
-                extra_html=pat_p + plan_p + gamma_sub + src_p,
+                extra_html=pat_p + plan_p,
                 clickable=clickable,
+                direction=str(row.get("direction", "")),
             )
         )
     return out
 
 
 def _candidates_card_fragments(df: pd.DataFrame, *, clickable: bool = True) -> list[str]:
+    """Render validated candidate cards: 3 scores + pattern + status."""
     if df.empty:
         return []
-    view = _scale_intensity_cols(df.copy())
-    view = _round_floats(view)
+    view = _round_floats(df.copy())
     out: list[str] = []
     for _, row in view.iterrows():
         t = str(row.get("ticker", "")).strip()
         if not t:
             continue
-        dom = _dir_badge_html(row.get("dominant_direction"))
-        head = f'<span class="data-card-badges">{dom}</span>'
-        pairs = [
-            ("Bull", _conviction_span(_row_scalar(row, "bullish_score"))),
-            ("Bear", _conviction_span(_row_scalar(row, "bearish_score"))),
-            ("Bull intensity", _conviction_span(_row_scalar(row, "bullish_flow_intensity"))),
-            ("Bear intensity", _conviction_span(_row_scalar(row, "bearish_flow_intensity"))),
+        direc = _dir_badge_html(row.get("direction"))
+        gamma = _gamma_badge_html(row.get("gamma_regime"))
+        head = f'<span class="data-card-badges">{direc}{gamma}</span>'
+        pairs: list[tuple[str, str]] = [
+            ("Flow", _conviction_span(_row_scalar(row, "flow_score_scaled"))),
+            ("Price", _conviction_span(_row_scalar(row, "price_score"))),
+            ("Options", _conviction_span(_row_scalar(row, "options_context_score"))),
+            ("Final", _conviction_span(_row_scalar(row, "final_score"))),
         ]
-        imb = _row_scalar(row, "flow_imbalance_ratio")
-        if imb is not None:
-            pairs.append(("Imbalance", _fmt_card_num(imb, 2)))
-        tp = _row_scalar(row, "total_premium")
-        if tp is not None:
-            pairs.append(("Premium", _fmt_money_short(tp)))
-        tc = _row_scalar(row, "total_count")
-        if tc is not None:
-            pairs.append(("Flow prints (#)", _fmt_card_num(tc, 0)))
         metrics = _card_metrics_dl(pairs)
+        pat = _row_scalar(row, "pattern")
+        pat_p = (
+            f'<p class="data-card-thesis">{html_escape(str(pat))}</p>'
+            if pat is not None and str(pat).strip() and str(pat) not in ("nan", "unknown")
+            else ""
+        )
+        rr = _row_scalar(row, "reject_reason")
+        if rr is not None and str(rr).strip() and str(rr) != "nan":
+            reason_short = str(rr).split("(")[0].strip().replace("_", " ")
+            status_p = f'<p class="data-card-meta"><span class="status-chip status-rejected">{html_escape(reason_short)}</span></p>'
+        else:
+            status_p = '<p class="data-card-meta"><span class="status-chip status-passed">PASSED</span></p>'
         out.append(
             _data_card_article(
                 t,
                 head_badges_html=head,
                 metrics_html=metrics,
+                extra_html=pat_p + status_p,
                 clickable=clickable,
+                direction=str(row.get("direction", "")),
             )
         )
     return out
@@ -644,12 +645,15 @@ def _rejected_card_fragments(df: pd.DataFrame) -> list[str]:
         direc = _dir_badge_html(row.get("direction"))
         head = f'<span class="data-card-badges">{direc}</span>'
         rr = _row_scalar(row, "reject_reason")
-        thesis = ""
-        if rr is not None and str(rr).strip():
-            thesis = f'<p class="data-card-thesis">{html_escape(str(rr))}</p>'
-        pairs = [
-            ("Flow (scaled)", _conviction_span(_row_scalar(row, "flow_score_scaled"))),
+        reason_p = ""
+        if rr is not None and str(rr).strip() and str(rr) != "nan":
+            reason_short = str(rr).split("(")[0].strip().replace("_", " ")
+            reason_p = f'<p class="data-card-meta"><span class="status-chip status-rejected">{html_escape(reason_short)}</span></p>'
+        pairs: list[tuple[str, str]] = [
+            ("Flow", _conviction_span(_row_scalar(row, "flow_score_scaled"))),
             ("Price", _conviction_span(_row_scalar(row, "price_score"))),
+            ("Options", _conviction_span(_row_scalar(row, "options_context_score"))),
+            ("Final", _conviction_span(_row_scalar(row, "final_score"))),
         ]
         metrics = _card_metrics_dl(pairs)
         out.append(
@@ -657,8 +661,9 @@ def _rejected_card_fragments(df: pd.DataFrame) -> list[str]:
                 t,
                 head_badges_html=head,
                 metrics_html=metrics,
-                extra_html=thesis,
+                extra_html=reason_p,
                 clickable=True,
+                direction=str(row.get("direction", "")),
             )
         )
     return out
@@ -809,6 +814,7 @@ def _watchlist_card_fragments(rows: list[dict]) -> list[str]:
                 metrics_html=metrics,
                 extra_html=ex,
                 clickable=True,
+                direction=str(r.get("direction", "")),
             )
         )
     return out
@@ -821,41 +827,32 @@ def _positions_card_fragments(rows: list[dict]) -> list[str]:
         if not t:
             continue
         direc = _dir_badge_html(r.get("direction"))
-        head = f'<span class="data-card-badges">{direc}</span>'
-        pairs = [
-            ("Final", _conviction_span(r.get("final_score"))),
-            ("Flow", _conviction_span(r.get("flow_score_scaled"))),
-            ("Entry", _fmt_card_num(r.get("entry_price"), 2)),
-            ("Active stop", _fmt_card_num(r.get("active_stop"), 2)),
-            ("T1 / T2", f"{_fmt_card_num(r.get('target_1'), 2)} / {_fmt_card_num(r.get('target_2'), 2)}"),
-            ("Unrealized R", _fmt_card_num(r.get("unrealized_r"), 2)),
+        hs = r.get("health_state")
+        health_badge = ""
+        if hs and str(hs).strip():
+            cls = {"STRONG": "good", "NEUTRAL": "neutral", "WEAK": "warn", "FAILING": "bad"}.get(str(hs), "neutral")
+            health_badge = f'<span class="health-badge health-{cls}">{html_escape(str(hs))}</span>'
+        head = f'<span class="data-card-badges">{direc}{health_badge}</span>'
+        pairs: list[tuple[str, str]] = [
+            ("Health", _conviction_span(r.get("health"))),
+            ("Unreal R", _fmt_card_num(r.get("unrealized_r"), 2)),
         ]
         metrics = _card_metrics_dl(pairs)
-        pat = r.get("pattern")
-        thesis = (
-            f'<p class="data-card-thesis">{html_escape(str(pat))}</p>'
-            if pat is not None and str(pat).strip() and str(pat) != "unknown"
-            else ""
-        )
-        gr = r.get("gamma_regime")
-        gamma_line = ""
-        if gr is not None and str(gr).strip():
-            gamma_line = f'<p class="data-card-plan">Γ {_gamma_badge_html(gr)} · GEX {_fmt_card_num(r.get("net_gex"), 2)} · flip {_fmt_card_num(r.get("gamma_flip_level_estimate"), 2)}</p>'
+        ep = _fmt_card_num(r.get("entry_price"), 2)
+        stop = _fmt_card_num(r.get("active_stop"), 2)
+        plan_p = f'<p class="data-card-plan">Entry {ep} → Stop {stop}</p>'
         opened = r.get("opened_at") or r.get("entry_date")
         od = ""
         if opened:
             od = f'<p class="data-card-meta">Opened {html_escape(str(opened))}</p>'
-        ps = r.get("price_score")
-        ps_line = ""
-        if ps is not None and str(ps) != "":
-            ps_line = f'<p class="data-card-meta">Price score at open: {_conviction_span(ps)}</p>'
         out.append(
             _data_card_article(
                 t,
                 head_badges_html=head,
                 metrics_html=metrics,
-                extra_html=thesis + gamma_line + od + ps_line,
+                extra_html=plan_p + od,
                 clickable=True,
+                direction=str(r.get("direction", "")),
             )
         )
     return out
@@ -1004,13 +1001,281 @@ def _compute_performance() -> dict:
     return perf
 
 
+# ---------------------------------------------------------------------------
+# Tab insight summaries — natural language panels above card grids
+# ---------------------------------------------------------------------------
+
+def _line(dot: str, text: str) -> str:
+    return f'<p class="insight-line"><span class="dot dot-{dot}"></span>{text}</p>'
+
+
+def _signals_insights(df: pd.DataFrame) -> str:
+    if df.empty:
+        return '<div class="tab-insights">' + _line("neutral", "No signals this scan.") + "</div>"
+
+    n = len(df)
+    longs = int((df["direction"] == "LONG").sum()) if "direction" in df.columns else 0
+    shorts = n - longs
+
+    lines: list[str] = []
+
+    # Regime context
+    rs_val = None
+    if "regime_score" in df.columns:
+        rs_series = pd.to_numeric(df["regime_score"], errors="coerce").dropna()
+        if not rs_series.empty:
+            rs_val = float(rs_series.iloc[0])
+    regime_note = ""
+    if rs_val is not None:
+        if rs_val >= 0.65:
+            regime_note = f" Regime {rs_val:.2f}, favoring longs."
+        elif rs_val <= 0.35:
+            regime_note = f" Regime {rs_val:.2f}, favoring shorts."
+        else:
+            regime_note = f" Regime {rs_val:.2f}, neutral."
+    lines.append(_line("neutral", f"{n} signal{'s' if n != 1 else ''} — {longs} long, {shorts} short.{regime_note}"))
+
+    # Best setup
+    if "final_score" in df.columns:
+        best_idx = pd.to_numeric(df["final_score"], errors="coerce").idxmax()
+        best = df.loc[best_idx]
+        ticker = best.get("ticker", "?")
+        direction = best.get("direction", "?")
+        score = _fmt_card_num(best.get("final_score"), 1)
+        pattern = best.get("pattern", "")
+        rr = _fmt_card_num(best.get("rr_ratio"), 1)
+        pat_str = f" — {html_escape(str(pattern))}" if pattern and str(pattern) not in ("", "nan", "unknown") else ""
+        rr_str = f", {rr}:1 RR" if rr != "—" else ""
+        lines.append(_line("good", f"Strongest: {html_escape(str(ticker))} ({direction}, {score}){pat_str}{rr_str}"))
+
+    # Common strengths
+    strengths: list[str] = []
+    if "flow_score_scaled" in df.columns:
+        avg_flow = pd.to_numeric(df["flow_score_scaled"], errors="coerce").mean()
+        if avg_flow >= 6.0:
+            strengths.append("strong flow conviction")
+    if "gamma_regime" in df.columns:
+        pos_gamma = (df["gamma_regime"] == "POSITIVE").sum()
+        if pos_gamma > n / 2:
+            strengths.append("positive gamma")
+    if "agg_premium_alignment" in df.columns:
+        avg_align = pd.to_numeric(df["agg_premium_alignment"], errors="coerce").mean()
+        if avg_align >= 0.6:
+            strengths.append("premium-aligned")
+    if "rr_ratio" in df.columns:
+        avg_rr = pd.to_numeric(df["rr_ratio"], errors="coerce").mean()
+        if avg_rr >= 2.5:
+            strengths.append(f"good avg RR ({avg_rr:.1f}:1)")
+    if strengths:
+        lines.append(_line("good", "Strengths: " + ", ".join(strengths)))
+
+    # Gaps / weaknesses from checks_failed
+    if "checks_failed" in df.columns:
+        from collections import Counter
+        all_fails: list[str] = []
+        for val in df["checks_failed"].dropna():
+            parts = [p.strip() for p in str(val).split(",") if p.strip() and p.strip() != "none"]
+            all_fails.extend(parts)
+        if all_fails:
+            counts = Counter(all_fails).most_common(3)
+            gap_parts = [f"{count}/{n} lack {name}" for name, count in counts if count > 0]
+            if gap_parts:
+                lines.append(_line("warn", "Gaps: " + ", ".join(gap_parts)))
+
+    return '<div class="tab-insights">' + "".join(lines) + "</div>"
+
+
+def _candidates_insights(bull: pd.DataFrame, bear: pd.DataFrame, rejected: pd.DataFrame) -> str:
+    n_bull = len(bull) if not bull.empty else 0
+    n_bear = len(bear) if not bear.empty else 0
+
+    if n_bull == 0 and n_bear == 0:
+        return '<div class="tab-insights">' + _line("neutral", "No validated candidates this scan.") + "</div>"
+
+    lines: list[str] = []
+
+    # Count passed vs rejected
+    all_cands = pd.concat([bull, bear], ignore_index=True) if n_bull + n_bear > 0 else pd.DataFrame()
+    n_passed = 0
+    n_rejected = 0
+    if not all_cands.empty and "reject_reason" in all_cands.columns:
+        n_passed = int(all_cands["reject_reason"].isna().sum() + (all_cands["reject_reason"] == "").sum())
+        n_rejected = len(all_cands) - n_passed
+
+    lines.append(_line("neutral", f"{n_bull} bullish, {n_bear} bearish validated. {n_passed} passed, {n_rejected} rejected."))
+
+    # Near-misses: top rejected by flow score
+    if not rejected.empty and "flow_score_scaled" in rejected.columns:
+        rej_sorted = rejected.copy()
+        rej_sorted["_fs"] = pd.to_numeric(rej_sorted["flow_score_scaled"], errors="coerce")
+        rej_sorted = rej_sorted.dropna(subset=["_fs"]).sort_values("_fs", ascending=False).head(3)
+        if not rej_sorted.empty:
+            misses: list[str] = []
+            for _, row in rej_sorted.iterrows():
+                t = html_escape(str(row.get("ticker", "?")))
+                fs = f"{float(row['_fs']):.1f}"
+                reason = str(row.get("reject_reason", "")).split("(")[0].strip()
+                misses.append(f"{t} (flow {fs}, {reason})")
+            lines.append(_line("warn", "Near-misses: " + ", ".join(misses)))
+
+    # Rejection breakdown
+    if not rejected.empty and "reject_reason" in rejected.columns:
+        from collections import Counter
+        reasons = [str(r).split("(")[0].strip().replace("_", " ") for r in rejected["reject_reason"].dropna()]
+        if reasons:
+            counts = Counter(reasons).most_common(3)
+            parts = [f"{name} ({count})" for name, count in counts]
+            lines.append(_line("neutral", "Top rejection reasons: " + ", ".join(parts)))
+
+    return '<div class="tab-insights">' + "".join(lines) + "</div>"
+
+
+def _positions_insights(positions: list[dict]) -> str:
+    n = len(positions)
+    if n == 0:
+        return '<div class="tab-insights">' + _line("neutral", "No open positions.") + "</div>"
+
+    longs = sum(1 for p in positions if p.get("direction") == "LONG")
+    shorts = n - longs
+
+    lines: list[str] = []
+    lines.append(_line("neutral", f"{n} open — {longs} long, {shorts} short."))
+
+    # Health distribution
+    from collections import Counter
+    state_counts = Counter(p.get("health_state", "NEUTRAL") for p in positions)
+    state_order = ["STRONG", "NEUTRAL", "WEAK", "FAILING"]
+    state_dots = {"STRONG": "good", "NEUTRAL": "neutral", "WEAK": "warn", "FAILING": "bad"}
+    health_parts: list[str] = []
+    for s in state_order:
+        c = state_counts.get(s, 0)
+        if c > 0:
+            health_parts.append(f"{c} {s}")
+    if health_parts:
+        lines.append(_line(state_dots.get(state_order[0] if state_counts.get("STRONG", 0) > 0 else "neutral", "neutral"),
+                          "Health: " + ", ".join(health_parts)))
+
+    # Action items: deteriorating, approaching time stop, FAILING
+    actions: list[str] = []
+    for p in positions:
+        ticker = p.get("ticker", "?")
+        state = p.get("health_state")
+        delta = p.get("health_delta", 0.0)
+        health = p.get("health")
+        health_prev = p.get("health_prev")
+
+        if state == "FAILING":
+            actions.append(f"{ticker} FAILING (health {health:.0f})" if health is not None else f"{ticker} FAILING")
+        elif delta is not None and delta < -2.0 and health is not None and health_prev is not None:
+            actions.append(f"{ticker} deteriorating ({health_prev:.0f} → {health:.0f}, delta {delta:+.1f})")
+
+        days = p.get("days_held", 0)
+        time_stop = p.get("time_stop_days")
+        if time_stop and days >= time_stop - 1:
+            actions.append(f"{ticker} approaching time stop (day {days}/{time_stop})")
+
+    for a in actions[:3]:
+        lines.append(_line("bad", a))
+
+    # Best runner
+    best_r = -999.0
+    best_pos = None
+    for p in positions:
+        entry = p.get("entry_price", 0)
+        risk = p.get("risk_per_share", 0)
+        best_price = p.get("best_price", entry)
+        if risk > 0 and entry > 0:
+            if p.get("direction") == "LONG":
+                ur = (best_price - entry) / risk
+            else:
+                ur = (entry - best_price) / risk
+            if ur > best_r:
+                best_r = ur
+                best_pos = p
+
+    if best_pos and best_r > 0:
+        t = best_pos.get("ticker", "?")
+        state = best_pos.get("health_state", "?")
+        lines.append(_line("good", f"Best runner: {t} at {best_r:+.1f}R ({state})"))
+
+    return '<div class="tab-insights">' + "".join(lines) + "</div>"
+
+
+def _rejected_insights(rejected: pd.DataFrame, watchlist: list[dict]) -> str:
+    n_rej = len(rejected) if not rejected.empty else 0
+    n_wl = len(watchlist)
+
+    if n_rej == 0 and n_wl == 0:
+        return '<div class="tab-insights">' + _line("neutral", "No rejected candidates or watchlist entries.") + "</div>"
+
+    lines: list[str] = []
+
+    # Rejection summary
+    if n_rej > 0 and "reject_reason" in rejected.columns:
+        from collections import Counter
+        reasons = [str(r).split("(")[0].strip().replace("_", " ") for r in rejected["reject_reason"].dropna()]
+        counts = Counter(reasons).most_common(3)
+        parts = [f"{name} ({count})" for name, count in counts]
+        lines.append(_line("neutral", f"{n_rej} rejected — top reasons: " + ", ".join(parts)))
+    elif n_rej > 0:
+        lines.append(_line("neutral", f"{n_rej} rejected this scan."))
+
+    # Watchlist highlights
+    if n_wl > 0:
+        best_wl = max(watchlist, key=lambda w: float(w.get("flow_score_scaled", 0) or 0))
+        best_ticker = best_wl.get("ticker", "?")
+        best_flow = float(best_wl.get("flow_score_scaled", 0) or 0)
+        lines.append(_line("warn", f"{n_wl} on watchlist. Closest to promotion: {html_escape(str(best_ticker))} (flow {best_flow:.1f})"))
+
+        # Recurring names (3+ days on watchlist)
+        from datetime import date
+        today = date.today()
+        persistent: list[str] = []
+        for w in watchlist:
+            first_seen = w.get("first_seen")
+            if first_seen:
+                try:
+                    seen_date = date.fromisoformat(str(first_seen))
+                    days_on = (today - seen_date).days
+                    if days_on >= 3:
+                        persistent.append(f"{w.get('ticker', '?')} ({days_on}d)")
+                except (ValueError, TypeError):
+                    pass
+        if persistent:
+            lines.append(_line("warn", "Persistent flow: " + ", ".join(persistent[:5])))
+
+    return '<div class="tab-insights">' + "".join(lines) + "</div>"
+
+
 @app.route("/")
 def index():
     signals, signals_src = load_final_signals()
     rejected, rejected_src = load_rejected()
-    bull, bull_src = load_ranked_bullish()
-    bear, bear_src = load_ranked_bearish()
     flow, flow_src = load_flow_features()
+
+    # Build validated candidates: signals + rejected merged, split by direction.
+    # Enrich with flow features so rejected rows carry the underlying flow
+    # metrics for the detail modal (bullish_score, total_premium, avg_dte, etc.).
+    _parts = [df for df in (signals, rejected) if not df.empty]
+    _validated = pd.concat(_parts, ignore_index=True) if _parts else pd.DataFrame()
+    if not _validated.empty and not flow.empty and "ticker" in _validated.columns and "ticker" in flow.columns:
+        _flow_cols = [c for c in flow.columns if c not in _validated.columns or c == "ticker"]
+        _validated = _validated.merge(flow[_flow_cols], on="ticker", how="left")
+    sort_sig = request.args.get("sort_sig", "")
+    sort_bull = request.args.get("sort_bull", "")
+    sort_bear = request.args.get("sort_bear", "")
+    sort_rej = request.args.get("sort_rej", "")
+
+    if not _validated.empty and "direction" in _validated.columns:
+        bull = _validated[_validated["direction"] == "LONG"].copy()
+        bear = _validated[_validated["direction"] == "SHORT"].copy()
+        bull = _sort_df(bull, sort_bull) if sort_bull else _sort_df(bull, "flow_score_scaled")
+        bear = _sort_df(bear, sort_bear) if sort_bear else _sort_df(bear, "flow_score_scaled")
+    else:
+        bull = pd.DataFrame()
+        bear = pd.DataFrame()
+    bull_src = rejected_src or signals_src
+    bear_src = bull_src
     positions = load_positions()
     watchlist = load_watchlist()
     watchlist = _enrich_watchlist_from_rejected(watchlist, rejected)
@@ -1058,9 +1323,12 @@ def index():
     page_pos = _int_query("page_pos")
     page_wl = _int_query("page_wl")
 
+    signals_sorted = _sort_df(signals, sort_sig) if sort_sig else signals
+    rejected_sorted = _sort_df(rejected, sort_rej) if sort_rej else rejected
+
     ctx = {
         "signals_html": _paginate_card_fragments(
-            _signals_card_fragments(signals, clickable=True),
+            _signals_card_fragments(signals_sorted, clickable=True),
             page=page_sig,
             per_page=pp,
             page_param="page_sig",
@@ -1069,7 +1337,7 @@ def index():
         "signals_src": signals_src,
         "signals_detail": _df_to_detail_json(signals),
         "rejected_html": _paginate_card_fragments(
-            _rejected_card_fragments(rejected),
+            _rejected_card_fragments(rejected_sorted),
             page=page_rej,
             per_page=pp,
             page_param="page_rej",
@@ -1132,6 +1400,14 @@ def index():
         "live_alerts_loaded": not alerts_raw.empty or bool(alerts_error),
         "perf": perf,
         "last_updated": last_updated,
+        "signals_insights": _signals_insights(signals),
+        "candidates_insights": _candidates_insights(bull, bear, rejected),
+        "positions_insights": _positions_insights(positions),
+        "rejected_insights": _rejected_insights(rejected, watchlist),
+        "sort_sig": sort_sig,
+        "sort_bull": sort_bull,
+        "sort_bear": sort_bear,
+        "sort_rej": sort_rej,
     }
     return render_template("index.html", **ctx)
 

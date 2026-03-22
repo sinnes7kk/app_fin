@@ -27,6 +27,17 @@ def _print_signals(out: dict) -> None:
     else:
         print("  No candidates were rejected (none reached price validation)")
 
+    mr = out.get("market_regime", {})
+    if mr.get("available"):
+        print()
+        print("=" * 60)
+        print("MARKET REGIME")
+        print("=" * 60)
+        print(f"  Regime score:  {mr['regime_score']:.2f}  (0=risk-off, 1=risk-on)")
+        print(f"  SPY trend:     {mr['spy_trend']}  (close={mr['spy_close']}  EMA20={mr['spy_ema20']}  EMA50={mr['spy_ema50']})")
+        print(f"  VIX:           {mr.get('vix_close', '?')}  sizing mult={mr['vix_sizing_mult']:.2f}")
+        print(f"  Components:    spy_align={mr.get('_spy_alignment', '?')}  vix={mr.get('_vix_component', '?')}  rvol={mr.get('_rvol_component', '?')}  tide={mr.get('_tide_component', '?')}")
+
     al = out["alert_stats"]
     print()
     print("=" * 60)
@@ -108,8 +119,13 @@ def _print_positions(open_result: dict, update_result: dict) -> None:
                 ur = (p["entry_price"] - close_approx) / risk if risk > 0 else 0.0
             partial_tag = " [T1 filled]" if p["partial_filled"] else ""
             shares = p.get("shares", 0)
+            h = p.get("health")
+            h_state = p.get("health_state", "?")
+            h_delta = p.get("health_delta", 0.0)
+            health_tag = f"  H={h:.1f} {h_state}" if h is not None else ""
+            delta_tag = f" ({h_delta:+.1f})" if h is not None else ""
             print(f"    {p['direction']:5s} {p['ticker']:6s}  {shares:>4} shares  day {p['days_held']}  "
-                  f"stop={p['active_stop']:.2f}  ~{ur:+.1f}R{partial_tag}")
+                  f"stop={p['active_stop']:.2f}  ~{ur:+.1f}R{partial_tag}{health_tag}{delta_tag}")
     else:
         print("\n  No open positions")
 
@@ -121,6 +137,7 @@ def main() -> None:
     parser.add_argument("--backtest", action="store_true", help="Run replay backtest over archived flow")
     parser.add_argument("--start", type=str, help="Backtest start date (YYYY-MM-DD)")
     parser.add_argument("--end", type=str, help="Backtest end date (YYYY-MM-DD)")
+    parser.add_argument("--walk-forward", action="store_true", help="Use walk-forward backtest mode")
     parser.add_argument(
         "--serve",
         action="store_true",
@@ -135,11 +152,14 @@ def main() -> None:
         return
 
     if args.backtest:
-        from app.backtest.engine import print_summary, run_backtest, save_backtest_results
+        from app.backtest.engine import print_summary, run_backtest, run_walk_forward, save_backtest_results
 
         start = args.start or "2020-01-01"
         end = args.end or "2099-12-31"
-        result = run_backtest(start_date=start, end_date=end)
+        if args.walk_forward:
+            result = run_walk_forward(start_date=start, end_date=end)
+        else:
+            result = run_backtest(start_date=start, end_date=end)
         print_summary(result)
         if result.trade_log:
             path = save_backtest_results(result)
@@ -152,7 +172,7 @@ def main() -> None:
         _print_positions({"opened": [], "rotated_out": [], "skipped": []}, result)
         return
 
-    out = run_flow_to_price_pipeline(flow_limit=500, top_n=20, min_premium=50_000)
+    out = run_flow_to_price_pipeline(flow_limit=2000, top_n=50, min_premium=50_000, alert_hours_back=48)
     _print_signals(out)
 
     if args.scan_only:

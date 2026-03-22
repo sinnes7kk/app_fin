@@ -10,18 +10,28 @@ from pathlib import Path
 import pandas as pd
 
 from app.config import (
+    DRAWDOWN_HALT_PCT,
+    DRAWDOWN_SIZING_MULT,
+    DRAWDOWN_THROTTLE_PCT,
     MAX_HOLD_DAYS,
     MAX_PORTFOLIO_HEAT,
     MAX_POSITIONS,
+    MAX_SECTOR_PER_DIRECTION,
     MIN_FINAL_SCORE,
     PARTIAL_EXIT_PCT,
+    PARTIAL_TIERS,
     PORTFOLIO_CAPITAL,
-    ROTATION_SCORE_MARGIN,
+    ROTATION_COOLDOWN_DAYS,
+    ROTATION_HEALTH_MARGIN,
     SIZING_TIERS,
 )
 from app.features.options_context import fetch_options_context
 from app.features.price_features import compute_features, fetch_ohlcv
+from app.features.sector_map import get_sector
+from app.signals.position_health import compute_position_health
+from app.signals.scoring import score_long_setup, score_short_setup
 from app.signals.trade_plan import compute_trailing_stops
+from app.vendors.unusual_whales import fetch_dark_pool, fetch_net_prem_ticks
 
 DATA_DIR = Path(__file__).resolve().parents[2] / "data"
 POSITIONS_PATH = DATA_DIR / "positions.json"
@@ -110,12 +120,44 @@ def _append_equity_curve(
     }
 
     EQUITY_CURVE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    write_header = not EQUITY_CURVE_PATH.exists()
-    with open(EQUITY_CURVE_PATH, "a", newline="") as f:
+
+    # With 8 runs/day, keep only the latest snapshot per calendar date
+    # (overwrite today's row if it exists to avoid distorting drawdown math).
+    today_str = row["date"]
+    existing_rows: list[dict] = []
+    if EQUITY_CURVE_PATH.exists():
+        with open(EQUITY_CURVE_PATH, "r", newline="") as f:
+            reader = csv.DictReader(f)
+            existing_rows = [r for r in reader if r.get("date") != today_str]
+
+    with open(EQUITY_CURVE_PATH, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=EQUITY_CURVE_COLUMNS, extrasaction="ignore")
-        if write_header:
-            writer.writeheader()
+        writer.writeheader()
+        writer.writerows(existing_rows)
         writer.writerow(row)
+
+
+def _current_drawdown() -> float:
+    """Compute current drawdown from peak as a positive fraction (0.0 = no drawdown).
+
+    Reads the equity curve CSV.  Returns 0.0 if data is insufficient.
+    """
+    if not EQUITY_CURVE_PATH.exists():
+        return 0.0
+    try:
+        eq = pd.read_csv(EQUITY_CURVE_PATH)
+        if eq.empty or "portfolio_value" not in eq.columns:
+            return 0.0
+        values = pd.to_numeric(eq["portfolio_value"], errors="coerce").dropna()
+        if values.empty:
+            return 0.0
+        peak = values.cummax().iloc[-1]
+        current = values.iloc[-1]
+        if peak <= 0:
+            return 0.0
+        return max(0.0, (peak - current) / peak)
+    except Exception:
+        return 0.0
 
 
 def _risk_pct_for_score(score: float) -> float:
@@ -124,6 +166,14 @@ def _risk_pct_for_score(score: float) -> float:
         if score >= threshold:
             return pct
     return 0.0
+
+
+def _partial_pct_for_score(score: float) -> float:
+    """Return the fraction of shares to sell at T1, scaled by conviction."""
+    for threshold, pct in PARTIAL_TIERS:
+        if score >= threshold:
+            return pct
+    return PARTIAL_EXIT_PCT
 
 
 def _current_portfolio_heat(positions: list[dict]) -> float:
@@ -143,28 +193,66 @@ def _unrealized_r(pos: dict) -> float:
     return (entry - best) / risk
 
 
-def _find_replaceable(existing: list[dict], new_score: float) -> dict | None:
-    """Find the weakest position eligible for rotation, or None.
+def _find_replaceable_by_health(existing: list[dict], new_score: float) -> dict | None:
+    """Find the weakest position eligible for conviction-based rotation, or None.
 
-    A position is replaceable if:
-      - Not partial-filled (T1 already hit = working trade, keep it)
-      - AND either losing/flat (unrealized_r <= 0) OR the new signal's score
-        exceeds the position's score by at least ROTATION_SCORE_MARGIN.
-    Returns the single weakest eligible position sorted by final_score.
+    Compares the new candidate's final_score against each open position's
+    composite conviction (0.5 * re_entry_score + 0.5 * health).  Falls back
+    to raw health when conviction hasn't been computed yet.
+
+      - STRONG: never replaceable
+      - NEUTRAL: replaceable only if new_score exceeds conviction by a margin
+        (adjusted by delta — deteriorating positions have a lower bar)
+      - WEAK: replaceable if new_score exceeds conviction
+      - FAILING: will be auto-exited separately, skip here
+
+    Also respects anti-whipsaw cooldown and preserves partial-filled positions.
     """
-    candidates = []
+    today = date.today()
+    candidates: list[tuple[dict, float]] = []
+
     for pos in existing:
         if pos.get("partial_filled", False):
             continue
-        ur = _unrealized_r(pos)
-        if ur <= 0.0:
-            candidates.append(pos)
-        elif new_score >= pos["final_score"] + ROTATION_SCORE_MARGIN:
-            candidates.append(pos)
+
+        last_rot = pos.get("last_rotation_date")
+        if last_rot:
+            try:
+                days_since = (today - date.fromisoformat(str(last_rot))).days
+            except (ValueError, TypeError):
+                days_since = 999
+            if days_since < ROTATION_COOLDOWN_DAYS:
+                continue
+
+        health = pos.get("health", 5.0)
+        conv = pos.get("conviction") or health
+        state = pos.get("health_state", "NEUTRAL")
+        delta = pos.get("health_delta", 0.0)
+
+        if state == "STRONG":
+            continue
+
+        if state == "FAILING":
+            continue
+
+        if state == "WEAK":
+            if new_score > conv:
+                candidates.append((pos, conv))
+            continue
+
+        # NEUTRAL: delta-adjusted margin
+        margin = ROTATION_HEALTH_MARGIN
+        if delta < -1.0:
+            margin = max(margin - 1.0, 0.5)
+        elif delta > 0:
+            margin = margin + 0.5
+
+        if new_score - conv > margin:
+            candidates.append((pos, conv))
 
     if not candidates:
         return None
-    return min(candidates, key=lambda p: p["final_score"])
+    return min(candidates, key=lambda x: x[1])[0]
 
 
 def _normalize_checks_snapshot(sig: dict, key: str) -> str | None:
@@ -234,6 +322,14 @@ def _build_position(sig: dict, risk_pct: float) -> dict | None:
         "risk_dollar": round(actual_risk_dollar, 2),
         "shares": shares,
         "position_value": round(position_value, 2),
+        "health": None,
+        "health_state": None,
+        "health_at_entry": None,
+        "health_prev": None,
+        "health_delta": 0.0,
+        "last_rotation_date": None,
+        "re_entry_score": None,
+        "conviction": None,
     }
 
 
@@ -246,9 +342,25 @@ def open_positions(signals: list[dict]) -> dict:
 
     Returns a dict with 'opened', 'rotated_out', and 'skipped' lists.
     """
+    drawdown = _current_drawdown()
+    if drawdown >= DRAWDOWN_HALT_PCT:
+        print(f"  [circuit-breaker] drawdown {drawdown:.1%} >= halt threshold — no new entries")
+        return {"opened": [], "rotated_out": [], "skipped": [
+            {"ticker": "*", "reason": f"drawdown halt ({drawdown:.1%})"}
+        ]}
+    drawdown_mult = DRAWDOWN_SIZING_MULT if drawdown >= DRAWDOWN_THROTTLE_PCT else 1.0
+    if drawdown_mult < 1.0:
+        print(f"  [circuit-breaker] drawdown {drawdown:.1%} — sizing reduced to {drawdown_mult:.0%}")
+
     existing = _load_positions()
     open_tickers = {(p["ticker"], p["direction"]) for p in existing}
     heat = _current_portfolio_heat(existing)
+
+    # Build sector counts for the sector concentration guard
+    sector_counts: dict[tuple[str, str], int] = {}
+    for p in existing:
+        key_sd = (get_sector(p["ticker"]), p["direction"])
+        sector_counts[key_sd] = sector_counts.get(key_sd, 0) + 1
 
     opened: list[dict] = []
     rotated_out: list[dict] = []
@@ -264,7 +376,15 @@ def open_positions(signals: list[dict]) -> dict:
             skipped.append({"ticker": sig["ticker"], "reason": f"score {score:.2f} < {MIN_FINAL_SCORE}"})
             continue
 
+        sector = get_sector(sig["ticker"])
+        sector_key = (sector, sig["direction"])
+        if sector_counts.get(sector_key, 0) >= MAX_SECTOR_PER_DIRECTION:
+            skipped.append({"ticker": sig["ticker"], "reason": f"sector cap ({sector} {sig['direction']})"})
+            continue
+
         risk_pct = _risk_pct_for_score(score)
+        vix_mult = sig.get("vix_sizing_mult", 1.0)
+        risk_pct = risk_pct * vix_mult * drawdown_mult
         pos = _build_position(sig, risk_pct)
         if pos is None:
             continue
@@ -272,32 +392,36 @@ def open_positions(signals: list[dict]) -> dict:
         new_heat = pos["risk_dollar"] / PORTFOLIO_CAPITAL
         book_full = len(existing) >= MAX_POSITIONS
 
+        rotated_slot = False
         if book_full:
-            victim = _find_replaceable(existing, score)
+            victim = _find_replaceable_by_health(existing, score)
             if victim is None:
                 skipped.append({"ticker": sig["ticker"], "reason": "book full, no replaceable position"})
                 continue
 
-            # Close the victim at its current best_price (approximate market)
             exit_price = victim.get("best_price", victim["entry_price"])
             log_row = close_position(victim, exit_price, "rotated_out")
             rotated_out.append(log_row)
 
-            # Free the victim's heat and slot
             heat -= victim.get("risk_dollar", 0.0) / PORTFOLIO_CAPITAL
             existing = [p for p in existing if not (
                 p["ticker"] == victim["ticker"] and p["direction"] == victim["direction"]
             )]
             open_tickers.discard((victim["ticker"], victim["direction"]))
+            rotated_slot = True
 
         if heat + new_heat > MAX_PORTFOLIO_HEAT:
             skipped.append({"ticker": sig["ticker"], "reason": "portfolio heat cap reached"})
             continue
 
+        if rotated_slot:
+            pos["last_rotation_date"] = str(date.today())
+
         heat += new_heat
         opened.append(pos)
         existing.append(pos)
         open_tickers.add(key)
+        sector_counts[sector_key] = sector_counts.get(sector_key, 0) + 1
 
     if skipped:
         for s in skipped:
@@ -396,6 +520,14 @@ def _check_exits(pos: dict, bar: pd.Series) -> tuple[str | None, float, str]:
         trail_method = _identify_exit_trail(pos, pos["active_stop"])
         return "stop", pos["active_stop"], trail_method
 
+    # Health-based auto-exit: FAILING positions or rapidly-deteriorating WEAK
+    health_state = pos.get("health_state")
+    health_delta = pos.get("health_delta", 0.0)
+    if health_state == "FAILING":
+        return "health_failing", close, ""
+    if health_state == "WEAK" and health_delta < -2.0:
+        return "health_weak_deteriorating", close, ""
+
     # Time stop: close if held too long and not trailing profitably
     risk = pos["risk_per_share"]
     if is_long:
@@ -435,6 +567,20 @@ def update_positions() -> dict:
     if not positions:
         return {"closed": [], "still_open": [], "partial_fills": []}
 
+    # One-time migration for positions missing newer fields
+    for pos in positions:
+        if "health" not in pos:
+            print(f"  [migration] {pos['ticker']}: adding health fields (first V2 run)")
+            pos.setdefault("health", None)
+            pos.setdefault("health_state", None)
+            pos.setdefault("health_at_entry", None)
+            pos.setdefault("health_prev", None)
+            pos.setdefault("health_delta", 0.0)
+            pos.setdefault("last_rotation_date", None)
+        if "conviction" not in pos:
+            pos.setdefault("re_entry_score", None)
+            pos.setdefault("conviction", None)
+
     still_open: list[dict] = []
     closed_rows: list[dict] = []
     partial_fills: list[str] = []
@@ -467,6 +613,35 @@ def update_positions() -> dict:
         trail_update = compute_trailing_stops(pos, df, options_ctx=opts_ctx)
         pos.update(trail_update)
 
+        # Fetch live enrichment data for position health scoring
+        enrichment: dict = {}
+        try:
+            npt = fetch_net_prem_ticks(ticker)
+            if npt:
+                enrichment["net_prem_ticks"] = npt
+        except Exception:
+            pass
+        try:
+            dp = fetch_dark_pool(ticker)
+            if dp:
+                enrichment["dark_pool"] = dp
+        except Exception:
+            pass
+
+        health_result = compute_position_health(pos, enrichment=enrichment or None)
+        pos["health"] = health_result["health"]
+        pos["health_state"] = health_result["health_state"]
+        pos["health_at_entry"] = health_result["health_at_entry"]
+        pos["health_prev"] = health_result["health_prev"]
+        pos["health_delta"] = health_result["health_delta"]
+
+        if pos["direction"] == "LONG":
+            re_entry = score_long_setup(df, options_ctx=opts_ctx)
+        else:
+            re_entry = score_short_setup(df, options_ctx=opts_ctx)
+        pos["re_entry_score"] = re_entry["score"]
+        pos["conviction"] = round(0.5 * re_entry["score"] + 0.5 * pos["health"], 2)
+
         # Don't check exits on entry day — give the trade at least one full bar
         if pos["entry_date"] == str(date.today()):
             still_open.append(pos)
@@ -481,9 +656,11 @@ def update_positions() -> dict:
             else:
                 partial_pnl = (entry - partial_price) / entry
 
+            p_pct = _partial_pct_for_score(pos["final_score"])
             pos["partial_filled"] = True
-            pos["partial_pnl_pct"] = round(partial_pnl * PARTIAL_EXIT_PCT, 4)
-            partial_fills.append(f"{ticker} T1 hit @ {partial_price:.2f} ({partial_pnl:.1%})")
+            pos["partial_exit_pct"] = p_pct
+            pos["partial_pnl_pct"] = round(partial_pnl * p_pct, 4)
+            partial_fills.append(f"{ticker} T1 hit @ {partial_price:.2f} ({partial_pnl:.1%}, exit {p_pct:.0%})")
 
         # Check for full exit
         exit_reason, exit_price, trail_method = _check_exits(pos, bar)

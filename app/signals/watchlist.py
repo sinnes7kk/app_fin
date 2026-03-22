@@ -19,7 +19,7 @@ from app.config import (
 )
 from app.features.options_context import fetch_options_context
 from app.features.price_features import clean_ohlcv, compute_features, fetch_ohlcv
-from app.signals.pipeline import _extract_pattern, combine_scores
+from app.signals.pipeline import _extract_pattern, combine_scores, compute_options_context_score
 from app.signals.scoring import score_long_setup, score_short_setup
 from app.signals.trade_plan import build_long_trade_plan, build_short_trade_plan
 
@@ -102,6 +102,7 @@ def add_candidates(
 def reevaluate_watchlist(
     entries: list[dict],
     fresh_tickers: set[tuple[str, str]] | None = None,
+    signal_bar_offset: int = 0,
 ) -> tuple[list[dict], list[dict], list[dict]]:
     """Re-run price validation on watchlist entries using frozen flow scores.
 
@@ -112,6 +113,8 @@ def reevaluate_watchlist(
     fresh_tickers : set of (ticker, direction) tuples, optional
         Candidates that appeared in today's fresh pipeline run.  These are
         skipped here because the fresh run already evaluated them.
+    signal_bar_offset : int
+        Passed through to scoring functions (1 = intraday mode).
 
     Returns
     -------
@@ -153,12 +156,12 @@ def reevaluate_watchlist(
                 opts_ctx = None
 
             if direction == "LONG":
-                price_signal = score_long_setup(df, options_ctx=opts_ctx)
+                price_signal = score_long_setup(df, options_ctx=opts_ctx, signal_bar_offset=signal_bar_offset)
                 price_signal["ticker"] = ticker
                 all_reasons = LONG_ALL_REASONS
                 build_plan = build_long_trade_plan
             else:
-                price_signal = score_short_setup(df, options_ctx=opts_ctx)
+                price_signal = score_short_setup(df, options_ctx=opts_ctx, signal_bar_offset=signal_bar_offset)
                 price_signal["ticker"] = ticker
                 all_reasons = SHORT_ALL_REASONS
                 build_plan = build_short_trade_plan
@@ -186,14 +189,15 @@ def reevaluate_watchlist(
                             watch_rejected.append(rej)
                             continue
 
-                trade_plan = build_plan(df, price_signal, options_ctx=opts_ctx)
+                trade_plan = build_plan(df, price_signal, options_ctx=opts_ctx, signal_bar_offset=signal_bar_offset)
+                _opts_score = compute_options_context_score(direction, opts_ctx)
                 promoted.append({
                     "ticker": ticker,
                     "direction": direction,
                     "flow_score_raw": flow_raw,
                     "flow_score_scaled": flow_scaled,
                     "price_score": float(price_signal["score"]),
-                    "final_score": combine_scores(flow_scaled, float(price_signal["score"])),
+                    "final_score": combine_scores(flow_scaled, float(price_signal["score"]), _opts_score),
                     "entry_price": trade_plan["entry_price"],
                     "stop_price": trade_plan["stop_price"],
                     "target_1": trade_plan["target_1"],
@@ -210,6 +214,12 @@ def reevaluate_watchlist(
                     "nearest_put_wall": opts_ctx.get("nearest_put_wall") if opts_ctx else None,
                     "distance_to_call_wall_pct": opts_ctx.get("distance_to_call_wall_pct") if opts_ctx else None,
                     "distance_to_put_wall_pct": opts_ctx.get("distance_to_put_wall_pct") if opts_ctx else None,
+                    "ticker_call_oi": opts_ctx.get("ticker_call_oi") if opts_ctx else None,
+                    "ticker_put_oi": opts_ctx.get("ticker_put_oi") if opts_ctx else None,
+                    "ticker_put_call_ratio": opts_ctx.get("ticker_put_call_ratio") if opts_ctx else None,
+                    "near_term_oi": opts_ctx.get("near_term_oi") if opts_ctx else None,
+                    "swing_dte_oi": opts_ctx.get("swing_dte_oi") if opts_ctx else None,
+                    "long_dated_oi": opts_ctx.get("long_dated_oi") if opts_ctx else None,
                     "source": "watchlist",
                     "first_seen": entry["first_seen"],
                     "trade_plan": trade_plan,

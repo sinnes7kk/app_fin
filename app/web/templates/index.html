@@ -25,8 +25,22 @@
   </nav>
 
   <main>
+    {% macro sort_select(param_name, current) %}
+    <select class="sort-select" data-sort-param="{{ param_name }}" aria-label="Sort by">
+      <option value="" {% if not current %}selected{% endif %}>Sort: default</option>
+      <option value="final_score" {% if current == 'final_score' %}selected{% endif %}>Final score</option>
+      <option value="flow_score_scaled" {% if current == 'flow_score_scaled' %}selected{% endif %}>Flow score</option>
+      <option value="price_score" {% if current == 'price_score' %}selected{% endif %}>Price score</option>
+      <option value="options_context_score" {% if current == 'options_context_score' %}selected{% endif %}>Options score</option>
+    </select>
+    {% endmacro %}
+
     <section id="panel-signals" class="panel active" role="tabpanel">
-      <h2>Final signals</h2>
+      <div class="panel-header">
+        <h2>Final signals</h2>
+        {{ sort_select("sort_sig", sort_sig) }}
+      </div>
+      {{ signals_insights | safe }}
       {% if signals_src %}<p class="src">Source: {{ signals_src }}</p>{% endif %}
       {{ signals_html | safe }}
       <div id="detail-signals" class="detail-panel" style="display:none"></div>
@@ -39,7 +53,9 @@
           <button type="button" class="active" data-cand-side="bullish" aria-pressed="true">Bullish</button>
           <button type="button" data-cand-side="bearish" aria-pressed="false">Bearish</button>
         </div>
+        {{ sort_select("sort_bull", sort_bull) }}
       </div>
+      {{ candidates_insights | safe }}
       <div id="candidates-bullish" class="candidates-view">
         {% if bull_src %}<p class="src">{{ bull_src }}</p>{% endif %}
         {{ bull_html | safe }}
@@ -53,6 +69,7 @@
 
     <section id="panel-positions" class="panel" role="tabpanel">
       <h2>Open positions</h2>
+      {{ positions_insights | safe }}
       <p class="src">data/positions.json</p>
       {{ positions_html | safe }}
       <div id="detail-positions" class="detail-panel" style="display:none"></div>
@@ -65,7 +82,9 @@
           <button type="button" class="active" data-rej-view="rejected" aria-pressed="true">Rejected</button>
           <button type="button" data-rej-view="watchlist" aria-pressed="false">Watchlist</button>
         </div>
+        {{ sort_select("sort_rej", sort_rej) }}
       </div>
+      {{ rejected_insights | safe }}
       <div id="rejected-view" class="rejected-view">
         {% if rejected_src %}<p class="src">{{ rejected_src }} (truncated)</p>{% endif %}
         {{ rejected_html | safe }}
@@ -252,7 +271,11 @@
     function indexByTicker(arr) {
       var m = {};
       for (var i = 0; i < arr.length; i++) {
-        if (arr[i].ticker) m[arr[i].ticker] = arr[i];
+        var r = arr[i];
+        if (!r.ticker) continue;
+        var dir = String(r.direction || "").toUpperCase();
+        if (dir) m[r.ticker + "|" + dir] = r;
+        if (!m[r.ticker]) m[r.ticker] = r;
       }
       return m;
     }
@@ -335,31 +358,293 @@
       return html + "</dl></div>";
     }
 
-    function buildConvictionDl(m) {
-      var blocks = [];
-      var scorePairs = [
-        ["Flow score (raw)", fmtConvictionHtml(m.flow_score_raw)],
-        ["Flow score (scaled)", fmtConvictionHtml(m.flow_score_scaled)],
-        ["Price score", fmtConvictionHtml(m.price_score)],
-        ["Final score", fmtConvictionHtml(m.final_score)],
-        ["Bullish score", fmtConvictionHtml(m.bullish_score)],
-        ["Bearish score", fmtConvictionHtml(m.bearish_score)],
-        ["Bullish flow intensity", fmtConvictionHtml(m.bullish_flow_intensity)],
-        ["Bearish flow intensity", fmtConvictionHtml(m.bearish_flow_intensity)],
-        ["Imbalance ratio", escHtml(fmt(m.flow_imbalance_ratio))],
-        ["Total premium", escHtml(fmt(m.total_premium))],
-        ["Flow prints (#)", escHtml(fmt(m.total_count))],
-        ["Avg DTE", escHtml(fmt(m.avg_dte))],
-        ["DTE score", fmtConvictionHtml(m.dte_score)],
-        ["ADDV ($)", escHtml(fmtAddv(m.addv))]
-      ];
-      var raw = detailSectionRaw("Conviction & flow", scorePairs);
-      if (raw) blocks.push(raw);
-      return blocks.length ? blocks.join("") : '<p class="empty">No conviction metrics on this row.</p>';
+    /* ── Verdict & chip helpers ── */
+    function _num(v) { var n = Number(v); return isFinite(n) ? n : 0; }
+    function _present(v) { return v !== "" && v !== null && v !== undefined && String(v).trim() !== ""; }
+
+    function fmtPremium(v) {
+      var n = _num(v); if (!n) return "—";
+      var ax = Math.abs(n);
+      if (ax >= 1e9) return "$" + (n / 1e9).toFixed(1) + "B";
+      if (ax >= 1e6) return "$" + (n / 1e6).toFixed(1) + "M";
+      if (ax >= 1e3) return "$" + (n / 1e3).toFixed(0) + "K";
+      return "$" + n.toFixed(0);
     }
 
-    function buildGammaDl(m) {
-      var block = detailSection("Gamma levels", [
+    function makeChips(items) {
+      return items.map(function (it) {
+        var cls = "detail-chip" + (it.pass ? " detail-chip-pass" : " detail-chip-fail");
+        return '<span class="' + cls + '">' + escHtml(it.label) + "</span>";
+      }).join("");
+    }
+
+    function chipGroupHtml(title, items) {
+      if (!items.length) return "";
+      return '<div class="detail-chip-group"><h4>' + escHtml(title) + '</h4><div class="detail-chips">' + makeChips(items) + "</div></div>";
+    }
+
+    function verdictHtml(text, level) {
+      var cls = level === "positive" ? "positive" : level === "negative" ? "negative" : "";
+      return '<p class="detail-verdict' + (cls ? " " + cls : "") + '">' + escHtml(text) + "</p>";
+    }
+
+    function _dirPrefix(m) { return String(m.direction || "").toUpperCase() === "SHORT" ? "bearish" : "bullish"; }
+
+    function _finalScore(m) {
+      if (_present(m.final_score)) return _num(m.final_score);
+      var fs = _num(m.flow_score_scaled), ps = _num(m.price_score);
+      var opts = _num(m.options_context_score);
+      if (!fs && !ps) return null;
+      if (opts && !isNaN(opts)) return Math.round((0.50 * fs + 0.30 * ps + 0.20 * opts) * 10000) / 10000;
+      return Math.round((0.60 * fs + 0.40 * ps) * 10000) / 10000;
+    }
+
+    function buildFlowFactors(m) {
+      var dir = _dirPrefix(m);
+      var isLong = dir === "bullish";
+      var factors = [];
+
+      var intensity = _num(m[dir + "_flow_intensity"]);
+      factors.push({ label: "flow intensity", pass: intensity > 0.0005, val: intensity });
+
+      var ppt = _num(m[dir + "_premium_per_trade"]);
+      factors.push({ label: "premium per trade", pass: ppt >= 500000, val: ppt });
+
+      var volOi = _num(m[dir + "_vol_oi"]);
+      factors.push({ label: "vol > OI", pass: volOi > 1.0, val: volOi });
+
+      var sweeps = _num(m[dir + "_sweep_count"]);
+      factors.push({ label: "sweep activity", pass: sweeps > 0, val: sweeps });
+
+      var repeats = _num(m.repeat_flow_count);
+      factors.push({ label: "repeat flow", pass: repeats >= 3, val: repeats });
+
+      var dte = _num(m.dte_score);
+      factors.push({ label: "DTE quality", pass: dte >= 0.7, val: dte });
+
+      var vel = _num(m.flow_velocity);
+      factors.push({ label: "flow velocity", pass: vel > 1.0, val: vel });
+
+      var imb = _num(m.flow_imbalance_ratio);
+      factors.push({ label: "imbalance ratio", pass: isLong ? imb > 2.0 : imb < 0.5, val: imb });
+
+      return factors;
+    }
+
+    function buildConvictionVerdict(m) {
+      var dir = _dirPrefix(m);
+      var factors = buildFlowFactors(m);
+      var passing = factors.filter(function (f) { return f.pass; });
+      var failing = factors.filter(function (f) { return !f.pass; });
+      var strength = passing.length >= 6 ? "Strong" : passing.length >= 4 ? "Moderate" : "Weak";
+      var traits = passing.slice(0, 3).map(function (f) { return f.label; }).join(", ");
+      var text = strength + " " + dir + " flow";
+      if (traits) text += " — " + traits;
+      var level = passing.length >= 6 ? "positive" : passing.length < 4 ? "negative" : "";
+      return verdictHtml(text, level);
+    }
+
+    function buildConvictionDl(m) {
+      var parts = [];
+      parts.push('<p class="tab-intro">Score breakdown. Final score = weighted blend of flow (50%), price (30%), and options (20%). Minimum final score of 7.0 required; counter-regime trades face a +1.0 threshold penalty.</p>');
+      var dir = _dirPrefix(m);
+
+      parts.push(buildConvictionVerdict(m));
+
+      var fs = _finalScore(m);
+      var flowScaled = _num(m.flow_score_scaled);
+      var ps = _num(m.price_score);
+      var opts = _num(m.options_context_score);
+
+      var hasOpts = opts && !isNaN(opts);
+      var scorePairs = [
+        ["Final score", fmtConvictionHtml(fs)],
+        ["Flow conviction (" + (hasOpts ? "50%" : "60%") + ")", fmtConvictionHtml(flowScaled)],
+        ["Price conviction (" + (hasOpts ? "30%" : "40%") + ")", fmtConvictionHtml(ps)],
+        ["Options context (" + (hasOpts ? "20%" : "n/a") + ")", fmtConvictionHtml(opts)]
+      ];
+      var raw = detailSectionRaw("Score summary", scorePairs);
+      if (raw) parts.push(raw);
+
+      if (flowScaled) {
+        parts.push('<p class="batch-note">Flow score ' + flowScaled.toFixed(2) +
+          '/10 reflects absolute flow quality based on fixed thresholds. ' +
+          'See the Flow & Options tab for the full component breakdown.</p>');
+      }
+
+      if (fs) {
+        var formula;
+        if (hasOpts) {
+          formula = "Final = 0.50 \u00d7 " + (flowScaled ? flowScaled.toFixed(2) : "?") +
+            " + 0.30 \u00d7 " + (ps ? ps.toFixed(2) : "?") +
+            " + 0.20 \u00d7 " + opts.toFixed(2) + " = " + fs.toFixed(2);
+        } else {
+          formula = "Final = 0.60 \u00d7 " + (flowScaled ? flowScaled.toFixed(2) : "?") +
+            " + 0.40 \u00d7 " + (ps ? ps.toFixed(2) : "?") + " = " + fs.toFixed(2);
+        }
+        parts.push('<p class="batch-note">' + escHtml(formula) + '</p>');
+      }
+
+      return parts.join("") || '<p class="empty">No conviction metrics on this row.</p>';
+    }
+
+    /* ── Options context helpers ── */
+    function _computeOptionsBreakdown(m) {
+      var dir = String(m.direction || "").toUpperCase();
+      var isLong = dir !== "SHORT";
+      var regime = String(m.gamma_regime || "").toUpperCase();
+      var distCall = _present(m.distance_to_call_wall_pct) ? _num(m.distance_to_call_wall_pct) : null;
+      var distPut = _present(m.distance_to_put_wall_pct) ? _num(m.distance_to_put_wall_pct) : null;
+      var nearOi = _num(m.near_term_oi);
+      var swingOi = _num(m.swing_dte_oi);
+      var pcr = _present(m.ticker_put_call_ratio) ? _num(m.ticker_put_call_ratio) : null;
+
+      var gamma = 0, wall = 0, oi = 0;
+
+      if (regime === "NEGATIVE") gamma = 3;
+      else if (regime === "NEUTRAL") gamma = 1.5;
+
+      if (isLong) {
+        if (distCall !== null) { if (distCall > 5) wall = 3; else if (distCall > 2) wall = 1.5; }
+      } else {
+        if (distPut !== null) { if (distPut > 5) wall = 3; else if (distPut > 2) wall = 1.5; }
+      }
+
+      if (swingOi > nearOi && nearOi > 0) oi += 1;
+      if (pcr !== null) {
+        if (isLong && pcr < 0.7) oi += 1;
+        else if (!isLong && pcr > 1.3) oi += 1;
+        else if (isLong && pcr < 1.0) oi += 0.5;
+        else if (!isLong && pcr > 1.0) oi += 0.5;
+      }
+
+      var total = _num(m.options_context_score);
+      if (!total || isNaN(total)) total = 0;
+      var premBias = Math.max(0, Math.round((total - gamma - wall - oi) * 100) / 100);
+      return { gamma: gamma, wall: wall, oi: oi, premBias: premBias, total: total };
+    }
+
+    function buildOptionsFactors(m) {
+      var dir = String(m.direction || "").toUpperCase();
+      var isLong = dir !== "SHORT";
+      var regime = String(m.gamma_regime || "").toUpperCase();
+      var distCall = _present(m.distance_to_call_wall_pct) ? _num(m.distance_to_call_wall_pct) : null;
+      var distPut = _present(m.distance_to_put_wall_pct) ? _num(m.distance_to_put_wall_pct) : null;
+      var nearOi = _num(m.near_term_oi);
+      var swingOi = _num(m.swing_dte_oi);
+      var factors = [];
+
+      if (regime === "NEGATIVE") factors.push({ label: "gamma tailwind", pass: true });
+      else if (regime === "POSITIVE") factors.push({ label: "gamma headwind", pass: false });
+
+      if (isLong) {
+        if (distCall !== null && distCall > 5) factors.push({ label: "call wall clear", pass: true });
+        else if (distCall !== null && distCall < 2) factors.push({ label: "call wall near", pass: false });
+      } else {
+        if (distPut !== null && distPut > 5) factors.push({ label: "put wall clear", pass: true });
+        else if (distPut !== null && distPut < 2) factors.push({ label: "put wall near", pass: false });
+      }
+
+      if (swingOi > nearOi && nearOi > 0) factors.push({ label: "swing DTE dominant", pass: true });
+      else if (nearOi > swingOi && swingOi > 0) factors.push({ label: "near-term OI dominant", pass: false });
+
+      return factors;
+    }
+
+    function buildOptionsVerdict(m) {
+      var dir = String(m.direction || "").toUpperCase() === "SHORT" ? "short" : "long";
+      var factors = buildOptionsFactors(m);
+      if (!_present(m.gamma_regime) && !_present(m.ticker_call_oi)) {
+        return verdictHtml("No options data — rejected before options enrichment", "");
+      }
+      var passing = factors.filter(function (f) { return f.pass; });
+      var failing = factors.filter(function (f) { return !f.pass; });
+      var traits = passing.map(function (f) { return f.label; }).concat(failing.map(function (f) { return f.label; }));
+      var good = passing.length > failing.length;
+      var text = (good ? "Options positioning supports " : "Options positioning mixed for ") + dir + " thesis";
+      if (traits.length) text += " — " + traits.slice(0, 3).join(", ");
+      return verdictHtml(text, good ? "positive" : failing.length > passing.length ? "negative" : "");
+    }
+
+    function _flowRating(val, thresholds) {
+      if (val >= thresholds[0]) return '<span class="rating rating-strong">strong</span>';
+      if (val >= thresholds[1]) return '<span class="rating rating-moderate">moderate</span>';
+      return '<span class="rating rating-weak">weak</span>';
+    }
+
+    function _buildFlowComponentTable(m) {
+      var dir = _dirPrefix(m);
+      var components = [
+        { name: "Flow intensity",    weight: "25%", val: _num(m[dir + "_flow_intensity"]) * 10000, fmtFn: function(v){ return v.toFixed(1) + " bps"; }, thresh: [20, 5] },
+        { name: "Premium / trade",   weight: "15%", val: _num(m[dir + "_premium_per_trade"]), fmtFn: fmtPremium, thresh: [100000, 10000] },
+        { name: "Vol / OI ratio",    weight: "15%", val: _num(m[dir + "_vol_oi"]),            fmtFn: fmt,        thresh: [2.0, 1.0] },
+        { name: "Flow velocity",     weight: "13%", val: _num(m.flow_velocity),               fmtFn: fmt,        thresh: [2.0, 1.0] },
+        { name: "Repeat flow count", weight: "12%", val: _num(m.repeat_flow_count),           fmtFn: fmt,        thresh: [5, 3] },
+        { name: "Sweep count",       weight: "10%", val: _num(m[dir + "_sweep_count"]),        fmtFn: fmt,        thresh: [5, 1] },
+        { name: "DTE quality",       weight: "5%",  val: _num(m.dte_score),                   fmtFn: fmt,        thresh: [0.8, 0.5] },
+        { name: "Breadth",           weight: "5%",  val: _num(m[dir + "_breadth"]),             fmtFn: fmt,        thresh: [0.5, 0.2] }
+      ];
+      var html = '<div class="detail-section"><h4>Flow score components</h4>' +
+        '<table class="flow-components"><thead><tr><th>Component</th><th>Weight</th><th>Value</th><th>Rating</th></tr></thead><tbody>';
+      for (var i = 0; i < components.length; i++) {
+        var c = components[i];
+        html += "<tr><td>" + escHtml(c.name) + "</td><td>" + c.weight +
+          "</td><td>" + c.fmtFn(c.val) + "</td><td>" + _flowRating(c.val, c.thresh) + "</td></tr>";
+      }
+      html += "</tbody></table></div>";
+      return html;
+    }
+
+    function buildOptionsDl(m) {
+      var parts = [];
+      parts.push('<p class="tab-intro">Institutional flow conviction and options market structure. Flow score is built from premium size, trade count, repeat flow, concentration, velocity, and flow intensity &mdash; each scored against absolute thresholds. Options context evaluates gamma alignment, wall proximity, OI term structure, and premium bias.</p>');
+      var dir = _dirPrefix(m);
+
+      /* ── Flow conviction ── */
+      parts.push(buildConvictionVerdict(m));
+      parts.push(_buildFlowComponentTable(m));
+
+      var flowScore = _num(m.flow_score_scaled);
+      if (flowScore) {
+        parts.push('<p class="batch-note">Flow score ' + flowScore.toFixed(2) +
+          "/10 reflects absolute flow quality on a 0\u201310 scale based on fixed thresholds. " +
+          "Higher means stronger institutional conviction.</p>");
+      }
+
+      var flowFactors = buildFlowFactors(m);
+      var flowPass = flowFactors.filter(function (f) { return f.pass; });
+      var flowFail = flowFactors.filter(function (f) { return !f.pass; });
+      if (flowPass.length) parts.push(chipGroupHtml("Flow strengths", flowPass));
+      if (flowFail.length) parts.push(chipGroupHtml("Flow weaknesses", flowFail));
+
+      /* ── Flow context ── */
+      var contextPairs = [
+        ["Total premium", fmtPremium(m.total_premium)],
+        ["Flow prints", fmt(m.total_count)],
+        ["Imbalance ratio", fmt(m.flow_imbalance_ratio)],
+        ["Avg DTE", fmt(m.avg_dte)],
+        ["ADDV", fmtAddv(m.addv)]
+      ];
+      var ctxRaw = detailSectionRaw("Flow context", contextPairs);
+      if (ctxRaw) parts.push(ctxRaw);
+
+      parts.push('<hr class="section-divider">');
+
+      /* ── Options context ── */
+      parts.push(buildOptionsVerdict(m));
+
+      var bd = _computeOptionsBreakdown(m);
+      var breakdownPairs = [
+        ["Gamma alignment (0-3)", fmtConvictionHtml(bd.gamma)],
+        ["Wall proximity (0-3)", fmtConvictionHtml(bd.wall)],
+        ["OI structure (0-2)", fmtConvictionHtml(bd.oi)],
+        ["Premium bias (0-2)", fmtConvictionHtml(bd.premBias)],
+        ["Total options score", fmtConvictionHtml(bd.total)]
+      ];
+      var bk = detailSectionRaw("Options score breakdown", breakdownPairs);
+      if (bk) parts.push(bk);
+
+      var gammaPairs = [
         ["Gamma regime", m.gamma_regime],
         ["Net GEX", m.net_gex],
         ["Gamma flip estimate", m.gamma_flip_level_estimate],
@@ -367,20 +652,311 @@
         ["Nearest put wall", m.nearest_put_wall],
         ["Dist to call wall %", m.distance_to_call_wall_pct],
         ["Dist to put wall %", m.distance_to_put_wall_pct]
-      ]);
-      return block || '<p class="empty">No gamma fields (merged from Final signals when available).</p>';
-    }
+      ];
+      var gammaBlock = detailSection("Gamma & wall levels", gammaPairs);
+      if (gammaBlock) parts.push(gammaBlock);
 
-    function buildOptionsDl(m) {
-      var block = detailSection("Options data", [
+      var oiPairs = [
         ["Call OI", m.ticker_call_oi],
         ["Put OI", m.ticker_put_oi],
         ["P/C ratio", m.ticker_put_call_ratio],
         ["Near-term OI", m.near_term_oi],
         ["Swing DTE OI", m.swing_dte_oi],
         ["Long-dated OI", m.long_dated_oi]
-      ]);
-      return block || '<p class="empty">No options OI fields (merged from Final signals when available).</p>';
+      ];
+      var oiBlock = detailSection("OI structure", oiPairs);
+      if (oiBlock) parts.push(oiBlock);
+
+      var factors = buildOptionsFactors(m);
+      var passing = factors.filter(function (f) { return f.pass; });
+      var failing = factors.filter(function (f) { return !f.pass; });
+      if (passing.length) parts.push(chipGroupHtml("Options strengths", passing));
+      if (failing.length) parts.push(chipGroupHtml("Options weaknesses", failing));
+
+      var joined = parts.join("");
+      return joined || '<p class="empty">No flow or options data available.</p>';
+    }
+
+    /* ── Verdict tab ── */
+    function _csvSet(v) {
+      if (!_present(v)) return {};
+      var s = {};
+      String(v).split(",").forEach(function (x) { var t = x.trim(); if (t && t !== "none") s[t] = true; });
+      return s;
+    }
+
+    function _gateRow(pass, label, detail) {
+      var icon = pass ? "check" : "cross";
+      return (
+        '<div class="gate-row gate-' + icon + '">' +
+        '<span class="gate-icon">' + (pass ? "\u2713" : "\u2717") + "</span>" +
+        '<span class="gate-label">' + escHtml(label) + "</span>" +
+        (detail ? '<span class="gate-detail">' + escHtml(detail) + "</span>" : "") +
+        "</div>"
+      );
+    }
+
+    function _gateGroupHtml(title, rows) {
+      if (!rows.length) return "";
+      return '<div class="gate-group"><h4>' + escHtml(title) + "</h4>" + rows.join("") + "</div>";
+    }
+
+    function _buildPriceFixMessage(passed, failed, m) {
+      if (failed.trend_aligned)
+        return "Trend not aligned \u2014 hard gate, no signal possible without trend.";
+      if (failed.not_extended)
+        return "Price too extended from EMA20 \u2014 hard gate, wait for pullback.";
+      var ps = _num(m.price_score);
+      var failedSoft = [];
+      if (failed.room_to_target) failedSoft.push("room to target");
+      if (failed.continuation_pattern) failedSoft.push("continuation pattern");
+      if (failed.pullback_volume) failedSoft.push("pullback volume");
+      if (failed.breakout_volume) failedSoft.push("breakout volume");
+      if (failed.confirmation_volume) failedSoft.push("confirmation volume");
+      if (failed.momentum_aligned) failedSoft.push("momentum");
+
+      if (failed.room_to_target) {
+        var msg = "Room to target not met \u2014 without it, best achievable state is WATCHLIST";
+        if (ps) msg += " (price score " + ps + "/10)";
+        msg += ".";
+        var others = failedSoft.filter(function (s) { return s !== "room to target"; });
+        if (others.length) msg += " Also missing: " + others.join(", ") + ".";
+        return msg;
+      }
+      if (failedSoft.length) {
+        return "Missing: " + failedSoft.join(", ") + ". Needs score \u2265 7 and \u2265 3 of 5 soft checks for SIGNAL.";
+      }
+      return "Score or soft check count below SIGNAL threshold \u2014 check gates above.";
+    }
+
+    var FIX_MAP = {
+      weak_bullish_flow: "Bullish premium needs to exceed bearish by 1.5x",
+      weak_bearish_flow: "Bearish premium needs to exceed bullish by 1.5x",
+      poor_rr: "R:R ratio must be at least 2.0:1 \u2014 tighten stop or widen target",
+      wall_proximity: "Opposing options wall is too close \u2014 wait for wall to clear",
+      weak_relative_strength: "Ticker is underperforming SPY \u2014 needs RS > -2% for longs",
+      watchlist_reeval_failed: "Previously watchlisted \u2014 still fails price validation on re-check"
+    };
+
+    function buildVerdictDl(m) {
+      var parts = [];
+      parts.push('<p class="tab-intro">Full decision summary. A ticker needs flow conviction (directional premium imbalance), price validation (trend + pattern + volume + momentum, score &ge; 7), options context alignment, and R:R &ge; 2.0 to become a signal.</p>');
+      var rr = _present(m.reject_reason) ? String(m.reject_reason).trim() : "";
+      var isRejected = rr !== "" && rr !== "nan";
+      var isSignal = !isRejected && _present(m.final_score);
+      var fs = _finalScore(m);
+
+      /* 1. Outcome banner */
+      var bannerText, bannerCls;
+      if (isSignal) {
+        var pat = _present(m.pattern) ? String(m.pattern) : "";
+        bannerText = "PASSED" + (pat ? " \u2014 " + pat : "") + (fs ? ", final score " + fs.toFixed(2) : "");
+        bannerCls = "verdict-banner verdict-pass";
+      } else if (isRejected) {
+        var rrKey = rr.split("(")[0].trim().split(" ")[0];
+        var isWatchlist = rr.indexOf("watchlist") >= 0;
+        if (isWatchlist) {
+          bannerText = "WATCHLIST \u2014 " + rr;
+          bannerCls = "verdict-banner verdict-watch";
+        } else {
+          bannerText = "REJECTED \u2014 " + rr;
+          bannerCls = "verdict-banner verdict-fail";
+        }
+      } else {
+        bannerText = "CANDIDATE \u2014 awaiting validation";
+        bannerCls = "verdict-banner verdict-watch";
+      }
+      parts.push('<p class="' + bannerCls + '">' + escHtml(bannerText) + "</p>");
+
+      /* 2. Score card */
+      var vOpts = _num(m.options_context_score);
+      var vHasOpts = vOpts && !isNaN(vOpts);
+      var skippedBeforePrice = rr.indexOf("weak_") === 0;
+      var skipLabel = '<span style="opacity:0.5">Skipped</span>';
+      var scoreRows = [
+        ["Flow conviction", fmtConvictionHtml(m.flow_score_scaled), vHasOpts ? "50%" : "60%"],
+        ["Price conviction",
+          skippedBeforePrice ? skipLabel : fmtConvictionHtml(m.price_score),
+          skippedBeforePrice ? "" : (vHasOpts ? "30%" : "40%")],
+        ["Options context",
+          skippedBeforePrice || !vHasOpts ? skipLabel : fmtConvictionHtml(m.options_context_score),
+          skippedBeforePrice || !vHasOpts ? "" : "20%"],
+        ["Final score", fmtConvictionHtml(fs), ""]
+      ];
+      var scoreHtml = '<div class="detail-section"><h4>Score card</h4>' +
+        '<table class="score-card"><thead><tr><th>Layer</th><th>Score</th><th>Weight</th></tr></thead><tbody>';
+      for (var i = 0; i < scoreRows.length; i++) {
+        var isFinal = i === scoreRows.length - 1;
+        scoreHtml += '<tr' + (isFinal ? ' class="score-card-final"' : "") + ">" +
+          "<td>" + escHtml(scoreRows[i][0]) + "</td>" +
+          "<td>" + scoreRows[i][1] + "</td>" +
+          "<td>" + escHtml(scoreRows[i][2]) + "</td></tr>";
+      }
+      scoreHtml += "</tbody></table></div>";
+      parts.push(scoreHtml);
+
+      /* 3. Decision gate checklist */
+      var passed = _csvSet(m.checks_passed);
+      var failed = _csvSet(m.checks_failed);
+      var dir = _dirPrefix(m);
+      var isLong = dir === "bullish";
+
+      /* Flow gates */
+      var flowGates = [];
+      var imb = _num(m.flow_imbalance_ratio);
+      var flowDirOk = isRejected && rr.indexOf("weak_") === 0 ? false : true;
+      if (!flowDirOk) {
+        flowGates.push(_gateRow(false, "Flow direction", isLong
+          ? "bullish premium < 1.5x bearish"
+          : "bearish premium < 1.5x bullish"));
+      } else {
+        flowGates.push(_gateRow(true, "Flow direction", isLong
+          ? "bullish premium > 1.5x bearish"
+          : "bearish premium > 1.5x bullish"));
+      }
+      flowGates.push(_gateRow(
+        isLong ? imb > 2.0 : (imb > 0 && imb < 0.5),
+        "Flow imbalance",
+        "ratio: " + (imb ? imb.toFixed(1) : "\u2014")
+      ));
+      parts.push(_gateGroupHtml("Flow gates", flowGates));
+
+      /* Price gates — show continuous component scores */
+      var priceGates = [];
+      var allChecks = Object.keys(passed).concat(Object.keys(failed));
+      var hasAnyPriceData = allChecks.length > 0;
+
+      if (hasAnyPriceData) {
+        var pt = _num(m.price_trend), pe = _num(m.price_extension), pr = _num(m.price_room);
+        var pp = _num(m.price_pattern);
+        var pvq = _num(m.price_pattern_vol), ppc = _num(m.price_pattern_candle);
+        var pcv = _num(m.price_confirm_vol);
+        var pmom = _num(m.price_momentum);
+
+        priceGates.push(_gateRow(!!passed.trend_aligned, "Trend quality",
+          (pt ? pt.toFixed(2) + " / 2.5" : "") + (passed.strong_trend ? " (strong)" : "")));
+        priceGates.push(_gateRow(!!passed.not_extended, "Not extended",
+          pe ? pe.toFixed(2) + " / 1.0" : "within 2 ATR of EMA20"));
+
+        priceGates.push(_gateRow(!!passed.room_to_target, "Room to target",
+          pr ? pr.toFixed(2) + " / 1.0" : ""));
+
+        var contLabels = ["structural_breakout", "structural_breakdown", "bounce_and_fail",
+          "flag_breakout", "flag_breakdown", "support_ema_confluence", "resistance_ema_confluence",
+          "pullback_to_support", "pullback_to_resistance", "retest_and_confirm",
+          "ema_pullback", "ema_rally", "trend_continuation"];
+        var contMatch = null;
+        for (var ci = 0; ci < contLabels.length; ci++) {
+          if (passed[contLabels[ci]]) { contMatch = contLabels[ci]; break; }
+        }
+        priceGates.push(_gateRow(!!contMatch, "Continuation pattern",
+          (pp ? pp.toFixed(1) + " / 2.0" : "") + (contMatch ? " \u2014 " + contMatch : " \u2014 none matched")));
+
+        var isBreakoutPat = contMatch && (contMatch.indexOf("breakout") >= 0 || contMatch.indexOf("breakdown") >= 0 || contMatch === "trend_continuation");
+        var volLabel = isBreakoutPat ? "Breakout volume" : "Pullback volume";
+        var volPassed = !!passed.breakout_volume || !!passed.pullback_volume;
+        priceGates.push(_gateRow(volPassed, volLabel,
+          pvq ? pvq.toFixed(2) + " / 0.5" : (contMatch ? "" : "n/a \u2014 no pattern")));
+        priceGates.push(_gateRow(ppc > 0, "Pattern candle",
+          ppc ? ppc.toFixed(2) + " / 0.5" : (contMatch ? "" : "n/a \u2014 no pattern")));
+        priceGates.push(_gateRow(!!passed.confirmation_volume, "Confirmation volume",
+          pcv ? pcv.toFixed(2) + " / 1.0" : ""));
+        priceGates.push(_gateRow(!!passed.momentum_aligned, "Momentum",
+          pmom ? pmom.toFixed(2) + " / 1.5" : ""));
+      } else {
+        var skipReason = isLong
+          ? "Bullish flow premium did not exceed bearish by 1.5\u00d7."
+          : "Bearish flow premium did not exceed bullish by 1.5\u00d7.";
+        priceGates.push('<p class="tab-intro" style="margin:0.4em 0">Not evaluated. ' +
+          escHtml(skipReason) +
+          ' Price checks only run for candidates that pass the flow gate.</p>');
+      }
+      parts.push(_gateGroupHtml("Price gates", priceGates));
+
+      /* Options gates — derived from raw context fields */
+      var optGates = [];
+      var gr = String(m.gamma_regime || "").toUpperCase();
+      if (gr === "NEGATIVE") optGates.push(_gateRow(true, "Gamma alignment", "tailwind (negative gamma)"));
+      else if (gr === "POSITIVE") optGates.push(_gateRow(false, "Gamma alignment", "headwind (positive gamma)"));
+      else if (gr === "NEUTRAL") optGates.push(_gateRow(true, "Gamma alignment", "neutral"));
+
+      if (isLong && _present(m.nearest_call_wall)) {
+        var cw = parseFloat(m.nearest_call_wall);
+        var spot = _num(m.entry_price) || _num(m.close);
+        if (spot && cw) {
+          var cwPct = ((cw - spot) / spot * 100).toFixed(1);
+          optGates.push(_gateRow(cwPct > 2, "Call wall", cw.toFixed(1) + " (" + cwPct + "% away)"));
+        }
+      } else if (!isLong && _present(m.nearest_put_wall)) {
+        var pw = parseFloat(m.nearest_put_wall);
+        var spot2 = _num(m.entry_price) || _num(m.close);
+        if (spot2 && pw) {
+          var pwPct = ((spot2 - pw) / spot2 * 100).toFixed(1);
+          optGates.push(_gateRow(pwPct > 2, "Put wall", pw.toFixed(1) + " (" + pwPct + "% away)"));
+        }
+      }
+
+      var optScore = _num(m.options_context_score);
+      if (optScore !== null) {
+        optGates.push(_gateRow(optScore >= 5, "Options score", optScore.toFixed(1) + " / 10"));
+      }
+
+      if (optGates.length) {
+        parts.push(_gateGroupHtml("Options gates", optGates));
+      } else {
+        var optSkip = skippedBeforePrice
+          ? "Not evaluated. Options context is only fetched for candidates that pass the flow gate."
+          : "No options context data available for this ticker.";
+        parts.push(_gateGroupHtml("Options gates",
+          ['<p class="tab-intro" style="margin:0.4em 0">' + escHtml(optSkip) + '</p>']));
+      }
+
+      /* Pipeline gates */
+      var pipeGates = [];
+      var rrReject = rr.indexOf("weak_relative_strength") >= 0;
+      var wallReject = rr.indexOf("wall_proximity") >= 0;
+      var rrRatio = _num(m.rr_ratio);
+      var poorRR = rr.indexOf("poor_rr") >= 0;
+
+      if (rrReject) {
+        pipeGates.push(_gateRow(false, "Relative strength", rr));
+      } else if (hasAnyPriceData) {
+        pipeGates.push(_gateRow(true, "Relative strength", "within threshold"));
+      }
+
+      if (wallReject) {
+        pipeGates.push(_gateRow(false, "Wall proximity reject", rr));
+      } else if (hasAnyPriceData) {
+        pipeGates.push(_gateRow(true, "Wall proximity", "no blocking wall"));
+      }
+
+      if (poorRR) {
+        pipeGates.push(_gateRow(false, "R:R ratio", rrRatio ? rrRatio.toFixed(1) + ":1 — needs 2.0:1" : rr));
+      } else if (rrRatio) {
+        pipeGates.push(_gateRow(rrRatio >= 2.0, "R:R ratio", rrRatio.toFixed(1) + ":1"));
+      } else if (hasAnyPriceData) {
+        pipeGates.push(_gateRow(true, "R:R ratio", "passed"));
+      }
+
+      if (pipeGates.length) {
+        parts.push(_gateGroupHtml("Pipeline gates", pipeGates));
+      }
+
+      /* 4. "What would fix this?" */
+      if (isRejected) {
+        var rrBase = rr.split("(")[0].trim().replace(/ /g, "_");
+        var fix;
+        if (rrBase === "price_validation_failed") {
+          fix = _buildPriceFixMessage(passed, failed, m);
+        } else {
+          fix = FIX_MAP[rrBase] || FIX_MAP[rr.split(" ")[0]] || null;
+        }
+        if (fix) {
+          parts.push('<p class="verdict-fix"><strong>Blocked by:</strong> ' + escHtml(fix) + "</p>");
+        }
+      }
+
+      return parts.join("");
     }
 
     function detailChipBlock(title, csv, chipKind) {
@@ -404,6 +980,7 @@
 
     function buildPriceActionDl(m) {
       var parts = [];
+      parts.push('<p class="tab-intro">Daily chart quality checks. Score budget: trend (0-2.5), extension (0-1), room (0-1), continuation pattern (0-2), pattern volume (0-0.5), pattern candle (0-0.5), momentum (0-1.5), confirmation volume (0-1). Patterns ranked: structural breakout &gt; flag &gt; S/R+EMA confluence &gt; structural pullback &gt; retest &amp; confirm &gt; EMA pullback &gt; bounce &gt; trend continuation (clean grinder fallback when no specific pattern detected, 6+ of 10 bars with higher lows/lower highs). Both pattern volume and pattern candle are conditional on pattern type and score zero without a pattern. Momentum measures signal bar position in the 5-bar range.</p>');
       var ctx = detailSection("Price action", [
         ["Pattern", m.pattern],
         ["Time stop (days)", m.time_stop_days],
@@ -429,6 +1006,7 @@
     }
 
     function buildPlanDl(m) {
+      var intro = '<p class="tab-intro">Trade plan with entry zone, stop, targets, and risk/reward. Entry is based on current price; stop is anchored to the previous completed bar&rsquo;s low/high. Needs R:R &ge; 2.0 to pass.</p>';
       var block = detailSection("Plan & risk", [
         ["Entry", m.entry_price],
         ["Stop", m.stop_price],
@@ -438,12 +1016,13 @@
         ["Time stop (days)", m.time_stop_days],
         ["Source", m.source]
       ]);
-      return block || '<p class="empty">No trade plan (needs a final signal or promoted row).</p>';
+      return intro + (block || '<p class="empty">No trade plan (needs a final signal or promoted row).</p>');
     }
 
     function buildPositionDl(ticker) {
+      var intro = '<p class="tab-intro">Open position details including entry, stops (initial and trailing), targets, and unrealized R-multiple. The live conviction section shows how this position compares to new candidates on the same 0\u201310 scale.</p>';
       var p = POSITIONS_IDX[ticker];
-      if (!p) return '<p class="empty">No open position for this ticker.</p>';
+      if (!p) return intro + '<p class="empty">No open position for this ticker.</p>';
       var t12 = fmt(p.target_1) + " / " + fmt(p.target_2);
       var thesis = detailSection("Thesis", [
         ["Pattern / setup", p.pattern],
@@ -463,23 +1042,38 @@
         ["Flow (scaled)", fmtConvictionHtml(p.flow_score_scaled)],
         ["Price score", fmtConvictionHtml(p.price_score)]
       ]);
+
+      var healthLabel = p.health_state
+        ? p.health_state + " (" + fmt(p.health) + "/10)"
+        : fmt(p.health);
+      var deltaStr = p.health_delta != null
+        ? (p.health_delta >= 0 ? "+" : "") + Number(p.health_delta).toFixed(1)
+        : "\u2014";
+      var liveRows = [
+        ["Re-entry score", fmtConvictionHtml(p.re_entry_score)],
+        ["Health", healthLabel],
+        ["Health \u0394 (vs prev)", deltaStr],
+        ["Conviction (composite)", fmtConvictionHtml(p.conviction)]
+      ];
+      var live = detailSectionRaw("Live conviction", liveRows);
+
       var snap = detailSection("Gamma snapshot (at open)", [
         ["Gamma regime", p.gamma_regime],
         ["Net GEX", p.net_gex],
-        ["Γ flip est.", p.gamma_flip_level_estimate],
+        ["\u0393 flip est.", p.gamma_flip_level_estimate],
         ["Call wall", p.nearest_call_wall],
         ["Put wall", p.nearest_put_wall]
       ]);
-      return (thesis + risk + conv + snap) || '<p class="empty">No position fields.</p>';
+      return intro + ((thesis + risk + conv + live + snap) || '<p class="empty">No position fields.</p>');
     }
 
     function subtabBarHtml() {
-      var ids = ["conviction", "gamma", "price", "options", "plan", "position"];
+      var ids = ["verdict", "conviction", "price", "options", "plan", "position"];
       var labels = {
+        verdict: "Verdict",
         conviction: "Conviction",
-        gamma: "Gamma",
         price: "Price action",
-        options: "Options",
+        options: "Flow & Options",
         plan: "Plan",
         position: "Position"
       };
@@ -507,11 +1101,11 @@
 
     function detailPanelsHtml(m, ticker) {
       return (
-        '<div class="detail-subtab-panel active" data-panel="conviction">' +
-        buildConvictionDl(m) +
+        '<div class="detail-subtab-panel active" data-panel="verdict">' +
+        buildVerdictDl(m) +
         "</div>" +
-        '<div class="detail-subtab-panel" data-panel="gamma">' +
-        buildGammaDl(m) +
+        '<div class="detail-subtab-panel" data-panel="conviction">' +
+        buildConvictionDl(m) +
         "</div>" +
         '<div class="detail-subtab-panel" data-panel="price">' +
         buildPriceActionDl(m) +
@@ -587,11 +1181,11 @@
       closeTickerDetailModal(open);
     });
 
-    function showDetail(panelId, ticker, kind, idx) {
+    function showDetail(panelId, key, kind, idx) {
       var panel = document.getElementById(panelId);
       if (!panel) return;
 
-      if (panel.classList.contains("detail-panel--modal-open") && panel.getAttribute("data-ticker") === ticker) {
+      if (panel.classList.contains("detail-panel--modal-open") && panel.getAttribute("data-ticker") === key) {
         closeTickerDetailModal(panel);
         return;
       }
@@ -600,28 +1194,29 @@
         closeTickerDetailModal(p);
       });
 
-      var d = idx[ticker];
+      var d = idx[key] || idx[key.split("|")[0]];
+      var displayTicker = key.split("|")[0];
       if (!d) {
         panel.innerHTML = wrapDetailModal(
           '<div class="detail-header"><span class="detail-ticker">' +
-            escHtml(ticker) +
+            escHtml(displayTicker) +
             '</span><button type="button" class="detail-close" aria-label="Close">&times;</button></div>' +
             '<p class="empty">No detail for ' +
-            escHtml(ticker) +
+            escHtml(displayTicker) +
             ".</p>"
         );
         attachModalClose(panel);
       } else {
-        var m = mergeDetailRow(d, ticker, kind);
+        var m = mergeDetailRow(d, displayTicker, kind);
         var body =
           '<div class="detail-subtabs-wrap">' +
           subtabBarHtml() +
           '<div class="detail-subtab-panels">' +
-          detailPanelsHtml(m, ticker) +
+          detailPanelsHtml(m, displayTicker) +
           "</div></div>";
         var inner =
           '<div class="detail-header"><span class="detail-ticker">' +
-          escHtml(ticker) +
+          escHtml(displayTicker) +
           '</span><button type="button" class="detail-close" aria-label="Close">&times;</button></div>' +
           '<div class="detail-body">' +
           body +
@@ -630,7 +1225,7 @@
         bindDetailSubtabs(panel);
         attachModalClose(panel);
       }
-      panel.setAttribute("data-ticker", ticker);
+      panel.setAttribute("data-ticker", key);
       panel.classList.add("detail-panel--modal-open");
       panel.style.display = "flex";
       document.body.style.overflow = "hidden";
@@ -644,25 +1239,71 @@
         var card = head.closest("article.data-card--interactive");
         if (!card || !container.contains(card)) return;
         var ticker = card.getAttribute("data-ticker");
-        if (ticker) showDetail(panelId, ticker, kind, idx);
+        if (!ticker) return;
+        var direction = card.getAttribute("data-direction") || "";
+        var key = direction ? ticker + "|" + direction : ticker;
+        showDetail(panelId, key, kind, idx);
       });
     }
 
     (function () {
       var tabs = document.querySelectorAll("nav.tabs button[data-tab]");
       var panels = document.querySelectorAll("main section.panel");
+
+      function activateTab(id) {
+        tabs.forEach(function (b) {
+          var on = b.getAttribute("data-tab") === id;
+          b.classList.toggle("active", on);
+          b.setAttribute("aria-selected", on ? "true" : "false");
+        });
+        panels.forEach(function (p) {
+          p.classList.toggle("active", p.id === "panel-" + id);
+        });
+      }
+
+      function setTabParam(id) {
+        var url = new URL(window.location);
+        url.searchParams.set("tab", id);
+        history.replaceState(null, "", url);
+      }
+
       tabs.forEach(function (btn) {
         btn.addEventListener("click", function () {
           document.querySelectorAll(".detail-panel.detail-panel--modal-open").forEach(closeTickerDetailModal);
           var id = btn.getAttribute("data-tab");
-          tabs.forEach(function (b) {
-            b.classList.toggle("active", b === btn);
-            b.setAttribute("aria-selected", b === btn ? "true" : "false");
-          });
-          panels.forEach(function (p) {
-            p.classList.toggle("active", p.id === "panel-" + id);
-          });
+          activateTab(id);
+          setTabParam(id);
         });
+      });
+
+      var savedTab = new URLSearchParams(window.location.search).get("tab");
+      if (savedTab) activateTab(savedTab);
+
+      // Intercept pagination links so the active tab survives page reload
+      document.addEventListener("click", function (e) {
+        var link = e.target.closest(".table-pager a");
+        if (!link) return;
+        e.preventDefault();
+        var activeBtn = document.querySelector("nav.tabs button.active");
+        var tab = activeBtn ? activeBtn.getAttribute("data-tab") : "";
+        var url = new URL(link.href, window.location.origin);
+        if (tab) url.searchParams.set("tab", tab);
+        window.location.href = url.toString();
+      });
+
+      // Sort dropdowns
+      document.addEventListener("change", function (e) {
+        var sel = e.target.closest(".sort-select");
+        if (!sel) return;
+        var param = sel.getAttribute("data-sort-param");
+        var val = sel.value;
+        var url = new URL(window.location);
+        if (val) url.searchParams.set(param, val);
+        else url.searchParams.delete(param);
+        var activeBtn = document.querySelector("nav.tabs button.active");
+        var tab = activeBtn ? activeBtn.getAttribute("data-tab") : "";
+        if (tab) url.searchParams.set("tab", tab);
+        window.location.href = url.toString();
       });
 
       var candPills = document.getElementById("candidates-pills");
@@ -680,6 +1321,13 @@
           var bearEl = document.getElementById("candidates-bearish");
           if (bullEl) bullEl.style.display = side === "bullish" ? "" : "none";
           if (bearEl) bearEl.style.display = side === "bearish" ? "" : "none";
+          var candSort = candPills.closest(".panel-header").querySelector(".sort-select");
+          if (candSort) {
+            var newParam = side === "bearish" ? "sort_bear" : "sort_bull";
+            candSort.setAttribute("data-sort-param", newParam);
+            var urlParams = new URLSearchParams(window.location.search);
+            candSort.value = urlParams.get(newParam) || "";
+          }
         });
       }
 

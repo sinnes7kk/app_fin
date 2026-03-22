@@ -15,16 +15,16 @@ def filter_qualifying_flow(
     min_premium: float = 500_000,
     min_dte: int = 30,
     max_dte: int = 120,
-    require_ask_side: bool = True,
+    require_ask_side: bool = False,
 ) -> pd.DataFrame:
     """
-    Filter normalized flow events down to the ones relevant for the V1 swing system.
+    Filter normalized flow events down to the ones relevant for the swing system.
 
     Rules:
     - premium >= min_premium
     - min_dte <= dte <= max_dte
     - option_type is CALL or PUT
-    - execution_side == ASK if require_ask_side=True
+    - execution_side is ASK or BID (MIXED excluded unless require_ask_side)
     """
     if df.empty:
         return df.copy()
@@ -45,6 +45,8 @@ def filter_qualifying_flow(
 
     if require_ask_side:
         out = out[out["execution_side"] == "ASK"]
+    else:
+        out = out[out["execution_side"].isin(["ASK", "BID"])]
 
     return out
 
@@ -74,6 +76,31 @@ def add_volume_oi_ratio(df: pd.DataFrame) -> pd.DataFrame:
 
 
 RECENCY_HALF_LIFE_HOURS = 6.0
+
+
+def compute_flow_velocity(df: pd.DataFrame) -> pd.DataFrame:
+    """Add per-ticker flow velocity (recent vs. older premium ratio).
+
+    Splits each ticker's flow at its median event timestamp so the "recent"
+    and "older" buckets are always populated regardless of when the pipeline
+    runs.  Values > 1.0 mean the newer half carries more premium than the
+    older half — flow is intensifying.
+    """
+    if df.empty or "event_ts" not in df.columns:
+        return df.copy()
+
+    out = df.copy()
+    median_ts = out.groupby("ticker")["event_ts"].transform("median")
+    recent = out["event_ts"] >= median_ts
+
+    recent_prem = out.loc[recent].groupby("ticker")["premium"].sum()
+    older_prem = out.loc[~recent].groupby("ticker")["premium"].sum()
+
+    velocity = (recent_prem / older_prem.replace(0, float("nan"))).fillna(0.0)
+    velocity.name = "flow_velocity"
+    out = out.merge(velocity.reset_index(), on="ticker", how="left")
+    out["flow_velocity"] = out["flow_velocity"].fillna(0.0)
+    return out
 
 
 def add_recency_weight(df: pd.DataFrame) -> pd.DataFrame:
@@ -136,15 +163,45 @@ def _norm01(series: pd.Series) -> pd.Series:
     return (series - mn) / (mx - mn)
 
 
+def _clip_scale(series: pd.Series, floor: float, ceiling: float) -> pd.Series:
+    """Scale series to 0-1 using absolute thresholds.
+
+    Values at or below *floor* map to 0, at or above *ceiling* map to 1,
+    with linear interpolation between.
+    """
+    if ceiling == floor:
+        return pd.Series(0.5, index=series.index)
+    clamped = series.clip(lower=floor, upper=ceiling)
+    return (clamped - floor) / (ceiling - floor)
+
+
 # Weights sum to 1.0 — adjust here to re-prioritize.
 _FLOW_WEIGHTS = {
-    "flow_intensity":    0.30,
+    "flow_intensity":    0.25,
     "premium_per_trade": 0.15,
-    "vol_oi":            0.20,
-    "repeat":            0.15,
+    "vol_oi":            0.15,
+    "repeat":            0.12,
     "sweep":             0.10,
     "dte":               0.05,
-    "concentration":     0.05,
+    "breadth":           0.05,
+    "velocity":          0.13,
+}
+
+# V2 thresholds — calibrated from domain knowledge. Tuning targets:
+# - After 2-4 weeks of live data, replace with percentile-based thresholds
+#   derived from the accumulated distribution of each metric.
+# - V3+: switch to z-scores against a 30-day rolling distribution per
+#   component, or percentile ranks against a historical lookback window.
+#   This requires storing per-run flow statistics in data/flow_stats.csv.
+_FLOW_THRESHOLDS = {
+    "flow_intensity":    (np.log1p(1), np.log1p(50)),
+    "premium_per_trade": (np.log1p(5_000), np.log1p(200_000)),
+    "vol_oi":            (0.5,   3.0),
+    "repeat":            (1.0,  10.0),
+    "sweep":             (0.0,   8.0),
+    "dte":               (0.3,   1.0),
+    "breadth":           (0.1,   0.8),
+    "velocity":          (0.0,   3.0),
 }
 
 
@@ -156,19 +213,27 @@ def _weighted_flow_score(
     vol_oi_col: str,
     repeat_col: str,
     sweep_col: str,
-    concentration_col: str,
+    breadth_col: str,
     dte_col: str,
+    velocity_col: str = "flow_velocity",
 ) -> pd.Series:
-    """Build a directional flow score from normalized 0–1 components."""
+    """Build a directional flow score from absolute-threshold-scaled 0-1 components."""
     w = _FLOW_WEIGHTS
+    t = _FLOW_THRESHOLDS
+    vel = (
+        _clip_scale(agg[velocity_col].fillna(0), *t["velocity"])
+        if velocity_col in agg.columns
+        else 0.0
+    )
     return (
-        w["flow_intensity"]     * _norm01(agg[flow_intensity_col].fillna(0))
-        + w["premium_per_trade"] * _norm01(np.log1p(agg[ppt_col]))
-        + w["vol_oi"]           * _norm01(agg[vol_oi_col].fillna(0))
-        + w["repeat"]           * _norm01(agg[repeat_col])
-        + w["sweep"]            * _norm01(agg[sweep_col])
-        + w["dte"]              * _norm01(agg[dte_col])
-        + w["concentration"]    * _norm01(agg[concentration_col])
+        w["flow_intensity"]     * _clip_scale(np.log1p(agg[flow_intensity_col].fillna(0) * 10_000), *t["flow_intensity"])
+        + w["premium_per_trade"] * _clip_scale(np.log1p(agg[ppt_col]), *t["premium_per_trade"])
+        + w["vol_oi"]           * _clip_scale(agg[vol_oi_col].fillna(0), *t["vol_oi"])
+        + w["repeat"]           * _clip_scale(agg[repeat_col], *t["repeat"])
+        + w["sweep"]            * _clip_scale(agg[sweep_col], *t["sweep"])
+        + w["dte"]              * _clip_scale(agg[dte_col], *t["dte"])
+        + w["breadth"]          * _clip_scale(agg[breadth_col], *t["breadth"])
+        + w["velocity"]         * vel
     )
 
 
@@ -181,7 +246,7 @@ def aggregate_flow_by_ticker(df: pd.DataFrame) -> pd.DataFrame:
     - directional vol/OI
     - sweep counts/premium
     - premium-per-trade metrics
-    - concentration metrics
+    - breadth metrics
     - DTE quality score
     - directional scores for ranking
     """
@@ -208,8 +273,10 @@ def aggregate_flow_by_ticker(df: pd.DataFrame) -> pd.DataFrame:
                 "bearish_premium_per_trade",
                 "bullish_max_trade_premium",
                 "bearish_max_trade_premium",
-                "bullish_concentration",
-                "bearish_concentration",
+                "bullish_breadth",
+                "bearish_breadth",
+                "bullish_premium_raw",
+                "bearish_premium_raw",
                 "net_premium_bias",
                 "flow_imbalance_ratio",
                 "dominant_direction",
@@ -235,6 +302,9 @@ def aggregate_flow_by_ticker(df: pd.DataFrame) -> pd.DataFrame:
     if "repeat_flow_count" not in out.columns:
         out = add_repeat_flow_count(out)
 
+    if "flow_velocity" not in out.columns:
+        out = compute_flow_velocity(out)
+
     if "is_sweep" not in out.columns:
         out["is_sweep"] = False
 
@@ -242,10 +312,16 @@ def aggregate_flow_by_ticker(df: pd.DataFrame) -> pd.DataFrame:
     out["premium"] = pd.to_numeric(out["premium"], errors="coerce").fillna(0.0)
     out["dte"] = pd.to_numeric(out["dte"], errors="coerce")
     out["is_sweep"] = out["is_sweep"].fillna(False).astype(bool)
+    if "direction_confidence" not in out.columns:
+        out["direction_confidence"] = 1.0
+    out["direction_confidence"] = pd.to_numeric(out["direction_confidence"], errors="coerce").fillna(0.0)
+
+    # Directional premium weighted by confidence (BID-side discounted)
+    conf_premium = out["premium"] * out["direction_confidence"]
 
     # Direction-specific components
-    out["bullish_premium_component"] = out["premium"].where(out["direction"] == "LONG", 0.0)
-    out["bearish_premium_component"] = out["premium"].where(out["direction"] == "SHORT", 0.0)
+    out["bullish_premium_component"] = conf_premium.where(out["direction"] == "LONG", 0.0)
+    out["bearish_premium_component"] = conf_premium.where(out["direction"] == "SHORT", 0.0)
 
     out["bullish_count_component"] = (out["direction"] == "LONG").astype(int)
     out["bearish_count_component"] = (out["direction"] == "SHORT").astype(int)
@@ -257,11 +333,11 @@ def aggregate_flow_by_ticker(df: pd.DataFrame) -> pd.DataFrame:
         (out["direction"] == "SHORT") & (out["is_sweep"])
     ).astype(int)
 
-    out["bullish_sweep_premium_component"] = out["premium"].where(
+    out["bullish_sweep_premium_component"] = conf_premium.where(
         (out["direction"] == "LONG") & (out["is_sweep"]),
         0.0,
     )
-    out["bearish_sweep_premium_component"] = out["premium"].where(
+    out["bearish_sweep_premium_component"] = conf_premium.where(
         (out["direction"] == "SHORT") & (out["is_sweep"]),
         0.0,
     )
@@ -269,11 +345,20 @@ def aggregate_flow_by_ticker(df: pd.DataFrame) -> pd.DataFrame:
     out["bullish_vol_oi_component"] = out["volume_oi_ratio"].where(out["direction"] == "LONG", np.nan)
     out["bearish_vol_oi_component"] = out["volume_oi_ratio"].where(out["direction"] == "SHORT", np.nan)
 
-    out["bullish_trade_premium_component"] = out["premium"].where(out["direction"] == "LONG", np.nan)
-    out["bearish_trade_premium_component"] = out["premium"].where(out["direction"] == "SHORT", np.nan)
+    out["bullish_trade_premium_component"] = conf_premium.where(out["direction"] == "LONG", np.nan)
+    out["bearish_trade_premium_component"] = conf_premium.where(out["direction"] == "SHORT", np.nan)
 
     out["bullish_repeat_component"] = (out["direction"] == "LONG").astype(int)
     out["bearish_repeat_component"] = (out["direction"] == "SHORT").astype(int)
+
+    # Raw (pre-decay) directional premiums for gate checks
+    if "premium_raw" in out.columns:
+        raw_conf = pd.to_numeric(out["premium_raw"], errors="coerce").fillna(0.0) * out["direction_confidence"]
+        out["bullish_premium_raw_component"] = raw_conf.where(out["direction"] == "LONG", 0.0)
+        out["bearish_premium_raw_component"] = raw_conf.where(out["direction"] == "SHORT", 0.0)
+    else:
+        out["bullish_premium_raw_component"] = out["bullish_premium_component"]
+        out["bearish_premium_raw_component"] = out["bearish_premium_component"]
 
     grouped = out.groupby("ticker", dropna=False)
 
@@ -297,6 +382,9 @@ def aggregate_flow_by_ticker(df: pd.DataFrame) -> pd.DataFrame:
         bearish_max_trade_premium=("bearish_trade_premium_component", "max"),
         bullish_repeat_count=("bullish_repeat_component", "sum"),
         bearish_repeat_count=("bearish_repeat_component", "sum"),
+        flow_velocity=("flow_velocity", "max"),
+        bullish_premium_raw=("bullish_premium_raw_component", "sum"),
+        bearish_premium_raw=("bearish_premium_raw_component", "sum"),
     ).reset_index()
 
     # Fill direction-specific nulls
@@ -316,6 +404,9 @@ def aggregate_flow_by_ticker(df: pd.DataFrame) -> pd.DataFrame:
         "bearish_max_trade_premium",
         "bullish_repeat_count",
         "bearish_repeat_count",
+        "flow_velocity",
+        "bullish_premium_raw",
+        "bearish_premium_raw",
     ]
     agg[fill_zero_cols] = agg[fill_zero_cols].fillna(0)
 
@@ -337,16 +428,17 @@ def aggregate_flow_by_ticker(df: pd.DataFrame) -> pd.DataFrame:
         0.0,
     )
 
-    # Concentration: max individual trade premium / total directional premium
-    agg["bullish_concentration"] = np.where(
+    # Breadth: 1 - (max single trade / total directional premium).
+    # Higher breadth = many evenly-sized trades = stronger confirmation.
+    agg["bullish_breadth"] = 1.0 - np.where(
         agg["bullish_premium"] > 0,
         agg["bullish_max_trade_premium"] / agg["bullish_premium"],
-        0.0,
+        1.0,
     )
-    agg["bearish_concentration"] = np.where(
+    agg["bearish_breadth"] = 1.0 - np.where(
         agg["bearish_premium"] > 0,
         agg["bearish_max_trade_premium"] / agg["bearish_premium"],
-        0.0,
+        1.0,
     )
 
     # Flow imbalance ratio (capped at 99 to avoid inf when one side is zero)
@@ -362,8 +454,8 @@ def aggregate_flow_by_ticker(df: pd.DataFrame) -> pd.DataFrame:
     # ADDV and flow intensity — normalizes premium by stock size
     agg["addv"] = agg["ticker"].apply(fetch_addv)
     addv_safe = agg["addv"].replace(0, float("nan"))
-    agg["bullish_flow_intensity"] = agg["bullish_premium"] / addv_safe
-    agg["bearish_flow_intensity"] = agg["bearish_premium"] / addv_safe
+    agg["bullish_flow_intensity"] = agg["bullish_premium_raw"] / addv_safe
+    agg["bearish_flow_intensity"] = agg["bearish_premium_raw"] / addv_safe
     agg[["bullish_flow_intensity", "bearish_flow_intensity"]] = (
         agg[["bullish_flow_intensity", "bearish_flow_intensity"]].fillna(0.0)
     )
@@ -374,8 +466,8 @@ def aggregate_flow_by_ticker(df: pd.DataFrame) -> pd.DataFrame:
         "avg_volume_oi_ratio",
         "bullish_vol_oi",
         "bearish_vol_oi",
-        "bullish_concentration",
-        "bearish_concentration",
+        "bullish_breadth",
+        "bearish_breadth",
         "dte_score",
         "bullish_flow_intensity",
         "bearish_flow_intensity",
@@ -393,7 +485,7 @@ def aggregate_flow_by_ticker(df: pd.DataFrame) -> pd.DataFrame:
         vol_oi_col="bullish_vol_oi",
         repeat_col="bullish_repeat_count",
         sweep_col="bullish_sweep_count",
-        concentration_col="bullish_concentration",
+        breadth_col="bullish_breadth",
         dte_col="dte_score",
     )
 
@@ -404,7 +496,7 @@ def aggregate_flow_by_ticker(df: pd.DataFrame) -> pd.DataFrame:
         vol_oi_col="bearish_vol_oi",
         repeat_col="bearish_repeat_count",
         sweep_col="bearish_sweep_count",
-        concentration_col="bearish_concentration",
+        breadth_col="bearish_breadth",
         dte_col="dte_score",
     )
 
@@ -458,13 +550,11 @@ def build_flow_feature_table(
     min_premium: float = 500_000,
     min_dte: int = 30,
     max_dte: int = 120,
-    require_ask_side: bool = True,
+    require_ask_side: bool = False,
 ) -> pd.DataFrame:
     """
-    Full V1 pipeline for flow features:
-    1. filter qualifying flow
-    2. add derived metrics
-    3. aggregate by ticker
+    Full flow feature pipeline: filter qualifying flow (ASK + BID by default),
+    add derived metrics, aggregate by ticker.
     """
     filtered = filter_qualifying_flow(
         normalized_df,
@@ -474,6 +564,7 @@ def build_flow_feature_table(
         require_ask_side=require_ask_side,
     )
 
+    filtered["premium_raw"] = filtered["premium"]
     filtered = add_recency_weight(filtered)
     filtered = add_volume_oi_ratio(filtered)
     filtered = add_repeat_flow_count(filtered)
