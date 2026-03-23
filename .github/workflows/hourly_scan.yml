@@ -7,12 +7,18 @@ on:
     - cron: "0 14-21 * * 1-5"
   workflow_dispatch:
 
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
 jobs:
   scan:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -44,7 +50,27 @@ jobs:
             data/final_signals/ \
             data/ranked_candidates/ \
             data/flow_features/ \
+            data/market_regime.json \
             || true
           git diff --cached --quiet && echo "No data changes to commit" && exit 0
           git commit -m "auto: hourly scan $(date -u +%Y-%m-%dT%H:%M:%SZ)"
           git push
+
+      - name: Build static dashboard
+        run: python scripts/build_static.py
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: scan
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

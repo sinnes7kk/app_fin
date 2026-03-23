@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
+import subprocess
+import threading
 from datetime import datetime, timezone
 from html import escape as html_escape
 from pathlib import Path
@@ -1546,10 +1549,46 @@ def api_alerts():
         return jsonify({"ok": False, "error": str(e), "rows": []}), 200
 
 
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_PULL_INTERVAL = int(os.environ.get("AUTO_PULL_INTERVAL", "300"))  # seconds
+_log = logging.getLogger(__name__)
+
+
+def _git_auto_pull() -> None:
+    """Pull latest data from origin/main on a timer.  Runs in a daemon thread."""
+    import time
+
+    while True:
+        time.sleep(_PULL_INTERVAL)
+        try:
+            result = subprocess.run(
+                ["git", "pull", "--ff-only", "origin", "main"],
+                cwd=_REPO_ROOT,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            if result.returncode == 0:
+                summary = result.stdout.strip().split("\n")[-1]
+                if "Already up to date" not in summary:
+                    _log.info("auto-pull: %s", summary)
+            else:
+                _log.warning("auto-pull failed: %s", result.stderr.strip())
+        except Exception as exc:
+            _log.warning("auto-pull error: %s", exc)
+
+
 def main() -> None:
     port = int(os.environ.get("PORT", "5050"))
+
+    if os.environ.get("DISABLE_AUTO_PULL") != "1":
+        t = threading.Thread(target=_git_auto_pull, daemon=True)
+        t.start()
+        _log.info("auto-pull enabled every %ds (set DISABLE_AUTO_PULL=1 to disable)", _PULL_INTERVAL)
+
     app.run(host="127.0.0.1", port=port, debug=os.environ.get("FLASK_DEBUG") == "1")
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
     main()

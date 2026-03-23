@@ -23,6 +23,9 @@ build/
 .vscode/
 .DS_Store
 
+# Static build output
+_site/
+
 # Data — keep directory structure (.gitkeep) but exclude run outputs
 data/**/*.csv
 data/watchlist.json
