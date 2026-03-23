@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
+import json
 import os
 from datetime import datetime, timezone
 from html import escape as html_escape
+from pathlib import Path
 from urllib.parse import urlencode
 
 import numpy as np
 import pandas as pd
 from flask import Flask, jsonify, render_template, request
 
+from app.config import MIN_FINAL_SCORE, REGIME_THRESHOLD_BOOST
 from app.web.data_access import (
     load_equity_curve,
     load_final_signals,
@@ -23,6 +26,17 @@ from app.web.data_access import (
 )
 
 app = Flask(__name__, static_folder="static", template_folder="templates")
+
+_REGIME_PATH = Path(__file__).resolve().parents[2] / "data" / "market_regime.json"
+
+
+def load_market_regime() -> dict:
+    """Load the latest market regime snapshot from disk."""
+    try:
+        return json.loads(_REGIME_PATH.read_text())
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
 
 TABLE_PAGE_SIZE = 7
 
@@ -515,16 +529,44 @@ def _data_card_article(
     extra_html: str = "",
     clickable: bool = False,
     direction: str = "",
+    filter_attrs: dict[str, str] | None = None,
 ) -> str:
     tcls = "data-card-ticker ticker-link" if clickable else "data-card-ticker"
     icls = " data-card--interactive" if clickable else ""
     dir_attr = f' data-direction="{html_escape(str(direction))}"' if direction else ""
+    extra_attrs = ""
+    if filter_attrs:
+        for k, v in filter_attrs.items():
+            extra_attrs += f' data-{k}="{html_escape(str(v))}"'
     return (
-        f'<article class="data-card{icls}" data-ticker="{html_escape(str(ticker))}"{dir_attr}>'
+        f'<article class="data-card{icls}" data-ticker="{html_escape(str(ticker))}"{dir_attr}{extra_attrs}>'
         f'<header class="data-card-head"><span class="{tcls}">{html_escape(str(ticker))}</span>'
         f"{head_badges_html}</header>"
         f'<div class="data-card-body">{metrics_html}{extra_html}</div></article>'
     )
+
+
+def _filter_attrs_from_row(row) -> dict[str, str]:
+    """Extract filterable data-* attributes from a candidate/rejected/signal row."""
+    def _safe(col):
+        v = _row_scalar(row, col)
+        if v is None or (isinstance(v, float) and pd.isna(v)):
+            return ""
+        return str(v).strip()
+
+    pat = _safe("pattern")
+    if pat in ("nan", "unknown"):
+        pat = ""
+    return {
+        "pattern": pat,
+        "reject": _safe("reject_reason").split("(")[0].strip(),
+        "flow": _safe("flow_score_scaled"),
+        "price": _safe("price_score"),
+        "options": _safe("options_context_score"),
+        "final": _safe("final_score"),
+        "passed": _safe("checks_passed"),
+        "failed": _safe("checks_failed"),
+    }
 
 
 def _paginate_card_fragments(
@@ -583,6 +625,7 @@ def _signals_card_fragments(df: pd.DataFrame, *, clickable: bool = True) -> list
                 extra_html=pat_p + plan_p,
                 clickable=clickable,
                 direction=str(row.get("direction", "")),
+                filter_attrs=_filter_attrs_from_row(row),
             )
         )
     return out
@@ -628,6 +671,7 @@ def _candidates_card_fragments(df: pd.DataFrame, *, clickable: bool = True) -> l
                 extra_html=pat_p + status_p,
                 clickable=clickable,
                 direction=str(row.get("direction", "")),
+                filter_attrs=_filter_attrs_from_row(row),
             )
         )
     return out
@@ -664,6 +708,7 @@ def _rejected_card_fragments(df: pd.DataFrame) -> list[str]:
                 extra_html=reason_p,
                 clickable=True,
                 direction=str(row.get("direction", "")),
+                filter_attrs=_filter_attrs_from_row(row),
             )
         )
     return out
@@ -1250,8 +1295,24 @@ def _rejected_insights(rejected: pd.DataFrame, watchlist: list[dict]) -> str:
 @app.route("/")
 def index():
     signals, signals_src = load_final_signals()
-    rejected, rejected_src = load_rejected()
+    rejected_all, rejected_src = load_rejected()
     flow, flow_src = load_flow_features()
+    regime = load_market_regime()
+
+    # Filter out trivial rejections that never reached full price scoring.
+    _TRIVIAL_PREFIXES = ("weak_bullish_flow", "weak_bearish_flow",
+                         "trend_not_aligned", "price_over_extended", "error:")
+
+    def _is_trivial(reason: str) -> bool:
+        return any(str(reason).startswith(p) for p in _TRIVIAL_PREFIXES)
+
+    if not rejected_all.empty and "reject_reason" in rejected_all.columns:
+        _trivial_mask = rejected_all["reject_reason"].apply(_is_trivial)
+        trivial_rejected_count = int(_trivial_mask.sum())
+        rejected = rejected_all[~_trivial_mask].copy()
+    else:
+        trivial_rejected_count = 0
+        rejected = rejected_all.copy()
 
     # Build validated candidates: signals + rejected merged, split by direction.
     # Enrich with flow features so rejected rows carry the underlying flow
@@ -1274,11 +1335,42 @@ def index():
     else:
         bull = pd.DataFrame()
         bear = pd.DataFrame()
+    # Compute near-threshold candidates: those with final_score within 2 pts of threshold
+    near_df = pd.DataFrame()
+    _near_long_min = MIN_FINAL_SCORE + REGIME_THRESHOLD_BOOST  # worst-case (fully bearish regime)
+    _near_short_min = MIN_FINAL_SCORE + REGIME_THRESHOLD_BOOST
+    if not _validated.empty and "final_score" in _validated.columns:
+        _validated["_fs_num"] = pd.to_numeric(_validated["final_score"], errors="coerce")
+        _near_gap = 2.0
+        mask = _validated["_fs_num"].notna() & (_validated["_fs_num"] > 0)
+        if mask.any():
+            # Derive direction-aware threshold: use REGIME_THRESHOLD_BOOST as upper bound
+            _near_long_min = MIN_FINAL_SCORE + REGIME_THRESHOLD_BOOST
+            _near_short_min = MIN_FINAL_SCORE + REGIME_THRESHOLD_BOOST
+            long_mask = mask & (_validated["direction"] == "LONG") & (_validated["_fs_num"] >= _near_long_min - _near_gap)
+            short_mask = mask & (_validated["direction"] == "SHORT") & (_validated["_fs_num"] >= _near_short_min - _near_gap)
+            near_df = _validated[long_mask | short_mask].copy()
+            if not near_df.empty:
+                near_df = near_df.sort_values("_fs_num", ascending=False)
+        _validated.drop(columns=["_fs_num"], inplace=True)
+        if not near_df.empty and "_fs_num" in near_df.columns:
+            near_df.drop(columns=["_fs_num"], inplace=True)
+
+    page_near = _int_query("page_near")
+
     bull_src = rejected_src or signals_src
     bear_src = bull_src
     positions = load_positions()
     watchlist = load_watchlist()
-    watchlist = _enrich_watchlist_from_rejected(watchlist, rejected)
+    watchlist = _enrich_watchlist_from_rejected(watchlist, rejected_all)
+    if not flow.empty and "ticker" in flow.columns:
+        flow_lookup = flow.set_index("ticker").to_dict("index")
+        for w in watchlist:
+            t = w.get("ticker")
+            if t and t in flow_lookup:
+                for k, v in flow_lookup[t].items():
+                    if k not in w or w[k] is None:
+                        w[k] = v
     trades = load_trade_log_tail(80)
 
     from app.vendors.unusual_whales import fetch_recent_alert_flow
@@ -1312,6 +1404,15 @@ def index():
 
     perf = _compute_performance()
     last_updated = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+    def _parse_scan_ts(src: str) -> str:
+        """Extract a human-readable timestamp from a CSV filename like 'final_signals_20260322_131750.csv'."""
+        import re
+        m = re.search(r"(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})", src)
+        if m:
+            return f"{m.group(1)}-{m.group(2)}-{m.group(3)} {m.group(4)}:{m.group(5)}:{m.group(6)} UTC"
+        return src or "unknown"
+    scan_timestamp = _parse_scan_ts(signals_src or rejected_src or flow_src)
 
     pp = TABLE_PAGE_SIZE
     page_sig = _int_query("page_sig")
@@ -1364,6 +1465,16 @@ def index():
         ),
         "bear_src": bear_src,
         "bear_detail": _df_to_detail_json(bear),
+        "near_html": _paginate_card_fragments(
+            _candidates_card_fragments(near_df, clickable=True),
+            page=page_near,
+            per_page=pp,
+            page_param="page_near",
+            empty_msg="No candidates near threshold.",
+        ),
+        "near_detail": _df_to_detail_json(near_df),
+        "near_threshold_long": round(_near_long_min, 1),
+        "near_threshold_short": round(_near_short_min, 1),
         "flow_html": _paginate_card_fragments(
             _flow_card_fragments(flow),
             page=page_flow,
@@ -1401,13 +1512,16 @@ def index():
         "perf": perf,
         "last_updated": last_updated,
         "signals_insights": _signals_insights(signals),
-        "candidates_insights": _candidates_insights(bull, bear, rejected),
+        "candidates_insights": _candidates_insights(bull, bear, rejected_all),
         "positions_insights": _positions_insights(positions),
-        "rejected_insights": _rejected_insights(rejected, watchlist),
+        "rejected_insights": _rejected_insights(rejected_all, watchlist),
+        "trivial_rejected_count": trivial_rejected_count,
+        "regime": regime,
         "sort_sig": sort_sig,
         "sort_bull": sort_bull,
         "sort_bear": sort_bear,
         "sort_rej": sort_rej,
+        "scan_timestamp": scan_timestamp,
     }
     return render_template("index.html", **ctx)
 

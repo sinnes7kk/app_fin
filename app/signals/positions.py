@@ -636,9 +636,9 @@ def update_positions() -> dict:
         pos["health_delta"] = health_result["health_delta"]
 
         if pos["direction"] == "LONG":
-            re_entry = score_long_setup(df, options_ctx=opts_ctx)
+            re_entry = score_long_setup(df)
         else:
-            re_entry = score_short_setup(df, options_ctx=opts_ctx)
+            re_entry = score_short_setup(df)
         pos["re_entry_score"] = re_entry["score"]
         pos["conviction"] = round(0.5 * re_entry["score"] + 0.5 * pos["health"], 2)
 

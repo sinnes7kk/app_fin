@@ -195,16 +195,19 @@ def is_pullback_to_ema(
     """Check whether any of the last ``lookback`` bars pulled back to the
     EMA20 or EMA50.
 
-    Each bar is evaluated against its own EMA values (not today's), since the
-    EMA shifts daily.  Passes if the bar's low actually touched or nearly
-    touched the EMA (within ``atr_multiple * ATR``) while closing above it,
-    and the signal bar hasn't since moved far away from the EMA.
+    Tier 1: bar touched EMA and signal bar is still near EMA (fresh).
+    Tier 2: bar touched EMA and signal bar has since moved *above* it,
+    confirming the pullback held (within 3 ATR to prevent stale matches).
     """
     if len(df) < lookback:
         return False
-    if not _signal_bar_near_ema(df):
+    last = df.iloc[-1]
+    last_atr = last.get("atr14")
+    last_close = last.get("close")
+    if pd.isna(last_atr) or last_atr <= 0 or pd.isna(last_close):
         return False
 
+    near_ema = _signal_bar_near_ema(df)
     window = df.iloc[-lookback:]
 
     for _, bar in window.iterrows():
@@ -218,9 +221,13 @@ def is_pullback_to_ema(
             continue
 
         band = atr_multiple * atr
-        for ema in (ema20, ema50):
-            if low <= ema + band and close >= ema:
-                return True
+        for ema_val, ema_col in ((ema20, "ema20"), (ema50, "ema50")):
+            if low <= ema_val + band and close >= ema_val:
+                if near_ema:
+                    return True
+                last_ema = last.get(ema_col)
+                if pd.notna(last_ema) and last_close > last_ema and (last_close - last_ema) <= 3.0 * last_atr:
+                    return True
 
     return False
 
@@ -232,15 +239,19 @@ def is_rally_to_ema(
 ) -> bool:
     """Short-side equivalent of ``is_pullback_to_ema``.
 
-    Passes if any of the last ``lookback`` bars rallied up to touch or nearly
-    touch the EMA20 or EMA50 (within ``atr_multiple * ATR``) and was rejected
-    (closed back below it), and the signal bar hasn't since moved far away.
+    Tier 1: bar touched EMA and signal bar is still near EMA (fresh).
+    Tier 2: bar touched EMA and signal bar has since moved *below* it,
+    confirming the rally failed (within 3 ATR to prevent stale matches).
     """
     if len(df) < lookback:
         return False
-    if not _signal_bar_near_ema(df):
+    last = df.iloc[-1]
+    last_atr = last.get("atr14")
+    last_close = last.get("close")
+    if pd.isna(last_atr) or last_atr <= 0 or pd.isna(last_close):
         return False
 
+    near_ema = _signal_bar_near_ema(df)
     window = df.iloc[-lookback:]
 
     for _, bar in window.iterrows():
@@ -254,9 +265,13 @@ def is_rally_to_ema(
             continue
 
         band = atr_multiple * atr
-        for ema in (ema20, ema50):
-            if high >= ema - band and close <= ema:
-                return True
+        for ema_val, ema_col in ((ema20, "ema20"), (ema50, "ema50")):
+            if high >= ema_val - band and close <= ema_val:
+                if near_ema:
+                    return True
+                last_ema = last.get(ema_col)
+                if pd.notna(last_ema) and last_close < last_ema and (last_ema - last_close) <= 3.0 * last_atr:
+                    return True
 
     return False
 

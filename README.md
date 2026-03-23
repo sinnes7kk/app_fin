@@ -952,44 +952,99 @@ add logs/tests/replay scripts
 
 ---
 
-# Future Version Notes
+# Future Roadmap
 
-## V3 — Agent-validated scoring
+## V3 — Agent-based scoring (compute-then-judge architecture)
 
-Replace brittle rules with specialized LLM/vision agents for the hardest scoring
-aspects. The rules engine continues to do the heavy lifting (filtering 500+ tickers
-down to ~30-50 candidates cheaply), but each surviving candidate gets validated by
-agents before a final signal decision.
+Replace brittle rule interactions with specialized LLM agents for the nuanced,
+context-dependent decisions. The deterministic rules engine stays as the pre-filter
+and compute layer — agents judge and qualify, they don't compute.
 
-**Architecture:** Rules pipeline → top ~50 candidates → parallel agent calls → agent
-score aggregation → final signal.
+### Architecture
 
-Candidate agents:
-- **S/R quality agent** — receives chart image + algorithmically identified levels;
-  answers "is this genuine structural support/resistance that a human trader would
-  respect?" Solves the problem of rules identifying noise levels (the BA issue).
-- **Pattern quality agent** — evaluates multi-day price sequences holistically;
-  catches complex patterns that are hard to enumerate as if/else rules.
-- **Context agent** — checks earnings calendar, sector rotation, news catalysts;
-  provides awareness that pure price/flow data cannot capture.
+```
+Pre-filter (deterministic rules)
+  → Compute layer (existing code: S/R levels, EMAs, volume, flow scores)
+    → Build structured summary per ticker
+      → Specialized sub-agents (parallel, per candidate)
+        → Orchestrator → final conviction score
+```
 
-Agent output: a confidence modifier (e.g., 0.5x–1.5x) applied to the rules-based
-price score, or an independent 0-10 agent score blended into the final formula.
+The pre-filter layer (trend alignment, extension, flow thresholds) remains fast,
+deterministic, and cheap. Only the ~20-50 candidates that survive reach the agent
+layer. Each agent receives a pre-computed structured summary, not raw data:
 
-Cost is manageable: ~30-50 LLM calls per pipeline run, a few cents total.
+> "CIA SHORT. Price $5.55. Support cluster at $5.00 (3 touches, last touch 8 bars
+> ago). EMA20: $5.44, EMA50: $5.46, both sloping down. Today closed below $5.00
+> for the first time on 2.1x avg volume. Flow score 9.79/10. Next support at $3.50."
 
-## V4 — Specialized parallel agents
+### Sub-agents
 
-Split the single validation agent into domain-specific agents that run in parallel:
-S/R quality, pattern quality, macro context, sector momentum. Each contributes an
-independent score channel to the final blend, similar to how flow/price/options
-currently work.
+1. **S/R Quality Agent** — qualifies algorithmically identified levels. Answers "is
+   this genuine structural support/resistance?" Solves the problem of rules treating
+   noise levels as meaningful.
 
-## V5 — Agent-in-the-loop position management
+2. **Trade Plan Agent** — determines optimal stop placement, targets, and R:R given
+   the setup context. Handles edge cases (ATH breakouts, gap scenarios) that
+   fixed-formula rules struggle with.
+
+3. **Flow/Options Confirmation Agent** — synthesizes flow score, options context,
+   dark pool activity, and net premium ticks into a directional conviction judgment.
+
+4. **Entry/Timing Agent** — evaluates whether the current bar/moment is the right
+   entry point, or whether waiting for confirmation is better.
+
+5. **Devil's Advocate Agent** — dedicated agent whose job is to *invalidate* the
+   thesis. Looks for: upcoming earnings, bear/bull trap patterns, hedging-vs-
+   directional ambiguity, liquidity concerns. This is where LLMs add the most
+   value over hard-coded rules.
+
+### Technology choices
+
+- **LLM**: OpenAI GPT-4o for the orchestrator and nuanced agents (S/R quality,
+  devil's advocate). GPT-4o-mini for structured/simpler agents (trade plan, flow
+  confirmation) to reduce cost and latency. Consider Claude for the devil's advocate
+  role (tends to be more cautious and thorough in identifying counterarguments).
+- **Orchestration**: Direct OpenAI API calls with `asyncio` + Pydantic structured
+  outputs (`response_format`). Skip Langchain — it adds complexity without
+  proportional value for this use case. Write a thin custom orchestration layer.
+- **Tracing**: Langfuse for full observability — every agent call logged with
+  input/output/model/latency. Essential for debugging "why did we take this trade?"
+- **Determinism**: All agents called with `temperature=0` and JSON schema outputs.
+  Cache every response with input hash for replay.
+
+### Cost estimate
+
+~40 candidates × 5 agents = 200 LLM calls per scan. At GPT-4o/mini mix pricing,
+roughly $1-3 per scan. At 8 scans/day: ~$300-700/month.
+
+### Key risks and mitigations
+
+- **Determinism**: LLMs are stochastic. Same input may produce different outputs.
+  Mitigation: `temperature=0`, structured outputs, full response caching.
+- **Backtesting**: Cache all agent responses. For replay, use cached output when
+  the exact input was seen before. Run agents 3x on the same input to measure
+  consistency.
+- **Shadow mode**: Run agents alongside the deterministic system for 4-8 weeks
+  before giving agents any execution authority. Compare decisions.
+
+### Agent output format
+
+Each agent returns a structured score (0-10) with reasoning. The orchestrator
+blends: `0.3 * S/R_quality + 0.2 * trade_plan + 0.2 * flow_confirm + 0.15 *
+entry_timing + 0.15 * (10 - devils_advocate_risk)`. Final conviction replaces
+the current deterministic final_score.
+
+## V4 — Agent-in-the-loop position management
 
 Extend agents to open-position review: evaluate whether the thesis is still intact,
 whether to tighten stops, or whether a better opportunity warrants rotation. Agents
 receive the current chart, entry context, and position health metrics.
+
+## V5 — Autonomous execution
+
+Brokerage integration with agent-approved order execution. Requires high confidence
+in agent consistency from V3-V4 shadow testing.
 
 ## Flow scoring — historical distribution (all future versions)
 
@@ -998,8 +1053,51 @@ distribution, or percentile ranks against a lookback window. Requires accumulate
 history (weeks/months of pipeline runs). This gives a statistically grounded answer
 to "is this flow genuinely unusual?" rather than relying on hand-tuned thresholds.
 
-## V3+ pattern additions
+## Pattern additions (V3+)
 
 - **Reclaim / V-recovery / capitulation bottom** — price breaks below key support,
   then reclaims it with volume. Currently excluded from the rules engine because
   it's a reversal (not continuation) setup and harder to code reliably.
+
+---
+
+# Known Issues
+
+## re_entry_score deflation for working positions
+
+`re_entry_score` re-runs the full entry scoring (`score_long_setup` / `score_short_setup`)
+on current data every update cycle. Entry patterns (structural breakout, flag breakout,
+pullback to support, etc.) are one-time events — they fire on the entry bar and then
+stop matching. A position that entered on a clean structural breakdown and is now
+grinding in a healthy downtrend will get a low `re_entry_score` because no entry
+pattern fires, even though the thesis is fully intact.
+
+Since `conviction = 0.5 * re_entry_score + 0.5 * health`, this deflates conviction
+for working positions and could make them vulnerable to rotation.
+
+**Mitigations already in place**: The `trend_continuation` pattern (1.4 pts) fires
+as a fallback for clean-trending stocks, which cushions the problem.
+
+**Potential fixes** (evaluate after live testing data is available):
+- Reweight to `0.2 * re_entry_score + 0.8 * health` to make health dominant
+- Create a "thesis-intact" score that only uses trend, extension, room, and momentum
+  (stripping one-time entry patterns and confirmation volume)
+- Only use `re_entry_score` for rotation comparison, not as a position metric
+
+## Candle quality is unreliable during intraday scans
+
+The `_pattern_candle_bonus` component (0-0.5 pts) evaluates candle shape — close
+position within the bar range, wick-to-body ratio — to amplify pattern scores.
+During market hours, the current daily bar is still forming, so candle metrics are
+mostly noise. The code mitigates this by primarily evaluating yesterday's completed
+bar and applying a time-of-day discount to today's developing bar, but yesterday's
+candle shape is often irrelevant to today's pattern.
+
+This causes candle quality to show as 0 (red) in most intraday scans, adding visual
+noise to the UI without meaningful signal. Since it's a 0-0.5 bonus (not a gate),
+it cannot block signals — but it does suppress up to 0.5 points of price score.
+
+**Potential fixes**:
+- Suppress the candle quality row in the UI during intraday scans
+- Only evaluate candle quality on after-hours/overnight scans when bars are complete
+- V3 agent layer can reason about partial candles contextually

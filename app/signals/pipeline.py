@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -14,7 +15,7 @@ from app.features.flow_trajectory import apply_trajectory_bonus, compute_intrada
 from app.features.market_regime import fetch_market_regime
 from app.features.options_context import clear_context_cache, fetch_options_context
 from app.features.price_features import clean_ohlcv, clear_price_cache, compute_features, fetch_ohlcv
-from app.signals.scoring import score_long_setup, score_short_setup
+from app.signals.scoring import quick_reject_check, score_long_setup, score_short_setup
 from app.config import (
     MIN_FINAL_SCORE,
     REGIME_THRESHOLD_BOOST,
@@ -90,6 +91,9 @@ CONTINUATION_PATTERNS = {
     "structural_breakout", "structural_breakdown",
     "bounce_and_fail", "flag_breakout", "flag_breakdown",
     "pullback_to_support", "pullback_to_resistance",
+    "support_ema_confluence", "resistance_ema_confluence",
+    "retest_and_confirm", "ema_pullback", "ema_rally",
+    "trend_continuation",
 }
 
 
@@ -266,19 +270,30 @@ def _attach_price_checks_to_ranked(
     return out
 
 
+_FLOW_COMPONENT_KEYS = [
+    "flow_velocity", "repeat_flow_count", "dte_score", "flow_imbalance_ratio",
+    "bullish_flow_intensity", "bearish_flow_intensity",
+    "bullish_premium_per_trade", "bearish_premium_per_trade",
+    "bullish_vol_oi", "bearish_vol_oi",
+    "bullish_sweep_count", "bearish_sweep_count",
+    "bullish_breadth", "bearish_breadth",
+]
+
+def _attach_flow_components(target: dict, row) -> None:
+    """Copy flow component fields from a ranked DataFrame row onto a dict."""
+    for fk in _FLOW_COMPONENT_KEYS:
+        val = row.get(fk) if hasattr(row, "get") else None
+        if val is not None and not (isinstance(val, float) and val != val):
+            target[fk] = float(val) if hasattr(val, "item") else val
+
+
 LONG_ALL_REASONS = {
     "trend_aligned", "not_extended", "room_to_target",
-    "bounce_and_fail", "flag_breakout", "pullback_to_support",
-    "structural_breakout", "trend_continuation",
-    "breakout_volume", "pullback_volume", "confirmation_volume",
-    "momentum_aligned",
+    "confirmation_volume", "momentum_aligned",
 }
 SHORT_ALL_REASONS = {
     "trend_aligned", "not_extended", "room_to_target",
-    "bounce_and_fail", "flag_breakdown", "pullback_to_resistance",
-    "structural_breakdown", "trend_continuation",
-    "breakout_volume", "pullback_volume", "confirmation_volume",
-    "momentum_aligned",
+    "confirmation_volume", "momentum_aligned",
 }
 
 
@@ -293,8 +308,8 @@ def _build_rejection_row(
     opts_ctx: dict | None = None,
     trade_plan: dict | None = None,
 ) -> dict:
-    passed = set(price_signal.get("reasons", []))
-    failed = sorted(all_reasons - passed)
+    passed_list = price_signal.get("checks_passed", [])
+    failed_list = price_signal.get("checks_failed", [])
     _fs = flow_score_scaled if flow_score_scaled is not None else flow_score_raw
     _ps = price_signal.get("score", 0)
     _opts_score = compute_options_context_score(direction, opts_ctx)
@@ -306,8 +321,8 @@ def _build_rejection_row(
         "price_score": _ps,
         "final_score": combine_scores(_fs, float(_ps), _opts_score),
         "reject_reason": reject_reason,
-        "checks_passed": ", ".join(sorted(passed)) or "none",
-        "checks_failed": ", ".join(failed) or "none",
+        "checks_passed": ", ".join(sorted(passed_list)) or "none",
+        "checks_failed": ", ".join(sorted(failed_list)) or "none",
         "options_context_score": _opts_score,
         "gamma_regime": opts_ctx.get("gamma_regime") if opts_ctx else None,
         "pattern": _extract_pattern(price_signal.get("reasons", [])),
@@ -353,11 +368,13 @@ def run_price_validation_for_bullish_candidates(
         flow_raw = float(row.get("bullish_score_raw", flow_scaled))
 
         if not has_strong_bullish_flow(row):
-            rejected.append(_build_rejection_row(
+            _rej = _build_rejection_row(
                 ticker, "LONG", flow_raw, {}, LONG_ALL_REASONS,
                 reject_reason="weak_bullish_flow",
                 flow_score_scaled=flow_scaled,
-            ))
+            )
+            _attach_flow_components(_rej, row)
+            rejected.append(_rej)
             continue
 
         try:
@@ -365,26 +382,40 @@ def run_price_validation_for_bullish_candidates(
             df = clean_ohlcv(df)
             df = compute_features(df)
 
+            should_reject, rej_reason, stub = quick_reject_check(df, "LONG")
+            if should_reject:
+                _rej = _build_rejection_row(
+                    ticker, "LONG", flow_raw, stub, LONG_ALL_REASONS,
+                    reject_reason=rej_reason, flow_score_scaled=flow_scaled,
+                )
+                _attach_flow_components(_rej, row)
+                rejected.append(_rej)
+                continue
+
             spot = float(df.iloc[-1]["close"])
             opts_ctx = fetch_options_context(ticker, spot)
 
-            price_signal = score_long_setup(df, options_ctx=opts_ctx, signal_bar_offset=signal_bar_offset)
+            price_signal = score_long_setup(df, signal_bar_offset=signal_bar_offset)
             price_signal["ticker"] = ticker
 
             if not price_signal["is_valid"]:
-                rejected.append(_build_rejection_row(
+                _rej = _build_rejection_row(
                     ticker, "LONG", flow_raw, price_signal, LONG_ALL_REASONS,
                     flow_score_scaled=flow_scaled, opts_ctx=opts_ctx,
-                ))
+                )
+                _attach_flow_components(_rej, row)
+                rejected.append(_rej)
                 continue
 
             rs = _relative_strength(df)
             if rs is not None and rs < RS_LONG_MIN:
-                rejected.append(_build_rejection_row(
+                _rej = _build_rejection_row(
                     ticker, "LONG", flow_raw, price_signal, LONG_ALL_REASONS,
                     reject_reason=f"weak_relative_strength ({rs:+.1%} vs SPY)",
                     flow_score_scaled=flow_scaled, opts_ctx=opts_ctx,
-                ))
+                )
+                _attach_flow_components(_rej, row)
+                rejected.append(_rej)
                 continue
 
             atr = float(df.iloc[-1]["atr14"])
@@ -393,22 +424,26 @@ def run_price_validation_for_bullish_candidates(
                 wall_dist_pct = (call_wall - spot) / spot
                 wall_dist_atr = (call_wall - spot) / atr
                 if wall_dist_pct < WALL_PROXIMITY_REJECT_PCT and wall_dist_atr < WALL_PROXIMITY_REJECT_ATR:
-                    rejected.append(_build_rejection_row(
+                    _rej = _build_rejection_row(
                         ticker, "LONG", flow_raw, price_signal, LONG_ALL_REASONS,
                         reject_reason=f"wall_proximity ({wall_dist_pct:.1%}, {wall_dist_atr:.1f} ATR to call wall)",
                         flow_score_scaled=flow_scaled, opts_ctx=opts_ctx,
-                    ))
+                    )
+                    _attach_flow_components(_rej, row)
+                    rejected.append(_rej)
                     continue
 
             trade_plan = build_long_trade_plan(df, price_signal, options_ctx=opts_ctx, signal_bar_offset=signal_bar_offset)
 
             if trade_plan["rr_ratio"] < MIN_RR:
-                rejected.append(_build_rejection_row(
+                _rej = _build_rejection_row(
                     ticker, "LONG", flow_raw, price_signal, LONG_ALL_REASONS,
                     reject_reason=f"poor_rr ({trade_plan['rr_ratio']:.1f}:1)",
                     flow_score_scaled=flow_scaled, opts_ctx=opts_ctx,
                     trade_plan=trade_plan,
-                ))
+                )
+                _attach_flow_components(_rej, row)
+                rejected.append(_rej)
                 continue
 
             _opts_score = compute_options_context_score("LONG", opts_ctx)
@@ -452,14 +487,17 @@ def run_price_validation_for_bullish_candidates(
             if sc:
                 for k, v in sc.items():
                     _row[f"price_{k}"] = v
+            _attach_flow_components(_row, row)
             accepted.append(_row)
 
         except Exception as e:
-            rejected.append(_build_rejection_row(
+            _rej = _build_rejection_row(
                 ticker, "LONG", flow_raw, {}, LONG_ALL_REASONS,
                 reject_reason=f"error: {e}",
                 flow_score_scaled=flow_scaled,
-            ))
+            )
+            _attach_flow_components(_rej, row)
+            rejected.append(_rej)
 
     return accepted, rejected
 
@@ -481,11 +519,13 @@ def run_price_validation_for_bearish_candidates(
         flow_raw = float(row.get("bearish_score_raw", flow_scaled))
 
         if not has_strong_bearish_flow(row):
-            rejected.append(_build_rejection_row(
+            _rej = _build_rejection_row(
                 ticker, "SHORT", flow_raw, {}, SHORT_ALL_REASONS,
                 reject_reason="weak_bearish_flow",
                 flow_score_scaled=flow_scaled,
-            ))
+            )
+            _attach_flow_components(_rej, row)
+            rejected.append(_rej)
             continue
 
         try:
@@ -493,17 +533,29 @@ def run_price_validation_for_bearish_candidates(
             df = clean_ohlcv(df)
             df = compute_features(df)
 
+            should_reject, rej_reason, stub = quick_reject_check(df, "SHORT")
+            if should_reject:
+                _rej = _build_rejection_row(
+                    ticker, "SHORT", flow_raw, stub, SHORT_ALL_REASONS,
+                    reject_reason=rej_reason, flow_score_scaled=flow_scaled,
+                )
+                _attach_flow_components(_rej, row)
+                rejected.append(_rej)
+                continue
+
             spot = float(df.iloc[-1]["close"])
             opts_ctx = fetch_options_context(ticker, spot)
 
-            price_signal = score_short_setup(df, options_ctx=opts_ctx, signal_bar_offset=signal_bar_offset)
+            price_signal = score_short_setup(df, signal_bar_offset=signal_bar_offset)
             price_signal["ticker"] = ticker
 
             if not price_signal["is_valid"]:
-                rejected.append(_build_rejection_row(
+                _rej = _build_rejection_row(
                     ticker, "SHORT", flow_raw, price_signal, SHORT_ALL_REASONS,
                     flow_score_scaled=flow_scaled, opts_ctx=opts_ctx,
-                ))
+                )
+                _attach_flow_components(_rej, row)
+                rejected.append(_rej)
                 continue
 
             rs = _relative_strength(df)
@@ -515,22 +567,26 @@ def run_price_validation_for_bearish_candidates(
                 wall_dist_pct = (spot - put_wall) / spot
                 wall_dist_atr = (spot - put_wall) / atr
                 if wall_dist_pct < WALL_PROXIMITY_REJECT_PCT and wall_dist_atr < WALL_PROXIMITY_REJECT_ATR:
-                    rejected.append(_build_rejection_row(
+                    _rej = _build_rejection_row(
                         ticker, "SHORT", flow_raw, price_signal, SHORT_ALL_REASONS,
                         reject_reason=f"wall_proximity ({wall_dist_pct:.1%}, {wall_dist_atr:.1f} ATR to put wall)",
                         flow_score_scaled=flow_scaled, opts_ctx=opts_ctx,
-                    ))
+                    )
+                    _attach_flow_components(_rej, row)
+                    rejected.append(_rej)
                     continue
 
             trade_plan = build_short_trade_plan(df, price_signal, options_ctx=opts_ctx, signal_bar_offset=signal_bar_offset)
 
             if trade_plan["rr_ratio"] < MIN_RR:
-                rejected.append(_build_rejection_row(
+                _rej = _build_rejection_row(
                     ticker, "SHORT", flow_raw, price_signal, SHORT_ALL_REASONS,
                     reject_reason=f"poor_rr ({trade_plan['rr_ratio']:.1f}:1)",
                     flow_score_scaled=flow_scaled, opts_ctx=opts_ctx,
                     trade_plan=trade_plan,
-                ))
+                )
+                _attach_flow_components(_rej, row)
+                rejected.append(_rej)
                 continue
 
             _opts_score = compute_options_context_score("SHORT", opts_ctx)
@@ -574,14 +630,17 @@ def run_price_validation_for_bearish_candidates(
             if sc:
                 for k, v in sc.items():
                     _row[f"price_{k}"] = v
+            _attach_flow_components(_row, row)
             accepted.append(_row)
 
         except Exception as e:
-            rejected.append(_build_rejection_row(
+            _rej = _build_rejection_row(
                 ticker, "SHORT", flow_raw, {}, SHORT_ALL_REASONS,
                 reject_reason=f"error: {e}",
                 flow_score_scaled=flow_scaled,
-            ))
+            )
+            _attach_flow_components(_rej, row)
+            rejected.append(_rej)
 
     return accepted, rejected
 
@@ -760,6 +819,9 @@ def run_flow_to_price_pipeline(
     market_regime = fetch_market_regime()
     rs = market_regime["regime_score"]
     print(f"  [regime] score={rs:.2f}  SPY={market_regime['spy_trend']}  VIX={market_regime.get('vix_close', '?')}  sizing_mult={market_regime['vix_sizing_mult']:.2f}")
+    regime_path = DATA_ROOT / "market_regime.json"
+    regime_path.parent.mkdir(parents=True, exist_ok=True)
+    regime_path.write_text(json.dumps(market_regime, default=str))
 
     prev_watchlist = load_watchlist()
     active_watchlist, expired_watchlist = prune_expired(prev_watchlist)
@@ -840,6 +902,7 @@ def run_flow_to_price_pipeline(
     promoted, still_watching, watch_rejected = reevaluate_watchlist(
         active_watchlist, fresh_tickers=fresh_tickers,
         signal_bar_offset=bar_offset,
+        flow_features=feature_table,
     )
 
     persistence = compute_persistence()

@@ -12,6 +12,7 @@ import json
 from datetime import date, timedelta
 from pathlib import Path
 
+from app.signals.pipeline import _FLOW_COMPONENT_KEYS
 from app.config import (
     WALL_PROXIMITY_REJECT_ATR,
     WALL_PROXIMITY_REJECT_PCT,
@@ -20,7 +21,7 @@ from app.config import (
 from app.features.options_context import fetch_options_context
 from app.features.price_features import clean_ohlcv, compute_features, fetch_ohlcv
 from app.signals.pipeline import _extract_pattern, combine_scores, compute_options_context_score
-from app.signals.scoring import score_long_setup, score_short_setup
+from app.signals.scoring import quick_reject_check, score_long_setup, score_short_setup
 from app.signals.trade_plan import build_long_trade_plan, build_short_trade_plan
 
 WATCHLIST_PATH = Path(__file__).resolve().parents[2] / "data" / "watchlist.json"
@@ -92,6 +93,9 @@ def add_candidates(
             "checks_failed": rej.get("checks_failed", ""),
             "price_score": rej.get("price_score"),
         }
+        for fk in _FLOW_COMPONENT_KEYS:
+            if fk in rej:
+                new_entry[fk] = rej[fk]
 
         if key not in keyed or new_entry["flow_score_raw"] > keyed[key]["flow_score_raw"]:
             keyed[key] = new_entry
@@ -103,6 +107,7 @@ def reevaluate_watchlist(
     entries: list[dict],
     fresh_tickers: set[tuple[str, str]] | None = None,
     signal_bar_offset: int = 0,
+    flow_features=None,
 ) -> tuple[list[dict], list[dict], list[dict]]:
     """Re-run price validation on watchlist entries using frozen flow scores.
 
@@ -115,6 +120,9 @@ def reevaluate_watchlist(
         skipped here because the fresh run already evaluated them.
     signal_bar_offset : int
         Passed through to scoring functions (1 = intraday mode).
+    flow_features : DataFrame, optional
+        Current scan's flow feature table, used to backfill flow component
+        data on entries that lack it.
 
     Returns
     -------
@@ -126,6 +134,10 @@ def reevaluate_watchlist(
         Rejection detail rows for display/logging.
     """
     from app.signals.pipeline import LONG_ALL_REASONS, SHORT_ALL_REASONS, _build_rejection_row
+
+    flow_lookup: dict[str, dict] = {}
+    if flow_features is not None and not flow_features.empty and "ticker" in flow_features.columns:
+        flow_lookup = flow_features.set_index("ticker").to_dict("index")
 
     fresh_tickers = fresh_tickers or set()
     promoted: list[dict] = []
@@ -142,10 +154,39 @@ def reevaluate_watchlist(
         flow_raw = entry["flow_score_raw"]
         flow_scaled = entry.get("flow_score_scaled", flow_raw)
 
+        if ticker in flow_lookup:
+            for fk in _FLOW_COMPONENT_KEYS:
+                if fk not in entry or entry[fk] is None:
+                    val = flow_lookup[ticker].get(fk)
+                    if val is not None:
+                        entry[fk] = val
+
         try:
             df = fetch_ohlcv(ticker)
             df = clean_ohlcv(df)
             df = compute_features(df)
+
+            all_reasons = LONG_ALL_REASONS if direction == "LONG" else SHORT_ALL_REASONS
+
+            should_reject, rej_reason, stub = quick_reject_check(df, direction)
+            if should_reject:
+                rej = _build_rejection_row(
+                    ticker, direction, flow_raw, stub, all_reasons,
+                    reject_reason="watchlist_reeval_failed",
+                    flow_score_scaled=flow_scaled,
+                )
+                for fk in _FLOW_COMPONENT_KEYS:
+                    if fk in entry and entry[fk] is not None:
+                        rej[fk] = entry[fk]
+                updated = dict(entry)
+                updated["checks_passed"] = rej["checks_passed"]
+                updated["checks_failed"] = rej["checks_failed"]
+                updated["reject_reason"] = rej["reject_reason"]
+                if rej.get("price_score") is not None:
+                    updated["price_score"] = rej["price_score"]
+                still_watching.append(updated)
+                watch_rejected.append(rej)
+                continue
 
             spot = float(df.iloc[-1]["close"])
             atr = float(df.iloc[-1]["atr14"])
@@ -156,14 +197,12 @@ def reevaluate_watchlist(
                 opts_ctx = None
 
             if direction == "LONG":
-                price_signal = score_long_setup(df, options_ctx=opts_ctx, signal_bar_offset=signal_bar_offset)
+                price_signal = score_long_setup(df, signal_bar_offset=signal_bar_offset)
                 price_signal["ticker"] = ticker
-                all_reasons = LONG_ALL_REASONS
                 build_plan = build_long_trade_plan
             else:
-                price_signal = score_short_setup(df, options_ctx=opts_ctx, signal_bar_offset=signal_bar_offset)
+                price_signal = score_short_setup(df, signal_bar_offset=signal_bar_offset)
                 price_signal["ticker"] = ticker
-                all_reasons = SHORT_ALL_REASONS
                 build_plan = build_short_trade_plan
 
             if price_signal["is_valid"]:
@@ -180,11 +219,21 @@ def reevaluate_watchlist(
                             rej = _build_rejection_row(
                                 ticker, direction, flow_raw, price_signal, all_reasons,
                                 reject_reason=f"wall_proximity ({wd_pct:.1%}, {wd_atr:.1f} ATR)",
+                                flow_score_scaled=flow_scaled,
+                                opts_ctx=opts_ctx,
                             )
+                            for fk in _FLOW_COMPONENT_KEYS:
+                                if fk in entry and entry[fk] is not None:
+                                    rej[fk] = entry[fk]
                             updated = dict(entry)
                             updated["checks_passed"] = rej["checks_passed"]
                             updated["checks_failed"] = rej["checks_failed"]
                             updated["reject_reason"] = rej["reject_reason"]
+                            if opts_ctx:
+                                _opts_score = compute_options_context_score(direction, opts_ctx)
+                                updated["options_context_score"] = _opts_score
+                                updated["options_context"] = opts_ctx
+                                rej["options_context_score"] = _opts_score
                             still_watching.append(updated)
                             watch_rejected.append(rej)
                             continue
@@ -226,17 +275,43 @@ def reevaluate_watchlist(
                     "price_snapshot": price_signal,
                     "options_context": opts_ctx,
                 })
+                for fk in _FLOW_COMPONENT_KEYS:
+                    if fk in entry and entry[fk] is not None:
+                        promoted[-1][fk] = entry[fk]
             else:
                 rej = _build_rejection_row(
                     ticker, direction, flow_raw, price_signal, all_reasons,
                     reject_reason="watchlist_reeval_failed",
+                    flow_score_scaled=flow_scaled,
+                    opts_ctx=opts_ctx,
                 )
+                for fk in _FLOW_COMPONENT_KEYS:
+                    if fk in entry and entry[fk] is not None:
+                        rej[fk] = entry[fk]
                 updated = dict(entry)
                 updated["checks_passed"] = rej["checks_passed"]
                 updated["checks_failed"] = rej["checks_failed"]
                 updated["reject_reason"] = rej["reject_reason"]
                 if rej.get("price_score") is not None:
                     updated["price_score"] = rej["price_score"]
+                sc = price_signal.get("score_components")
+                if sc:
+                    for k, v in sc.items():
+                        updated[f"price_{k}"] = v
+                        rej[f"price_{k}"] = v
+                if opts_ctx:
+                    _opts_score = compute_options_context_score(direction, opts_ctx)
+                    updated["options_context_score"] = _opts_score
+                    updated["options_context"] = opts_ctx
+                    rej["options_context_score"] = _opts_score
+                    for oc_key in ("gamma_regime", "net_gex", "gamma_flip_level_estimate",
+                                   "nearest_call_wall", "nearest_put_wall",
+                                   "distance_to_call_wall_pct", "distance_to_put_wall_pct",
+                                   "ticker_call_oi", "ticker_put_oi", "ticker_put_call_ratio",
+                                   "near_term_oi", "swing_dte_oi", "long_dated_oi"):
+                        rej[oc_key] = opts_ctx.get(oc_key)
+                updated["pattern"] = _extract_pattern(price_signal.get("reasons", []))
+                rej["pattern"] = updated["pattern"]
                 still_watching.append(updated)
                 watch_rejected.append(rej)
 
@@ -245,6 +320,9 @@ def reevaluate_watchlist(
                 ticker, direction, flow_raw, {}, set(),
                 reject_reason=f"watchlist_error: {e}",
             )
+            for fk in _FLOW_COMPONENT_KEYS:
+                if fk in entry and entry[fk] is not None:
+                    rej[fk] = entry[fk]
             updated = dict(entry)
             updated["checks_passed"] = rej["checks_passed"]
             updated["checks_failed"] = rej["checks_failed"]

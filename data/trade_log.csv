@@ -1,5 +1,1 @@
-ticker,direction,entry_date,exit_date,entry_price,exit_price,shares,risk_pct,pnl_pct,pnl_dollar,r_multiple,days_held,exit_reason,trail_method,final_score,flow_score_scaled,partial_pnl_pct
-CMG,SHORT,2026-03-20,2026-03-21,33.37,33.37,50,0.02,0.0,0.0,0.0,4,stop,hybrid,8.9965,9.660826617573965,0.0
-QQQ,SHORT,2026-03-20,2026-03-21,582.06,582.06,4,0.015,0.0,0.0,0.0,4,stop,hybrid,7.2492,6.748671485186529,0.0
-IWM,SHORT,2026-03-20,2026-03-21,242.22,242.22,5,0.015,0.0,0.0,0.0,4,stop,hybrid,7.1286,6.547743682110134,0.0
-HOOD,SHORT,2026-03-20,2026-03-21,70.89,70.89,17,0.015,0.0,0.0,0.0,4,stop,hybrid,7.0823,6.470575493583476,0.0
+ticker,direction,pattern,entry_date,exit_date,entry_price,exit_price,shares,risk_pct,pnl_pct,pnl_dollar,r_multiple,days_held,exit_reason,trail_method,final_score,flow_score_scaled,partial_pnl_pct

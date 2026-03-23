@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import pandas as pd
 
-from app.features.price_features import _session_elapsed_frac
 from app.rules.continuation_rules import (
     detect_trend,
     find_support_resistance,
@@ -40,10 +39,10 @@ def _clip(val: float, lo: float = 0.0, hi: float = 1.0) -> float:
 
 
 def _trend_score(trend_ok: bool, strength: float) -> float:
-    """0-2.5: direction must match, then scaled by strength."""
+    """0-3.0: direction must match, then scaled by strength."""
     if not trend_ok:
         return 0.0
-    return 1.25 + 1.25 * _clip(strength, 0.0, 1.0)
+    return 1.5 + 1.5 * _clip(strength, 0.0, 1.0)
 
 
 def _extension_score(df: pd.DataFrame, max_distance_atr: float) -> tuple[bool, float]:
@@ -117,44 +116,8 @@ def _pattern_score(
     if bounce:
         return 1.0, "bounce"
     if clean_trend:
-        return 0.8, "trend_cont"
+        return 1.4, "trend_cont"
     return 0.0, ""
-
-
-def _pattern_candle_bonus(pattern_key: str, df: pd.DataFrame, is_long: bool) -> float:
-    """0-0.5: candle quality as a pattern amplifier.
-
-    Breakout/trend patterns reward a strong directional close.
-    Pullback/bounce patterns reward a rejection wick.
-    No pattern returns 0 — candle quality is meaningless without context.
-    """
-    if not pattern_key or df.empty:
-        return 0.0
-    last = df.iloc[-1]
-    candle_range = last["high"] - last["low"]
-    if candle_range <= 0:
-        return 0.0
-
-    if pattern_key in _BREAKOUT_PATTERNS:
-        close_pos = (last["close"] - last["low"]) / candle_range
-        if is_long:
-            return _clip((close_pos - 0.5) / 0.4) * 0.5 if last["close"] > last["open"] else 0.0
-        else:
-            return _clip((0.5 - close_pos) / 0.4) * 0.5 if last["close"] < last["open"] else 0.0
-
-    if pattern_key in _PULLBACK_PATTERNS:
-        body = abs(last["close"] - last["open"]) or 1e-9
-        if is_long:
-            wick = min(last["open"], last["close"]) - last["low"]
-            mid_ok = last["close"] > (last["low"] + candle_range * 0.5)
-        else:
-            wick = last["high"] - max(last["open"], last["close"])
-            mid_ok = last["close"] < (last["low"] + candle_range * 0.5)
-        if not mid_ok:
-            return 0.0
-        return _clip((wick / body - 0.5) / 2.0) * 0.5
-
-    return 0.0
 
 
 def _confirmation_volume_score(df: pd.DataFrame) -> float:
@@ -168,7 +131,7 @@ def _confirmation_volume_score(df: pd.DataFrame) -> float:
 
 
 def _momentum_score(df: pd.DataFrame, is_long: bool, lookback: int = 5) -> float:
-    """0-1.5: signal bar's close position in the recent high-low range.
+    """0-2.0: signal bar's close position in the recent high-low range.
 
     Close near the top of the 5-bar range rewards longs (directional energy
     is upward). Close near the bottom rewards shorts.
@@ -183,32 +146,7 @@ def _momentum_score(df: pd.DataFrame, is_long: bool, lookback: int = 5) -> float
         return 0.0
     pos = (float(df.iloc[-1]["close"]) - low_n) / rng
     raw = _clip(pos) if is_long else _clip(1.0 - pos)
-    return raw * 1.5
-
-
-_BREAKOUT_PATTERNS = {"structural", "flag", "trend_cont"}
-_PULLBACK_PATTERNS = {"pullback", "ema", "confluence", "retest", "bounce"}
-
-
-def _pattern_volume_bonus(pattern_key: str, df: pd.DataFrame, lookback: int = 3) -> float:
-    """0-0.5: volume quality conditional on pattern type.
-
-    Breakout patterns reward high preceding volume (institutional conviction).
-    Pullback patterns reward low preceding volume (orderly profit-taking).
-    No pattern returns 0.
-    """
-    if not pattern_key or len(df) < lookback + 1 or "rel_volume" not in df.columns:
-        return 0.0
-    window = df.iloc[-(lookback + 1):-1]
-    avg_rel = window["rel_volume"].mean()
-    if pd.isna(avg_rel):
-        return 0.0
-
-    if pattern_key in _BREAKOUT_PATTERNS:
-        return _clip((avg_rel - 1.0) / 1.5) * 0.5
-    if pattern_key in _PULLBACK_PATTERNS:
-        return _clip((1.3 - avg_rel) / 0.6) * 0.5
-    return 0.0
+    return raw * 2.0
 
 
 # ---------------------------------------------------------------------------
@@ -258,6 +196,53 @@ def _build_result(
 
 
 # ---------------------------------------------------------------------------
+# Early rejection pre-check — avoids expensive API calls
+# ---------------------------------------------------------------------------
+
+def quick_reject_check(
+    df: pd.DataFrame,
+    direction: str,
+) -> tuple[bool, str | None, dict]:
+    """Cheap hard-gate check using only price data.
+
+    Returns (should_reject, reject_reason, price_signal_stub).
+    The stub carries enough info for _build_rejection_row.
+    """
+    trend = detect_trend(df)
+    trend_dir = trend["trend"]
+
+    if direction == "LONG":
+        trend_opposite = trend_dir == "SHORT"
+    else:
+        trend_opposite = trend_dir == "LONG"
+
+    _, ext_sc = _extension_score(df, MAX_DISTANCE_FROM_EMA20_ATR)
+    not_extended_ok = ext_sc > 0
+
+    if not trend_opposite and not_extended_ok:
+        return False, None, {}
+
+    reason = "trend_not_aligned" if trend_opposite else "price_over_extended"
+    stub: dict = {
+        "score": 0,
+        "is_valid": False,
+        "state": "REJECT",
+        "reasons": [],
+        "checks_passed": [],
+        "checks_failed": ["trend_aligned"] if trend_opposite else ["not_extended"],
+        "score_components": {
+            "trend": 0.0,
+            "extension": round(ext_sc, 2),
+            "room": 0.0,
+            "pattern": 0.0,
+            "momentum": 0.0,
+            "confirm_vol": 0.0,
+        },
+    }
+    return True, reason, stub
+
+
+# ---------------------------------------------------------------------------
 # Main scoring functions — continuous 0-10
 # ---------------------------------------------------------------------------
 
@@ -286,7 +271,6 @@ _SHORT_PATTERN_LABELS = {
 
 def score_long_setup(
     df: pd.DataFrame,
-    options_ctx: dict | None = None,
     signal_bar_offset: int = 0,
 ) -> dict:
     """Score a long continuation setup on a continuous 0-10 scale."""
@@ -298,7 +282,10 @@ def score_long_setup(
     trend_opposite = trend["trend"] == "SHORT"
     trend_strength = trend.get("strength", 0.0)
 
-    structural_bo = is_structural_breakout(df, levels["structural_high"])
+    structural_bo = (
+        levels["structural_resistance_touches"] >= 2
+        and is_structural_breakout(df, levels["structural_resistance"])
+    )
     max_dist = BREAKOUT_MAX_DISTANCE_ATR if structural_bo else MAX_DISTANCE_FROM_EMA20_ATR
     not_extended_ok, ext_sc = _extension_score(df, max_dist)
 
@@ -326,25 +313,15 @@ def score_long_setup(
         confluence=pullback_ema_confluence, retest=retest_confirm,
         clean_trend=clean_trend,
     )
-    vol_quality = _pattern_volume_bonus(pattern_key, df)
-
-    candle_df = df.iloc[:-1] if signal_bar_offset and len(df) > 1 else df
-    candle_bonus = _pattern_candle_bonus(pattern_key, candle_df, is_long=True)
-    if signal_bar_offset and len(df) > 1:
-        today_bonus = _pattern_candle_bonus(pattern_key, df, is_long=True)
-        frac = _session_elapsed_frac() or 1.0
-        discount = min(1.0, frac + 0.3)
-        candle_bonus = max(candle_bonus, today_bonus * discount)
-
     intraday = signal_bar_offset and len(df) > 1 and df.iloc[-1].get("is_intraday", False)
-    conf_vol_df = df if intraday else candle_df
+    conf_vol_df = df if intraday else (df.iloc[:-1] if signal_bar_offset and len(df) > 1 else df)
     confirmation_volume_ok = has_volume_confirmation(conf_vol_df)
     vol_conf_sc = _confirmation_volume_score(conf_vol_df)
 
     momentum_sc = _momentum_score(df, is_long=True)
     trend_sc = _trend_score(trend_ok, trend_strength)
 
-    score = trend_sc + ext_sc + room_sc + pattern_sc + vol_quality + candle_bonus + momentum_sc + vol_conf_sc
+    score = trend_sc + ext_sc + room_sc + pattern_sc + momentum_sc + vol_conf_sc
     score = min(10.0, score)
 
     reasons: list[str] = []
@@ -378,14 +355,6 @@ def score_long_setup(
     else:
         checks_failed.append("continuation_pattern")
 
-    if vol_quality > 0:
-        vol_label = "breakout_volume" if pattern_key in _BREAKOUT_PATTERNS else "pullback_volume"
-        reasons.append(vol_label)
-        checks_passed.append(vol_label)
-    elif pattern_key:
-        vol_label = "breakout_volume" if pattern_key in _BREAKOUT_PATTERNS else "pullback_volume"
-        checks_failed.append(vol_label)
-
     if confirmation_volume_ok:
         reasons.append("confirmation_volume")
         checks_passed.append("confirmation_volume")
@@ -403,8 +372,6 @@ def score_long_setup(
         "extension": round(ext_sc, 2),
         "room": round(room_sc, 2),
         "pattern": round(pattern_sc, 2),
-        "pattern_vol": round(vol_quality, 2),
-        "pattern_candle": round(candle_bonus, 2),
         "momentum": round(momentum_sc, 2),
         "confirm_vol": round(vol_conf_sc, 2),
     }
@@ -435,7 +402,6 @@ def score_long_setup(
 
 def score_short_setup(
     df: pd.DataFrame,
-    options_ctx: dict | None = None,
     signal_bar_offset: int = 0,
 ) -> dict:
     """Score a short continuation setup on a continuous 0-10 scale."""
@@ -447,7 +413,10 @@ def score_short_setup(
     trend_opposite = trend["trend"] == "LONG"
     trend_strength = trend.get("strength", 0.0)
 
-    structural_bd = is_structural_breakdown(df, levels["structural_low"])
+    structural_bd = (
+        levels["structural_support_touches"] >= 2
+        and is_structural_breakdown(df, levels["structural_support"])
+    )
     max_dist = BREAKOUT_MAX_DISTANCE_ATR if structural_bd else MAX_DISTANCE_FROM_EMA20_ATR
     not_extended_ok, ext_sc = _extension_score(df, max_dist)
 
@@ -475,25 +444,15 @@ def score_short_setup(
         confluence=pullback_ema_confluence, retest=retest_confirm,
         clean_trend=clean_trend,
     )
-    vol_quality = _pattern_volume_bonus(pattern_key, df)
-
-    candle_df = df.iloc[:-1] if signal_bar_offset and len(df) > 1 else df
-    candle_bonus = _pattern_candle_bonus(pattern_key, candle_df, is_long=False)
-    if signal_bar_offset and len(df) > 1:
-        today_bonus = _pattern_candle_bonus(pattern_key, df, is_long=False)
-        frac = _session_elapsed_frac() or 1.0
-        discount = min(1.0, frac + 0.3)
-        candle_bonus = max(candle_bonus, today_bonus * discount)
-
     intraday = signal_bar_offset and len(df) > 1 and df.iloc[-1].get("is_intraday", False)
-    conf_vol_df = df if intraday else candle_df
+    conf_vol_df = df if intraday else (df.iloc[:-1] if signal_bar_offset and len(df) > 1 else df)
     confirmation_volume_ok = has_volume_confirmation(conf_vol_df)
     vol_conf_sc = _confirmation_volume_score(conf_vol_df)
 
     momentum_sc = _momentum_score(df, is_long=False)
     trend_sc = _trend_score(trend_ok, trend_strength)
 
-    score = trend_sc + ext_sc + room_sc + pattern_sc + vol_quality + candle_bonus + momentum_sc + vol_conf_sc
+    score = trend_sc + ext_sc + room_sc + pattern_sc + momentum_sc + vol_conf_sc
     score = min(10.0, score)
 
     reasons: list[str] = []
@@ -527,14 +486,6 @@ def score_short_setup(
     else:
         checks_failed.append("continuation_pattern")
 
-    if vol_quality > 0:
-        vol_label = "breakout_volume" if pattern_key in _BREAKOUT_PATTERNS else "pullback_volume"
-        reasons.append(vol_label)
-        checks_passed.append(vol_label)
-    elif pattern_key:
-        vol_label = "breakout_volume" if pattern_key in _BREAKOUT_PATTERNS else "pullback_volume"
-        checks_failed.append(vol_label)
-
     if confirmation_volume_ok:
         reasons.append("confirmation_volume")
         checks_passed.append("confirmation_volume")
@@ -552,8 +503,6 @@ def score_short_setup(
         "extension": round(ext_sc, 2),
         "room": round(room_sc, 2),
         "pattern": round(pattern_sc, 2),
-        "pattern_vol": round(vol_quality, 2),
-        "pattern_candle": round(candle_bonus, 2),
         "momentum": round(momentum_sc, 2),
         "confirm_vol": round(vol_conf_sc, 2),
     }

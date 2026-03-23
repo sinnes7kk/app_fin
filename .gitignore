@@ -31,5 +31,9 @@ data/positions.json
 # ...but track persistent state needed across automated runs
 !data/raw_flow/*.csv
 !data/trade_log.csv
+!data/final_signals/*.csv
+!data/ranked_candidates/*.csv
+!data/flow_features/*.csv
+!data/equity_curve.csv
 !data/positions.json
 !data/watchlist.json

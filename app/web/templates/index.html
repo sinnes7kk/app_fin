@@ -10,7 +10,7 @@
   <header>
     <h1>app_fin</h1>
     <span class="meta">Local dashboard — data from <code>data/</code> + live UW alerts on demand</span>
-    <span class="timestamp">{{ last_updated }}</span>
+    <span class="timestamp">Last scan: <strong>{{ scan_timestamp }}</strong> &nbsp;|&nbsp; Page loaded: {{ last_updated }}</span>
   </header>
 
   <nav class="tabs pills" role="tablist">
@@ -24,6 +24,18 @@
     <button type="button" data-tab="performance" role="tab">Performance</button>
   </nav>
 
+  {% if regime %}
+  <div class="regime-bar">
+    {% set rs = regime.regime_score | default(0.5) %}
+    {% set rs_class = "regime-bullish" if rs >= 0.65 else ("regime-bearish" if rs <= 0.35 else "regime-neutral") %}
+    <span class="regime-item"><strong>Regime</strong> <span class="regime-badge {{ rs_class }}">{{ "%.2f"|format(rs) }}</span></span>
+    <span class="regime-item"><strong>SPY</strong> {{ regime.spy_trend | default("—") }}{% if regime.spy_close %} {{ "%.1f"|format(regime.spy_close) }}{% endif %}</span>
+    {% if regime.vix_close %}<span class="regime-item"><strong>VIX</strong> {{ "%.1f"|format(regime.vix_close) }}{% if regime.vix_sizing_mult %} &times;{{ "%.2f"|format(regime.vix_sizing_mult) }} size{% endif %}</span>{% endif %}
+    <span class="regime-item"><strong>Threshold</strong> Long &ge; {{ "%.1f"|format(7.0 + (1.0 - rs) * 1.0) }}, Short &ge; {{ "%.1f"|format(7.0 + rs * 1.0) }}</span>
+    <span class="regime-item regime-components">spy={{ "%.2f"|format(regime._spy_alignment | default(0.5)) }} vix={{ "%.2f"|format(regime._vix_component | default(0.5)) }} rvol={{ "%.2f"|format(regime._rvol_component | default(0.5)) }} tide={{ "%.2f"|format(regime._tide_component | default(0.5)) }}</span>
+  </div>
+  {% endif %}
+
   <main>
     {% macro sort_select(param_name, current) %}
     <select class="sort-select" data-sort-param="{{ param_name }}" aria-label="Sort by">
@@ -35,13 +47,58 @@
     </select>
     {% endmacro %}
 
+    {% macro filter_bar(panel_id) %}
+    <button type="button" class="filter-toggle" aria-expanded="false" data-filter-panel="{{ panel_id }}">Filters</button>
+    <div class="filter-bar" id="filter-{{ panel_id }}">
+      <div class="filter-group">
+        <label>Pattern</label>
+        <div class="filter-pills" data-filter="pattern">
+          <button type="button" class="filter-pill" data-val="structural">structural</button>
+          <button type="button" class="filter-pill" data-val="flag">flag</button>
+          <button type="button" class="filter-pill" data-val="confluence">confluence</button>
+          <button type="button" class="filter-pill" data-val="pullback">pullback</button>
+          <button type="button" class="filter-pill" data-val="retest">retest</button>
+          <button type="button" class="filter-pill" data-val="ema">ema</button>
+          <button type="button" class="filter-pill" data-val="bounce">bounce</button>
+          <button type="button" class="filter-pill" data-val="trend_cont">trend cont</button>
+          <button type="button" class="filter-pill" data-val="">none</button>
+        </div>
+      </div>
+      <div class="filter-group">
+        <label>Reason</label>
+        <select data-filter="reject">
+          <option value="">all</option>
+          <option value="weak_bullish_flow">weak bull flow</option>
+          <option value="weak_bearish_flow">weak bear flow</option>
+          <option value="price_validation_failed">price failed</option>
+          <option value="poor_rr">poor R:R</option>
+          <option value="wall_proximity">wall proximity</option>
+          <option value="weak_relative_strength">weak RS</option>
+        </select>
+      </div>
+      <div class="filter-group">
+        <label>Min scores</label>
+        <input type="number" data-filter="flow-min" placeholder="Flow" step="0.5" min="0" max="10">
+        <input type="number" data-filter="price-min" placeholder="Price" step="0.5" min="0" max="10">
+        <input type="number" data-filter="options-min" placeholder="Opts" step="0.5" min="0" max="10">
+      </div>
+      <div class="filter-group">
+        <label>Check</label>
+        <input type="text" data-filter="check-search" placeholder="e.g. momentum">
+      </div>
+      <button type="button" class="filter-clear" data-filter-panel="{{ panel_id }}">Clear</button>
+      <span class="filter-status" data-filter-status="{{ panel_id }}"></span>
+    </div>
+    {% endmacro %}
+
     <section id="panel-signals" class="panel active" role="tabpanel">
       <div class="panel-header">
         <h2>Final signals</h2>
         {{ sort_select("sort_sig", sort_sig) }}
+        {{ filter_bar("signals") }}
       </div>
       {{ signals_insights | safe }}
-      {% if signals_src %}<p class="src">Source: {{ signals_src }}</p>{% endif %}
+      <p class="src">Scan: {{ scan_timestamp }}</p>
       {{ signals_html | safe }}
       <div id="detail-signals" class="detail-panel" style="display:none"></div>
     </section>
@@ -52,17 +109,24 @@
         <div id="candidates-pills" class="pill-group" role="group" aria-label="Candidate side">
           <button type="button" class="active" data-cand-side="bullish" aria-pressed="true">Bullish</button>
           <button type="button" data-cand-side="bearish" aria-pressed="false">Bearish</button>
+          <button type="button" data-cand-side="near" aria-pressed="false">Near threshold</button>
         </div>
         {{ sort_select("sort_bull", sort_bull) }}
+        {{ filter_bar("candidates") }}
       </div>
       {{ candidates_insights | safe }}
+      {% if trivial_rejected_count %}<p class="src">{{ trivial_rejected_count }} trivial rejections hidden (weak flow, wrong trend, errors)</p>{% endif %}
       <div id="candidates-bullish" class="candidates-view">
-        {% if bull_src %}<p class="src">{{ bull_src }}</p>{% endif %}
+        <p class="src">Scan: {{ scan_timestamp }}</p>
         {{ bull_html | safe }}
       </div>
       <div id="candidates-bearish" class="candidates-view" style="display:none">
-        {% if bear_src %}<p class="src">{{ bear_src }}</p>{% endif %}
+        <p class="src">Scan: {{ scan_timestamp }}</p>
         {{ bear_html | safe }}
+      </div>
+      <div id="candidates-near" class="candidates-view" style="display:none">
+        <p class="tab-intro">Candidates within 2 points of the regime-adjusted threshold (Long &ge; {{ near_threshold_long }}, Short &ge; {{ near_threshold_short }}). These are the closest to becoming actionable signals.</p>
+        {{ near_html | safe }}
       </div>
       <div id="detail-candidates" class="detail-panel" style="display:none"></div>
     </section>
@@ -83,10 +147,12 @@
           <button type="button" data-rej-view="watchlist" aria-pressed="false">Watchlist</button>
         </div>
         {{ sort_select("sort_rej", sort_rej) }}
+        {{ filter_bar("rejected") }}
       </div>
       {{ rejected_insights | safe }}
       <div id="rejected-view" class="rejected-view">
-        {% if rejected_src %}<p class="src">{{ rejected_src }} (truncated)</p>{% endif %}
+        <p class="src">Scan: {{ scan_timestamp }}</p>
+        {% if trivial_rejected_count %}<p class="src">{{ trivial_rejected_count }} trivial rejections hidden (weak flow, wrong trend, errors)</p>{% endif %}
         {{ rejected_html | safe }}
       </div>
       <div id="watchlist-view" class="rejected-view" style="display:none">
@@ -110,7 +176,7 @@
 
     <section id="panel-flow" class="panel" role="tabpanel">
       <h2>Flow feature table</h2>
-      {% if flow_src %}<p class="src">{{ flow_src }} (truncated)</p>{% endif %}
+      <p class="src">Scan: {{ scan_timestamp }}</p>
       {{ flow_html | safe }}
     </section>
 
@@ -256,6 +322,7 @@
       signals: {{ signals_detail | default([], true) | tojson }},
       bull: {{ bull_detail | default([], true) | tojson }},
       bear: {{ bear_detail | default([], true) | tojson }},
+      near: {{ near_detail | default([], true) | tojson }},
       rejected: {{ rejected_detail | default([], true) | tojson }},
       watchlist: {{ watchlist_detail | default([], true) | tojson }}
     };
@@ -284,6 +351,7 @@
       signals: indexByTicker(DETAIL_DATA.signals),
       bull: indexByTicker(DETAIL_DATA.bull),
       bear: indexByTicker(DETAIL_DATA.bear),
+      near: indexByTicker(DETAIL_DATA.near),
       rejected: indexByTicker(DETAIL_DATA.rejected),
       watchlist: indexByTicker(DETAIL_DATA.watchlist)
     };
@@ -584,6 +652,14 @@
         { name: "DTE quality",       weight: "5%",  val: _num(m.dte_score),                   fmtFn: fmt,        thresh: [0.8, 0.5] },
         { name: "Breadth",           weight: "5%",  val: _num(m[dir + "_breadth"]),             fmtFn: fmt,        thresh: [0.5, 0.2] }
       ];
+      var allZero = components.every(function(c) { return c.val === 0; });
+      var flowScore = _num(m.flow_score_scaled);
+      if (allZero && flowScore > 3) {
+        return '<div class="detail-section"><h4>Flow score components</h4>' +
+          '<p class="tab-intro">Component breakdown unavailable — this entry was added to the watchlist before component-level data was persisted. ' +
+          'The flow score (' + flowScore.toFixed(2) + '/10) was computed at discovery and is still valid. ' +
+          'Component data will populate when this ticker next appears in the flow scanner.</p></div>';
+      }
       var html = '<div class="detail-section"><h4>Flow score components</h4>' +
         '<table class="flow-components"><thead><tr><th>Component</th><th>Weight</th><th>Value</th><th>Rating</th></tr></thead><tbody>';
       for (var i = 0; i < components.length; i++) {
@@ -710,8 +786,6 @@
       var failedSoft = [];
       if (failed.room_to_target) failedSoft.push("room to target");
       if (failed.continuation_pattern) failedSoft.push("continuation pattern");
-      if (failed.pullback_volume) failedSoft.push("pullback volume");
-      if (failed.breakout_volume) failedSoft.push("breakout volume");
       if (failed.confirmation_volume) failedSoft.push("confirmation volume");
       if (failed.momentum_aligned) failedSoft.push("momentum");
 
@@ -735,7 +809,7 @@
       poor_rr: "R:R ratio must be at least 2.0:1 \u2014 tighten stop or widen target",
       wall_proximity: "Opposing options wall is too close \u2014 wait for wall to clear",
       weak_relative_strength: "Ticker is underperforming SPY \u2014 needs RS > -2% for longs",
-      watchlist_reeval_failed: "Previously watchlisted \u2014 still fails price validation on re-check"
+      watchlist_reeval_failed: "Watchlist \u2014 price setup not yet valid, re-evaluated each scan"
     };
 
     function buildVerdictDl(m) {
@@ -829,17 +903,20 @@
       if (hasAnyPriceData) {
         var pt = _num(m.price_trend), pe = _num(m.price_extension), pr = _num(m.price_room);
         var pp = _num(m.price_pattern);
-        var pvq = _num(m.price_pattern_vol), ppc = _num(m.price_pattern_candle);
         var pcv = _num(m.price_confirm_vol);
         var pmom = _num(m.price_momentum);
 
-        priceGates.push(_gateRow(!!passed.trend_aligned, "Trend quality",
-          (pt ? pt.toFixed(2) + " / 2.5" : "") + (passed.strong_trend ? " (strong)" : "")));
-        priceGates.push(_gateRow(!!passed.not_extended, "Not extended",
-          pe ? pe.toFixed(2) + " / 1.0" : "within 2 ATR of EMA20"));
+        var _trendHint = pt >= 2.0 ? "strong trend" : pt > 0 ? "moderate / neutral trend" : "opposing trend";
+        priceGates.push(_gateRow(!!passed.trend_aligned, "Trend quality \u2014 EMA slope + ADX alignment",
+          (pt ? pt.toFixed(2) + " / 3.0 \u2014 " + _trendHint : "0 \u2014 trend opposing direction")));
 
-        priceGates.push(_gateRow(!!passed.room_to_target, "Room to target",
-          pr ? pr.toFixed(2) + " / 1.0" : ""));
+        var _extHint = pe >= 0.8 ? "close to EMA" : pe > 0 ? "moderately extended" : "too far from EMA20";
+        priceGates.push(_gateRow(!!passed.not_extended, "Price extension \u2014 distance from EMA20 in ATR",
+          pe ? pe.toFixed(2) + " / 1.0 \u2014 " + _extHint : "0 \u2014 " + _extHint));
+
+        var _roomHint = pr >= 0.7 ? "ample room" : pr > 0 ? "limited room" : "nearest S/R cluster too close (<1 ATR away)";
+        priceGates.push(_gateRow(!!passed.room_to_target, "Room to target \u2014 distance to nearest structural S/R",
+          pr ? pr.toFixed(2) + " / 1.0 \u2014 " + _roomHint : "0.00 / 1.0 \u2014 " + _roomHint));
 
         var contLabels = ["structural_breakout", "structural_breakdown", "bounce_and_fail",
           "flag_breakout", "flag_breakdown", "support_ema_confluence", "resistance_ema_confluence",
@@ -849,20 +926,19 @@
         for (var ci = 0; ci < contLabels.length; ci++) {
           if (passed[contLabels[ci]]) { contMatch = contLabels[ci]; break; }
         }
-        priceGates.push(_gateRow(!!contMatch, "Continuation pattern",
-          (pp ? pp.toFixed(1) + " / 2.0" : "") + (contMatch ? " \u2014 " + contMatch : " \u2014 none matched")));
+        var _patHint = contMatch
+          ? " \u2014 " + contMatch + " (2.0=structural break, 1.6=flag/confluence, 1.4=pullback/retest/trend cont, 1.2=EMA, 1.0=bounce)"
+          : " \u2014 none of the 8 pattern types matched";
+        priceGates.push(_gateRow(!!contMatch, "Continuation pattern \u2014 best matching setup",
+          (pp ? pp.toFixed(1) + " / 2.0" : "0.0 / 2.0") + _patHint));
 
-        var isBreakoutPat = contMatch && (contMatch.indexOf("breakout") >= 0 || contMatch.indexOf("breakdown") >= 0 || contMatch === "trend_continuation");
-        var volLabel = isBreakoutPat ? "Breakout volume" : "Pullback volume";
-        var volPassed = !!passed.breakout_volume || !!passed.pullback_volume;
-        priceGates.push(_gateRow(volPassed, volLabel,
-          pvq ? pvq.toFixed(2) + " / 0.5" : (contMatch ? "" : "n/a \u2014 no pattern")));
-        priceGates.push(_gateRow(ppc > 0, "Pattern candle",
-          ppc ? ppc.toFixed(2) + " / 0.5" : (contMatch ? "" : "n/a \u2014 no pattern")));
-        priceGates.push(_gateRow(!!passed.confirmation_volume, "Confirmation volume",
-          pcv ? pcv.toFixed(2) + " / 1.0" : ""));
-        priceGates.push(_gateRow(!!passed.momentum_aligned, "Momentum",
-          pmom ? pmom.toFixed(2) + " / 1.5" : ""));
+        var _cvHint = pcv >= 0.8 ? "strong volume confirmation" : pcv > 0.3 ? "moderate volume" : pcv > 0 ? "weak volume" : "below-average volume";
+        priceGates.push(_gateRow(!!passed.confirmation_volume, "Confirmation volume \u2014 signal bar vs 20-day avg",
+          pcv ? pcv.toFixed(2) + " / 1.0 \u2014 " + _cvHint : "0.00 / 1.0 \u2014 " + _cvHint));
+
+        var _momHint = pmom >= 1.2 ? "strong directional momentum" : pmom > 0.6 ? "moderate momentum" : pmom > 0 ? "weak momentum" : "price near range midpoint";
+        priceGates.push(_gateRow(!!passed.momentum_aligned, "Momentum \u2014 signal bar position in 5-bar range",
+          pmom ? pmom.toFixed(2) + " / 2.0 \u2014 " + _momHint : "0.00 / 2.0 \u2014 " + _momHint));
       } else {
         var skipReason = isLong
           ? "Bullish flow premium did not exceed bearish by 1.5\u00d7."
@@ -980,7 +1056,7 @@
 
     function buildPriceActionDl(m) {
       var parts = [];
-      parts.push('<p class="tab-intro">Daily chart quality checks. Score budget: trend (0-2.5), extension (0-1), room (0-1), continuation pattern (0-2), pattern volume (0-0.5), pattern candle (0-0.5), momentum (0-1.5), confirmation volume (0-1). Patterns ranked: structural breakout &gt; flag &gt; S/R+EMA confluence &gt; structural pullback &gt; retest &amp; confirm &gt; EMA pullback &gt; bounce &gt; trend continuation (clean grinder fallback when no specific pattern detected, 6+ of 10 bars with higher lows/lower highs). Both pattern volume and pattern candle are conditional on pattern type and score zero without a pattern. Momentum measures signal bar position in the 5-bar range.</p>');
+      parts.push('<p class="tab-intro">Daily chart quality checks. Score budget: trend (0-3), extension (0-1), room (0-1), continuation pattern (0-2), confirmation volume (0-1), momentum (0-2). Patterns ranked: structural breakout &gt; flag &gt; S/R+EMA confluence &gt; structural pullback &gt; retest &amp; confirm &gt; EMA pullback &gt; bounce &gt; trend continuation (clean grinder fallback, 6+ of 10 bars with higher lows/lower highs). Momentum measures signal bar position in the 5-bar range.</p>');
       var ctx = detailSection("Price action", [
         ["Pattern", m.pattern],
         ["Time stop (days)", m.time_stop_days],
@@ -1319,11 +1395,13 @@
           });
           var bullEl = document.getElementById("candidates-bullish");
           var bearEl = document.getElementById("candidates-bearish");
+          var nearEl = document.getElementById("candidates-near");
           if (bullEl) bullEl.style.display = side === "bullish" ? "" : "none";
           if (bearEl) bearEl.style.display = side === "bearish" ? "" : "none";
+          if (nearEl) nearEl.style.display = side === "near" ? "" : "none";
           var candSort = candPills.closest(".panel-header").querySelector(".sort-select");
           if (candSort) {
-            var newParam = side === "bearish" ? "sort_bear" : "sort_bull";
+            var newParam = side === "near" ? "sort_bull" : (side === "bearish" ? "sort_bear" : "sort_bull");
             candSort.setAttribute("data-sort-param", newParam);
             var urlParams = new URLSearchParams(window.location.search);
             candSort.value = urlParams.get(newParam) || "";
@@ -1362,6 +1440,7 @@
         var candIdx = {};
         for (var kb in IDX.bull) candIdx[kb] = IDX.bull[kb];
         for (var kbe in IDX.bear) candIdx[kbe] = IDX.bear[kbe];
+        for (var kn in IDX.near) candIdx[kn] = IDX.near[kn];
         wirePanelCardClicks(candPanel, "detail-candidates", "candidate", candIdx);
       }
       if (rejPanel) {
@@ -1503,6 +1582,147 @@
               status.textContent = "Request failed: " + e;
             });
         });
+      }
+    })();
+
+    /* ── Card filter system ── */
+    (function () {
+      var PANEL_IDS = ["signals", "candidates", "rejected"];
+
+      function getBar(pid) { return document.getElementById("filter-" + pid); }
+
+      // Toggle open/close
+      document.querySelectorAll(".filter-toggle").forEach(function (btn) {
+        btn.addEventListener("click", function () {
+          var pid = btn.getAttribute("data-filter-panel");
+          var bar = getBar(pid);
+          if (!bar) return;
+          var open = bar.classList.toggle("open");
+          btn.setAttribute("aria-expanded", open ? "true" : "false");
+        });
+      });
+
+      // Pattern pill toggle (multi-select)
+      document.querySelectorAll(".filter-pills").forEach(function (group) {
+        group.addEventListener("click", function (e) {
+          var pill = e.target.closest(".filter-pill");
+          if (!pill) return;
+          pill.classList.toggle("active");
+          var bar = pill.closest(".filter-bar");
+          if (bar) applyFilters(bar.id.replace("filter-", ""));
+        });
+      });
+
+      // Dropdown / input change
+      document.querySelectorAll(".filter-bar select, .filter-bar input").forEach(function (el) {
+        var evt = el.tagName === "INPUT" && el.type === "text" ? "input" : "change";
+        el.addEventListener(evt, function () {
+          var bar = el.closest(".filter-bar");
+          if (bar) applyFilters(bar.id.replace("filter-", ""));
+        });
+      });
+
+      // Clear
+      document.querySelectorAll(".filter-clear").forEach(function (btn) {
+        btn.addEventListener("click", function () {
+          var pid = btn.getAttribute("data-filter-panel");
+          var bar = getBar(pid);
+          if (!bar) return;
+          bar.querySelectorAll(".filter-pill.active").forEach(function (p) { p.classList.remove("active"); });
+          bar.querySelectorAll("select").forEach(function (s) { s.selectedIndex = 0; });
+          bar.querySelectorAll("input").forEach(function (i) { i.value = ""; });
+          applyFilters(pid);
+        });
+      });
+
+      function readFilters(pid) {
+        var bar = getBar(pid);
+        if (!bar) return null;
+        var patterns = [];
+        bar.querySelectorAll('.filter-pills[data-filter="pattern"] .filter-pill.active').forEach(function (p) {
+          patterns.push(p.getAttribute("data-val"));
+        });
+        var rejectSel = bar.querySelector('[data-filter="reject"]');
+        var reject = rejectSel ? rejectSel.value : "";
+        var flowMin = parseFloat((bar.querySelector('[data-filter="flow-min"]') || {}).value) || 0;
+        var priceMin = parseFloat((bar.querySelector('[data-filter="price-min"]') || {}).value) || 0;
+        var optsMin = parseFloat((bar.querySelector('[data-filter="options-min"]') || {}).value) || 0;
+        var checkTxt = ((bar.querySelector('[data-filter="check-search"]') || {}).value || "").toLowerCase().trim();
+        return { patterns: patterns, reject: reject, flowMin: flowMin, priceMin: priceMin, optsMin: optsMin, check: checkTxt };
+      }
+
+      function cardMatchesFilter(card, f) {
+        if (f.patterns.length > 0) {
+          var pat = (card.getAttribute("data-pattern") || "").toLowerCase();
+          var match = false;
+          for (var i = 0; i < f.patterns.length; i++) {
+            var target = f.patterns[i].toLowerCase();
+            if (target === "" && pat === "") { match = true; break; }
+            if (target !== "" && pat.indexOf(target) !== -1) { match = true; break; }
+          }
+          if (!match) return false;
+        }
+        if (f.reject) {
+          var rej = (card.getAttribute("data-reject") || "").toLowerCase();
+          if (rej.indexOf(f.reject.toLowerCase()) === -1) return false;
+        }
+        if (f.flowMin > 0) {
+          var fv = parseFloat(card.getAttribute("data-flow")) || 0;
+          if (fv < f.flowMin) return false;
+        }
+        if (f.priceMin > 0) {
+          var pv = parseFloat(card.getAttribute("data-price")) || 0;
+          if (pv < f.priceMin) return false;
+        }
+        if (f.optsMin > 0) {
+          var ov = parseFloat(card.getAttribute("data-options")) || 0;
+          if (ov < f.optsMin) return false;
+        }
+        if (f.check) {
+          var passed = (card.getAttribute("data-passed") || "").toLowerCase();
+          var failed = (card.getAttribute("data-failed") || "").toLowerCase();
+          if (passed.indexOf(f.check) === -1 && failed.indexOf(f.check) === -1) return false;
+        }
+        return true;
+      }
+
+      function getCardsForPanel(pid) {
+        var section = document.getElementById("panel-" + pid);
+        if (!section) return [];
+        return Array.prototype.slice.call(section.querySelectorAll("article.data-card"));
+      }
+
+      function applyFilters(pid) {
+        var f = readFilters(pid);
+        if (!f) return;
+        var cards = getCardsForPanel(pid);
+        var shown = 0;
+        var total = cards.length;
+        var hasAny = f.patterns.length > 0 || f.reject || f.flowMin > 0 || f.priceMin > 0 || f.optsMin > 0 || f.check;
+
+        cards.forEach(function (card) {
+          if (!hasAny || cardMatchesFilter(card, f)) {
+            card.style.display = "";
+            shown++;
+          } else {
+            card.style.display = "none";
+          }
+        });
+
+        var statusEl = document.querySelector('[data-filter-status="' + pid + '"]');
+        if (statusEl) {
+          statusEl.textContent = hasAny ? shown + " of " + total : "";
+        }
+        var toggleBtn = document.querySelector('.filter-toggle[data-filter-panel="' + pid + '"]');
+        if (toggleBtn) {
+          var countSpan = toggleBtn.querySelector(".filter-count");
+          if (!countSpan) {
+            countSpan = document.createElement("span");
+            countSpan.className = "filter-count";
+            toggleBtn.appendChild(countSpan);
+          }
+          countSpan.textContent = hasAny ? "(" + shown + ")" : "";
+        }
       }
     })();
 
