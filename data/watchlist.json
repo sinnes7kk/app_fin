@@ -18,24 +18,6 @@
     "checks_failed": "bullish_rejection_wick, bullish_strong_close, flag_breakout, healthy_pullback_volume, not_extended, pullback_to_support, room_to_target"
   },
   {
-    "ticker": "NEM",
-    "direction": "LONG",
-    "flow_score_raw": 0.581952639335794,
-    "flow_score_scaled": 5.446856094247177,
-    "first_seen": "2026-03-21",
-    "reject_reason": "price_validation_failed",
-    "checks_failed": "bounce_and_fail, bullish_rejection_wick, bullish_strong_close, flag_breakout, healthy_pullback_volume, not_extended, trend_aligned"
-  },
-  {
-    "ticker": "NFLX",
-    "direction": "LONG",
-    "flow_score_raw": 0.5736084815829959,
-    "flow_score_scaled": 5.3231748291010215,
-    "first_seen": "2026-03-21",
-    "reject_reason": "price_validation_failed",
-    "checks_failed": "flag_breakout, pullback_to_support, trend_aligned"
-  },
-  {
     "ticker": "SLV",
     "direction": "LONG",
     "flow_score_raw": 0.5726408139171769,
@@ -151,5 +133,257 @@
     "first_seen": "2026-03-21",
     "reject_reason": "price_validation_failed",
     "checks_failed": "bearish_rejection_wick, confirmation_volume, flag_breakdown, pullback_to_resistance, trend_aligned"
+  },
+  {
+    "ticker": "NVDL",
+    "direction": "LONG",
+    "flow_score_raw": 0.821267027828174,
+    "flow_score_scaled": 10.0,
+    "first_seen": "2026-03-23",
+    "reject_reason": "price_validation_failed",
+    "checks_failed": "bullish_strong_close, confirmation_volume, flag_breakout, pullback_to_support, trend_aligned"
+  },
+  {
+    "ticker": "CIEN",
+    "direction": "LONG",
+    "flow_score_raw": 0.6766180858405848,
+    "flow_score_scaled": 7.7895905186246,
+    "first_seen": "2026-03-23",
+    "reject_reason": "price_validation_failed",
+    "checks_failed": "bounce_and_fail, bullish_rejection_wick, confirmation_volume, flag_breakout, healthy_pullback_volume, not_extended, pullback_to_support, room_to_target"
+  },
+  {
+    "ticker": "NVDA",
+    "direction": "LONG",
+    "flow_score_raw": 0.5692517572843862,
+    "flow_score_scaled": 6.148904127420645,
+    "first_seen": "2026-03-23",
+    "reject_reason": "price_validation_failed",
+    "checks_failed": "bullish_strong_close, confirmation_volume, flag_breakout, pullback_to_support, trend_aligned"
+  },
+  {
+    "ticker": "ALGN",
+    "direction": "LONG",
+    "flow_score_raw": 0.5685876071596109,
+    "flow_score_scaled": 6.1387551162167755,
+    "first_seen": "2026-03-23",
+    "reject_reason": "price_validation_failed",
+    "checks_failed": "bullish_rejection_wick, bullish_strong_close, confirmation_volume, flag_breakout, healthy_pullback_volume, pullback_to_support"
+  },
+  {
+    "ticker": "COIN",
+    "direction": "LONG",
+    "flow_score_raw": 0.5610306887710004,
+    "flow_score_scaled": 6.023276331328062,
+    "first_seen": "2026-03-23",
+    "reject_reason": "price_validation_failed",
+    "checks_failed": "bullish_rejection_wick, bullish_strong_close, confirmation_volume, flag_breakout, pullback_to_support, trend_aligned"
+  },
+  {
+    "ticker": "BE",
+    "direction": "LONG",
+    "flow_score_raw": 0.5596022500235817,
+    "flow_score_scaled": 6.001448072458881,
+    "first_seen": "2026-03-23",
+    "reject_reason": "price_validation_failed",
+    "checks_failed": "bounce_and_fail, bullish_strong_close, confirmation_volume, flag_breakout, healthy_pullback_volume, pullback_to_support"
+  },
+  {
+    "ticker": "AMD",
+    "direction": "LONG",
+    "flow_score_raw": 0.5540793941527482,
+    "flow_score_scaled": 5.9170522046881535,
+    "first_seen": "2026-03-23",
+    "reject_reason": "price_validation_failed",
+    "checks_failed": "bullish_rejection_wick, bullish_strong_close, confirmation_volume, flag_breakout, pullback_to_support, trend_aligned"
+  },
+  {
+    "ticker": "BABA",
+    "direction": "LONG",
+    "flow_score_raw": 0.5435223676389934,
+    "flow_score_scaled": 5.755728166084834,
+    "first_seen": "2026-03-23",
+    "reject_reason": "price_validation_failed",
+    "checks_failed": "bullish_rejection_wick, confirmation_volume, flag_breakout, healthy_pullback_volume, not_extended, pullback_to_support, trend_aligned"
+  },
+  {
+    "ticker": "CHWY",
+    "direction": "LONG",
+    "flow_score_raw": 0.5217020791125608,
+    "flow_score_scaled": 5.422287962634804,
+    "first_seen": "2026-03-23",
+    "reject_reason": "price_validation_failed",
+    "checks_failed": "bullish_rejection_wick, confirmation_volume, flag_breakout, pullback_to_support, trend_aligned"
+  },
+  {
+    "ticker": "NET",
+    "direction": "LONG",
+    "flow_score_raw": 0.3991847510480866,
+    "flow_score_scaled": 3.5500761105098846,
+    "first_seen": "2026-03-23",
+    "reject_reason": "price_validation_failed",
+    "checks_failed": "bounce_and_fail, bullish_rejection_wick, confirmation_volume, flag_breakout, healthy_pullback_volume, pullback_to_support, room_to_target"
+  },
+  {
+    "ticker": "NEM",
+    "direction": "LONG",
+    "flow_score_raw": 0.38199671125318063,
+    "flow_score_scaled": 3.28742222858811,
+    "first_seen": "2026-03-23",
+    "reject_reason": "price_validation_failed",
+    "checks_failed": "bullish_rejection_wick, bullish_strong_close, confirmation_volume, flag_breakout, healthy_pullback_volume, not_extended, pullback_to_support, trend_aligned"
+  },
+  {
+    "ticker": "IONQ",
+    "direction": "LONG",
+    "flow_score_raw": 0.27297158737421845,
+    "flow_score_scaled": 1.6213874535058113,
+    "first_seen": "2026-03-23",
+    "reject_reason": "price_validation_failed",
+    "checks_failed": "bullish_rejection_wick, confirmation_volume, flag_breakout, pullback_to_support, trend_aligned"
+  },
+  {
+    "ticker": "DKNG",
+    "direction": "LONG",
+    "flow_score_raw": 0.16686817907919416,
+    "flow_score_scaled": 0.0,
+    "first_seen": "2026-03-23",
+    "reject_reason": "price_validation_failed",
+    "checks_failed": "bounce_and_fail, bullish_rejection_wick, bullish_strong_close, confirmation_volume, flag_breakout, pullback_to_support, trend_aligned"
+  },
+  {
+    "ticker": "QQQ",
+    "direction": "SHORT",
+    "flow_score_raw": 0.7638813763834567,
+    "flow_score_scaled": 10.0,
+    "first_seen": "2026-03-23",
+    "reject_reason": "price_validation_failed",
+    "checks_failed": "bearish_rejection_wick, bearish_strong_close, bounce_and_fail, confirmation_volume, flag_breakdown, pullback_to_resistance"
+  },
+  {
+    "ticker": "LMT",
+    "direction": "SHORT",
+    "flow_score_raw": 0.7068840480743673,
+    "flow_score_scaled": 8.872598278269704,
+    "first_seen": "2026-03-23",
+    "reject_reason": "price_validation_failed",
+    "checks_failed": "bearish_rejection_wick, bearish_strong_close, confirmation_volume, flag_breakdown, healthy_pullback_volume, pullback_to_resistance, room_to_target, trend_aligned"
+  },
+  {
+    "ticker": "SPY",
+    "direction": "SHORT",
+    "flow_score_raw": 0.5316256529857547,
+    "flow_score_scaled": 5.406003926704613,
+    "first_seen": "2026-03-23",
+    "reject_reason": "price_validation_failed",
+    "checks_failed": "bearish_rejection_wick, bearish_strong_close, bounce_and_fail, confirmation_volume, flag_breakdown, healthy_pullback_volume, pullback_to_resistance"
+  },
+  {
+    "ticker": "ADBE",
+    "direction": "SHORT",
+    "flow_score_raw": 0.4908134145562566,
+    "flow_score_scaled": 4.5987417402462,
+    "first_seen": "2026-03-23",
+    "reject_reason": "price_validation_failed",
+    "checks_failed": "bearish_rejection_wick, bearish_strong_close, bounce_and_fail, confirmation_volume, flag_breakdown, healthy_pullback_volume, pullback_to_resistance, room_to_target"
+  },
+  {
+    "ticker": "LQD",
+    "direction": "SHORT",
+    "flow_score_raw": 0.48964241998306324,
+    "flow_score_scaled": 4.575579579191985,
+    "first_seen": "2026-03-23",
+    "reject_reason": "price_validation_failed",
+    "checks_failed": "bearish_rejection_wick, bearish_strong_close, bounce_and_fail, confirmation_volume, flag_breakdown, healthy_pullback_volume, pullback_to_resistance"
+  },
+  {
+    "ticker": "HUT",
+    "direction": "SHORT",
+    "flow_score_raw": 0.47033204076995416,
+    "flow_score_scaled": 4.193622118763926,
+    "first_seen": "2026-03-23",
+    "reject_reason": "price_validation_failed",
+    "checks_failed": "bearish_rejection_wick, bearish_strong_close, bounce_and_fail, confirmation_volume, flag_breakdown, pullback_to_resistance, trend_aligned"
+  },
+  {
+    "ticker": "GS",
+    "direction": "SHORT",
+    "flow_score_raw": 0.45651350163102195,
+    "flow_score_scaled": 3.920292731594295,
+    "first_seen": "2026-03-23",
+    "reject_reason": "price_validation_failed",
+    "checks_failed": "bearish_rejection_wick, bearish_strong_close, bounce_and_fail, confirmation_volume, flag_breakdown, pullback_to_resistance, trend_aligned"
+  },
+  {
+    "ticker": "ABBV",
+    "direction": "SHORT",
+    "flow_score_raw": 0.4542320779420655,
+    "flow_score_scaled": 3.8751663884615484,
+    "first_seen": "2026-03-23",
+    "reject_reason": "price_validation_failed",
+    "checks_failed": "bearish_rejection_wick, bearish_strong_close, confirmation_volume, flag_breakdown, healthy_pullback_volume, not_extended, pullback_to_resistance, room_to_target"
+  },
+  {
+    "ticker": "UPRO",
+    "direction": "SHORT",
+    "flow_score_raw": 0.45324771821862453,
+    "flow_score_scaled": 3.8556958469478975,
+    "first_seen": "2026-03-23",
+    "reject_reason": "price_validation_failed",
+    "checks_failed": "bearish_rejection_wick, bearish_strong_close, bounce_and_fail, confirmation_volume, flag_breakdown, healthy_pullback_volume, pullback_to_resistance"
+  },
+  {
+    "ticker": "IWM",
+    "direction": "SHORT",
+    "flow_score_raw": 0.45155759350472413,
+    "flow_score_scaled": 3.8222653411870446,
+    "first_seen": "2026-03-23",
+    "reject_reason": "price_validation_failed",
+    "checks_failed": "bearish_rejection_wick, bearish_strong_close, bounce_and_fail, confirmation_volume, flag_breakdown, healthy_pullback_volume, pullback_to_resistance"
+  },
+  {
+    "ticker": "LITE",
+    "direction": "SHORT",
+    "flow_score_raw": 0.4470349839838511,
+    "flow_score_scaled": 3.7328085558988655,
+    "first_seen": "2026-03-23",
+    "reject_reason": "price_validation_failed",
+    "checks_failed": "bearish_rejection_wick, bearish_strong_close, bounce_and_fail, confirmation_volume, flag_breakdown, healthy_pullback_volume, trend_aligned"
+  },
+  {
+    "ticker": "MSTR",
+    "direction": "SHORT",
+    "flow_score_raw": 0.4391205212978375,
+    "flow_score_scaled": 3.576261238270313,
+    "first_seen": "2026-03-23",
+    "reject_reason": "price_validation_failed",
+    "checks_failed": "bearish_rejection_wick, bearish_strong_close, confirmation_volume, flag_breakdown, healthy_pullback_volume, pullback_to_resistance"
+  },
+  {
+    "ticker": "NBIS",
+    "direction": "SHORT",
+    "flow_score_raw": 0.39049869253899816,
+    "flow_score_scaled": 2.614526099403294,
+    "first_seen": "2026-03-23",
+    "reject_reason": "price_validation_failed",
+    "checks_failed": "bearish_strong_close, bounce_and_fail, confirmation_volume, flag_breakdown, healthy_pullback_volume, pullback_to_resistance, trend_aligned"
+  },
+  {
+    "ticker": "APH",
+    "direction": "SHORT",
+    "flow_score_raw": 0.2735045588184661,
+    "flow_score_scaled": 0.3003932847282185,
+    "first_seen": "2026-03-23",
+    "reject_reason": "price_validation_failed",
+    "checks_failed": "bearish_rejection_wick, bearish_strong_close, bounce_and_fail, confirmation_volume, flag_breakdown, healthy_pullback_volume, pullback_to_resistance"
+  },
+  {
+    "ticker": "CIFR",
+    "direction": "SHORT",
+    "flow_score_raw": 0.2631256067729431,
+    "flow_score_scaled": 0.09509860245075509,
+    "first_seen": "2026-03-23",
+    "reject_reason": "price_validation_failed",
+    "checks_failed": "bearish_rejection_wick, bearish_strong_close, bounce_and_fail, confirmation_volume, flag_breakdown, pullback_to_resistance, trend_aligned"
   }
 ]
