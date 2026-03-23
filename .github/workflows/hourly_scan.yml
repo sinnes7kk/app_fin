@@ -57,6 +57,8 @@ jobs:
           git push
 
       - name: Build static dashboard
+        env:
+          UNUSUAL_WHALES_API_KEY: ${{ secrets.UNUSUAL_WHALES_API_KEY }}
         run: python -m scripts.build_static
 
       - name: Upload Pages artifact
