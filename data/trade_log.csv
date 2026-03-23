@@ -1,1 +1,2 @@
 ticker,direction,pattern,entry_date,exit_date,entry_price,exit_price,shares,risk_pct,pnl_pct,pnl_dollar,r_multiple,days_held,exit_reason,trail_method,final_score,flow_score_scaled,partial_pnl_pct
+GLNG,LONG,unknown,2026-03-21,2026-03-23,52.67,52.67,47,0.03,0.0,0.0,0.0,4,stop,hybrid,9.2,10.0,0.0
