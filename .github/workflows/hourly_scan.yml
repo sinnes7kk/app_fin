@@ -1,6 +1,8 @@
 name: Hourly signal scan
 
 on:
+  push:
+    branches: [main]
   schedule:
     # Every hour on the hour, Mon-Fri, UTC 14-21.
     # Covers US market hours in both EDT (14-20) and EST (15-21).
@@ -33,11 +35,13 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Run pipeline
+        if: github.event_name != 'push'
         env:
           UNUSUAL_WHALES_API_KEY: ${{ secrets.UNUSUAL_WHALES_API_KEY }}
         run: python -m app.main
 
       - name: Commit data changes
+        if: github.event_name != 'push'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
