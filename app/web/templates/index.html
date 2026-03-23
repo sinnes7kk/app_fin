@@ -31,7 +31,7 @@
     <span class="regime-item"><strong>Regime</strong> <span class="regime-badge {{ rs_class }}">{{ "%.2f"|format(rs) }}</span></span>
     <span class="regime-item"><strong>SPY</strong> {{ regime.spy_trend | default("—") }}{% if regime.spy_close %} {{ "%.1f"|format(regime.spy_close) }}{% endif %}</span>
     {% if regime.vix_close %}<span class="regime-item"><strong>VIX</strong> {{ "%.1f"|format(regime.vix_close) }}{% if regime.vix_sizing_mult %} &times;{{ "%.2f"|format(regime.vix_sizing_mult) }} size{% endif %}</span>{% endif %}
-    <span class="regime-item"><strong>Threshold</strong> Long &ge; {{ "%.1f"|format(7.0 + (1.0 - rs) * 1.0) }}, Short &ge; {{ "%.1f"|format(7.0 + rs * 1.0) }}</span>
+    <span class="regime-item"><strong>Threshold</strong> Long &ge; {{ near_threshold_long }}, Short &ge; {{ near_threshold_short }}</span>
     <span class="regime-item regime-components">spy={{ "%.2f"|format(regime._spy_alignment | default(0.5)) }} vix={{ "%.2f"|format(regime._vix_component | default(0.5)) }} rvol={{ "%.2f"|format(regime._rvol_component | default(0.5)) }} tide={{ "%.2f"|format(regime._tide_component | default(0.5)) }}</span>
   </div>
   {% endif %}

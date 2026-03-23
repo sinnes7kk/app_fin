@@ -1,0 +1,4 @@
+ticker,direction,flow_score_raw,flow_score_scaled,price_score,final_score,entry_price,stop_price,target_1,target_2,rr_ratio,time_stop_days,source
+ORCL,SHORT,0.553261326287861,5.590944125048,9.0,6.9546,149.68,167.64,113.76,95.8,2.0,5,fresh
+AMAT,LONG,0.5695978564568422,5.240188026333066,8.0,6.3441,357.06,314.21,442.75,485.6,2.0,5,fresh
+U,SHORT,0.32633663652959605,2.329525501433071,9.0,4.9977,18.39,20.6,13.98,11.77,2.0,5,fresh

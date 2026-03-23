@@ -1340,16 +1340,14 @@ def index():
         bear = pd.DataFrame()
     # Compute near-threshold candidates: those with final_score within 2 pts of threshold
     near_df = pd.DataFrame()
-    _near_long_min = MIN_FINAL_SCORE + REGIME_THRESHOLD_BOOST  # worst-case (fully bearish regime)
-    _near_short_min = MIN_FINAL_SCORE + REGIME_THRESHOLD_BOOST
+    rs = regime.get("regime_score", 0.5) if regime else 0.5
+    _near_long_min = MIN_FINAL_SCORE + (1.0 - rs) * REGIME_THRESHOLD_BOOST
+    _near_short_min = MIN_FINAL_SCORE + rs * REGIME_THRESHOLD_BOOST
     if not _validated.empty and "final_score" in _validated.columns:
         _validated["_fs_num"] = pd.to_numeric(_validated["final_score"], errors="coerce")
         _near_gap = 2.0
         mask = _validated["_fs_num"].notna() & (_validated["_fs_num"] > 0)
         if mask.any():
-            # Derive direction-aware threshold: use REGIME_THRESHOLD_BOOST as upper bound
-            _near_long_min = MIN_FINAL_SCORE + REGIME_THRESHOLD_BOOST
-            _near_short_min = MIN_FINAL_SCORE + REGIME_THRESHOLD_BOOST
             long_mask = mask & (_validated["direction"] == "LONG") & (_validated["_fs_num"] >= _near_long_min - _near_gap)
             short_mask = mask & (_validated["direction"] == "SHORT") & (_validated["_fs_num"] >= _near_short_min - _near_gap)
             near_df = _validated[long_mask | short_mask].copy()

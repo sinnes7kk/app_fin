@@ -1,0 +1,4 @@
+ticker,direction,flow_score_raw,flow_score_scaled,price_score,final_score,entry_price,stop_price,target_1,target_2,time_stop_days,source
+AMAT,LONG,6.558825882262191,1.59927232460846,9.0,4.5596,357.21,312.8,423.83,490.45,5,fresh
+RDDT,SHORT,5.9156394539994865,0.0757381744923304,9.0,3.6454,138.12,158.49,107.56,77.0,5,fresh
+TLT,SHORT,5.797293748008679,0.0,9.0,3.6,87.49,91.03,82.18,76.87,5,fresh
