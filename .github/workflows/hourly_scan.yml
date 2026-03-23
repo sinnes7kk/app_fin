@@ -57,7 +57,7 @@ jobs:
           git push
 
       - name: Build static dashboard
-        run: python scripts/build_static.py
+        run: python -m scripts.build_static
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
