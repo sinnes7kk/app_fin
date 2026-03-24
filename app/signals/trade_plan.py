@@ -232,7 +232,15 @@ def build_long_trade_plan(
     entry_zone_low = entry_price - 0.25 * atr
     entry_zone_high = entry_price + 0.25 * atr
 
-    raw_stop = min(latest_low, support) - 0.25 * atr
+    reasons = scored_signal.get("reasons", [])
+    reason_set = set(reasons)
+    is_breakout = bool(reason_set & _BREAKOUT_PATTERNS_LONG)
+
+    if is_breakout:
+        broken_level = float(scored_signal.get("broken_level", structural_resistance))
+        raw_stop = min(latest_low, broken_level) - 0.25 * atr
+    else:
+        raw_stop = min(latest_low, support) - 0.25 * atr
     stop_price = _cap_stop(entry_price, raw_stop, "LONG")
     risk_per_share = entry_price - stop_price
 
@@ -241,15 +249,18 @@ def build_long_trade_plan(
 
     gamma_mult = _gamma_target_mult(options_ctx)
 
-    t1_rmultiple = entry_price + 2.0 * risk_per_share * gamma_mult
-    if structural_resistance > entry_price + MIN_RR * risk_per_share:
+    if is_breakout:
+        target_1 = entry_price + 2.0 * atr * gamma_mult
+        target_2 = entry_price + 3.0 * atr * gamma_mult
+    elif structural_resistance > entry_price + MIN_RR * risk_per_share:
+        t1_rmultiple = entry_price + 2.0 * risk_per_share * gamma_mult
         target_1 = structural_resistance
+        target_2 = entry_price + 3.0 * risk_per_share * gamma_mult
     else:
+        t1_rmultiple = entry_price + 2.0 * risk_per_share * gamma_mult
         target_1 = t1_rmultiple
-    target_2 = entry_price + 3.0 * risk_per_share * gamma_mult
+        target_2 = entry_price + 3.0 * risk_per_share * gamma_mult
 
-    # Pattern-specific measured move targets
-    reasons = scored_signal.get("reasons", [])
     mm_target = _measured_move_long(df, reasons, structural_resistance)
     mm_used = False
     if mm_target is not None and mm_target > target_1:
@@ -314,7 +325,15 @@ def build_short_trade_plan(
     entry_zone_low = entry_price - 0.25 * atr
     entry_zone_high = entry_price + 0.25 * atr
 
-    raw_stop = max(latest_high, resistance) + 0.25 * atr
+    reasons = scored_signal.get("reasons", [])
+    reason_set = set(reasons)
+    is_breakdown = bool(reason_set & _BREAKOUT_PATTERNS_SHORT)
+
+    if is_breakdown:
+        broken_level = float(scored_signal.get("broken_level", structural_support))
+        raw_stop = max(latest_high, broken_level) + 0.25 * atr
+    else:
+        raw_stop = max(latest_high, resistance) + 0.25 * atr
     stop_price = _cap_stop(entry_price, raw_stop, "SHORT")
     risk_per_share = stop_price - entry_price
 
@@ -323,14 +342,17 @@ def build_short_trade_plan(
 
     gamma_mult = _gamma_target_mult(options_ctx)
 
-    t1_rmultiple = entry_price - 2.0 * risk_per_share * gamma_mult
-    if structural_support < entry_price - MIN_RR * risk_per_share:
+    if is_breakdown:
+        target_1 = entry_price - 2.0 * atr * gamma_mult
+        target_2 = entry_price - 3.0 * atr * gamma_mult
+    elif structural_support < entry_price - MIN_RR * risk_per_share:
         target_1 = structural_support
+        target_2 = entry_price - 3.0 * risk_per_share * gamma_mult
     else:
+        t1_rmultiple = entry_price - 2.0 * risk_per_share * gamma_mult
         target_1 = t1_rmultiple
-    target_2 = entry_price - 3.0 * risk_per_share * gamma_mult
+        target_2 = entry_price - 3.0 * risk_per_share * gamma_mult
 
-    reasons = scored_signal.get("reasons", [])
     mm_target = _measured_move_short(df, reasons, structural_support)
     mm_used = False
     if mm_target is not None and mm_target < target_2:

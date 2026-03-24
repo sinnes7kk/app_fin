@@ -54,6 +54,8 @@ def detect_trend(df: pd.DataFrame) -> dict:
 STRUCTURAL_LOOKBACK = 60
 PIVOT_ORDER = 3
 CLUSTER_ATR_BAND = 0.5
+RANGE_FLOOR_LOOKBACK = 10
+RANGE_FLOOR_BAND = 0.25
 
 
 def _find_swing_highs(highs: pd.Series, order: int = PIVOT_ORDER) -> list[float]:
@@ -112,6 +114,67 @@ def _best_level_above(clusters: list[tuple[float, int]], price: float) -> tuple[
     return above[0] if above else None
 
 
+def _find_range_floor(
+    df: pd.DataFrame,
+    atr: float,
+    lookback: int = RANGE_FLOOR_LOOKBACK,
+    band: float = RANGE_FLOOR_BAND,
+) -> tuple[float, int] | None:
+    """Find the lowest tested level in recent bars (including edge bars).
+
+    Scans the last *lookback* bars for wick lows within *band * ATR* of each
+    other, returning the lowest cluster with 2+ touches.
+
+    Unlike pivot detection this has no right-side confirmation requirement,
+    so it captures double-bottom wicks at the edge of the window.
+    """
+    if len(df) < 2 or atr <= 0:
+        return None
+    n = min(lookback, len(df))
+    window = df.iloc[-n:]
+    lows = sorted(float(row["low"]) for _, row in window.iterrows())
+    threshold = band * atr
+    group: list[float] = [lows[0]]
+    for low in lows[1:]:
+        if low - group[0] <= threshold:
+            group.append(low)
+        else:
+            if len(group) >= 2:
+                return (sum(group) / len(group), len(group))
+            group = [low]
+    if len(group) >= 2:
+        return (sum(group) / len(group), len(group))
+    return None
+
+
+def _find_range_ceiling(
+    df: pd.DataFrame,
+    atr: float,
+    lookback: int = RANGE_FLOOR_LOOKBACK,
+    band: float = RANGE_FLOOR_BAND,
+) -> tuple[float, int] | None:
+    """Mirror of :func:`_find_range_floor` for wick highs."""
+    if len(df) < 2 or atr <= 0:
+        return None
+    n = min(lookback, len(df))
+    window = df.iloc[-n:]
+    highs = sorted(
+        (float(row["high"]) for _, row in window.iterrows()), reverse=True,
+    )
+    threshold = band * atr
+    group: list[float] = [highs[0]]
+    for high in highs[1:]:
+        if group[0] - high <= threshold:
+            group.append(high)
+        else:
+            if len(group) >= 2:
+                return (sum(group) / len(group), len(group))
+            group = [high]
+    if len(group) >= 2:
+        return (sum(group) / len(group), len(group))
+    return None
+
+
 def find_support_resistance(df: pd.DataFrame, lookback: int = 20) -> dict:
     """Find tactical and structural S/R levels using pivot-point clustering.
 
@@ -159,6 +222,11 @@ def find_support_resistance(df: pd.DataFrame, lookback: int = 20) -> dict:
     structural_support_touches = struct_sup_result[1] if struct_sup_result else 0
     structural_resistance_touches = struct_res_result[1] if struct_res_result else 0
 
+    # Range floor / ceiling — recent wick-level clustering (no pivot
+    # confirmation required, so edge bars are captured).
+    floor_result = _find_range_floor(df, atr)
+    ceiling_result = _find_range_ceiling(df, atr)
+
     return {
         "support": float(support),
         "resistance": float(resistance),
@@ -168,6 +236,10 @@ def find_support_resistance(df: pd.DataFrame, lookback: int = 20) -> dict:
         "structural_resistance_touches": structural_resistance_touches,
         "structural_high": float(structural["high"].max()),
         "structural_low": float(structural["low"].min()),
+        "range_floor": float(floor_result[0]) if floor_result else None,
+        "range_floor_touches": floor_result[1] if floor_result else 0,
+        "range_ceiling": float(ceiling_result[0]) if ceiling_result else None,
+        "range_ceiling_touches": ceiling_result[1] if ceiling_result else 0,
     }
 
 

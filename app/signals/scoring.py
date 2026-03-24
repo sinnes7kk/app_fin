@@ -175,6 +175,7 @@ def _build_result(
     checks_passed: list[str],
     checks_failed: list[str],
     components: dict | None = None,
+    broken_level: float | None = None,
 ) -> dict:
     result = {
         "direction": direction,
@@ -192,6 +193,8 @@ def _build_result(
     }
     if components:
         result["score_components"] = components
+    if broken_level is not None:
+        result["broken_level"] = broken_level
     return result
 
 
@@ -282,15 +285,31 @@ def score_long_setup(
     trend_opposite = trend["trend"] == "SHORT"
     trend_strength = trend.get("strength", 0.0)
 
+    range_ceiling = levels.get("range_ceiling")
+    range_ceiling_touches = levels.get("range_ceiling_touches", 0)
+
     structural_bo = (
-        levels["structural_resistance_touches"] >= 2
-        and is_structural_breakout(df, levels["structural_resistance"])
+        (range_ceiling_touches >= 2
+         and range_ceiling is not None
+         and is_structural_breakout(df, range_ceiling))
+        or (levels["structural_resistance_touches"] >= 2
+            and is_structural_breakout(df, levels["structural_resistance"]))
     )
+    _bo_broken_level: float | None = None
+    if structural_bo:
+        if (range_ceiling is not None and range_ceiling_touches >= 2
+                and is_structural_breakout(df, range_ceiling)):
+            _bo_broken_level = range_ceiling
+        else:
+            _bo_broken_level = levels["structural_resistance"]
+
     max_dist = BREAKOUT_MAX_DISTANCE_ATR if structural_bo else MAX_DISTANCE_FROM_EMA20_ATR
     not_extended_ok, ext_sc = _extension_score(df, max_dist)
 
     room_ok = has_room_to_target_long(df, levels["structural_resistance"])
     room_sc = _room_score(df, levels["structural_resistance"], is_long=True)
+    if structural_bo:
+        room_sc = 1.0
 
     bounce_fail = is_bounce_and_fail_long(df)
     flag = is_flag_breakout(df)
@@ -397,6 +416,7 @@ def score_long_setup(
         checks_passed=checks_passed,
         checks_failed=checks_failed,
         components=components,
+        broken_level=_bo_broken_level,
     )
 
 
@@ -413,15 +433,31 @@ def score_short_setup(
     trend_opposite = trend["trend"] == "LONG"
     trend_strength = trend.get("strength", 0.0)
 
+    range_floor = levels.get("range_floor")
+    range_floor_touches = levels.get("range_floor_touches", 0)
+
     structural_bd = (
-        levels["structural_support_touches"] >= 2
-        and is_structural_breakdown(df, levels["structural_support"])
+        (range_floor_touches >= 2
+         and range_floor is not None
+         and is_structural_breakdown(df, range_floor))
+        or (levels["structural_support_touches"] >= 2
+            and is_structural_breakdown(df, levels["structural_support"]))
     )
+    _bd_broken_level: float | None = None
+    if structural_bd:
+        if (range_floor is not None and range_floor_touches >= 2
+                and is_structural_breakdown(df, range_floor)):
+            _bd_broken_level = range_floor
+        else:
+            _bd_broken_level = levels["structural_support"]
+
     max_dist = BREAKOUT_MAX_DISTANCE_ATR if structural_bd else MAX_DISTANCE_FROM_EMA20_ATR
     not_extended_ok, ext_sc = _extension_score(df, max_dist)
 
     room_ok = has_room_to_target_short(df, levels["structural_support"])
     room_sc = _room_score(df, levels["structural_support"], is_long=False)
+    if structural_bd:
+        room_sc = 1.0
 
     bounce_fail = is_bounce_and_fail_short(df)
     flag = is_flag_breakdown(df)
@@ -528,4 +564,5 @@ def score_short_setup(
         checks_passed=checks_passed,
         checks_failed=checks_failed,
         components=components,
+        broken_level=_bd_broken_level,
     )
