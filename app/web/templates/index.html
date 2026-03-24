@@ -643,14 +643,14 @@
     function _buildFlowComponentTable(m) {
       var dir = _dirPrefix(m);
       var components = [
-        { name: "Flow intensity",    weight: "25%", val: _num(m[dir + "_flow_intensity"]) * 10000, fmtFn: function(v){ return v.toFixed(1) + " bps"; }, thresh: [20, 5] },
-        { name: "Premium / trade",   weight: "15%", val: _num(m[dir + "_premium_per_trade"]), fmtFn: fmtPremium, thresh: [100000, 10000] },
-        { name: "Vol / OI ratio",    weight: "15%", val: _num(m[dir + "_vol_oi"]),            fmtFn: fmt,        thresh: [2.0, 1.0] },
-        { name: "Flow velocity",     weight: "13%", val: _num(m.flow_velocity),               fmtFn: fmt,        thresh: [2.0, 1.0] },
-        { name: "Repeat flow count", weight: "12%", val: _num(m.repeat_flow_count),           fmtFn: fmt,        thresh: [5, 3] },
-        { name: "Sweep count",       weight: "10%", val: _num(m[dir + "_sweep_count"]),        fmtFn: fmt,        thresh: [5, 1] },
-        { name: "DTE quality",       weight: "5%",  val: _num(m.dte_score),                   fmtFn: fmt,        thresh: [0.8, 0.5] },
-        { name: "Breadth",           weight: "5%",  val: _num(m[dir + "_breadth"]),             fmtFn: fmt,        thresh: [0.5, 0.2] }
+        { name: "Flow intensity",    weight: "25%", val: _num(m[dir + "_flow_intensity"]) * 10000, fmtFn: function(v){ return v.toFixed(1) + " bps"; }, thresh: [20, 5], desc: "Options premium as % of avg daily dollar volume — normalizes flow size across market caps" },
+        { name: "Premium / trade",   weight: "15%", val: _num(m[dir + "_premium_per_trade"]), fmtFn: fmtPremium, thresh: [100000, 10000], desc: "Average dollar premium per individual options trade — higher means larger block trades" },
+        { name: "Vol / OI ratio",    weight: "15%", val: _num(m[dir + "_vol_oi"]),            fmtFn: fmt,        thresh: [2.0, 1.0], desc: "Today\u2019s volume vs open interest — above 1.0 means new positions are being opened" },
+        { name: "Flow velocity",     weight: "13%", val: _num(m.flow_velocity),               fmtFn: fmt,        thresh: [2.0, 1.0], desc: "Rate of premium acceleration — how quickly flow is ramping compared to session average" },
+        { name: "Repeat flow count", weight: "12%", val: _num(m.repeat_flow_count),           fmtFn: fmt,        thresh: [5, 3], desc: "Number of separate trades in the same direction — repeat activity signals conviction" },
+        { name: "Sweep count",       weight: "10%", val: _num(m[dir + "_sweep_count"]),        fmtFn: fmt,        thresh: [5, 1], desc: "Trades that sweep across multiple exchanges for immediate fill — aggressive institutional execution" },
+        { name: "DTE quality",       weight: "5%",  val: _num(m.dte_score),                   fmtFn: fmt,        thresh: [0.8, 0.5], desc: "Expiration profile — favors swing-term (2\u20138 week) expirations over weeklies or LEAPS" },
+        { name: "Breadth",           weight: "5%",  val: _num(m[dir + "_breadth"]),             fmtFn: fmt,        thresh: [0.5, 0.2], desc: "Strike diversity — flow spread across multiple strikes suggests broader institutional interest" }
       ];
       var allZero = components.every(function(c) { return c.val === 0; });
       var flowScore = _num(m.flow_score_scaled);
@@ -664,7 +664,7 @@
         '<table class="flow-components"><thead><tr><th>Component</th><th>Weight</th><th>Value</th><th>Rating</th></tr></thead><tbody>';
       for (var i = 0; i < components.length; i++) {
         var c = components[i];
-        html += "<tr><td>" + escHtml(c.name) + "</td><td>" + c.weight +
+        html += "<tr><td>" + escHtml(c.name) + (c.desc ? '<br><span class="flow-desc">' + escHtml(c.desc) + '</span>' : '') + "</td><td>" + c.weight +
           "</td><td>" + c.fmtFn(c.val) + "</td><td>" + _flowRating(c.val, c.thresh) + "</td></tr>";
       }
       html += "</tbody></table></div>";
