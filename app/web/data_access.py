@@ -14,7 +14,7 @@ def latest_glob(subdir: str, pattern: str) -> Path | None:
     folder = DATA_ROOT / subdir
     if not folder.is_dir():
         return None
-    matches = sorted(folder.glob(pattern), key=lambda p: p.stat().st_mtime, reverse=True)
+    matches = sorted(folder.glob(pattern), key=lambda p: p.name, reverse=True)
     return matches[0] if matches else None
 
 
