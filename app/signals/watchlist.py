@@ -247,6 +247,7 @@ def reevaluate_watchlist(
                     "flow_score_scaled": flow_scaled,
                     "price_score": float(price_signal["score"]),
                     "final_score": combine_scores(flow_scaled, float(price_signal["score"]), _opts_score),
+                    "options_context_score": _opts_score,
                     "entry_price": trade_plan["entry_price"],
                     "stop_price": trade_plan["stop_price"],
                     "target_1": trade_plan["target_1"],
