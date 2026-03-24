@@ -238,7 +238,7 @@ def build_long_trade_plan(
 
     if is_breakout:
         broken_level = float(scored_signal.get("broken_level", structural_resistance))
-        raw_stop = min(latest_low, broken_level) - 0.25 * atr
+        raw_stop = broken_level - 0.25 * atr
     else:
         raw_stop = min(latest_low, support) - 0.25 * atr
     stop_price = _cap_stop(entry_price, raw_stop, "LONG")
@@ -331,7 +331,7 @@ def build_short_trade_plan(
 
     if is_breakdown:
         broken_level = float(scored_signal.get("broken_level", structural_support))
-        raw_stop = max(latest_high, broken_level) + 0.25 * atr
+        raw_stop = broken_level + 0.25 * atr
     else:
         raw_stop = max(latest_high, resistance) + 0.25 * atr
     stop_price = _cap_stop(entry_price, raw_stop, "SHORT")
