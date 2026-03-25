@@ -596,7 +596,8 @@ def update_positions() -> dict:
 
         bar = df.iloc[-1]
         close = float(bar["close"])
-        pos["days_held"] += 1
+        entry_dt = date.fromisoformat(pos["entry_date"])
+        pos["days_held"] = (date.today() - entry_dt).days
 
         try:
             opts_ctx = fetch_options_context(ticker, close)
@@ -634,6 +635,7 @@ def update_positions() -> dict:
         pos["health_at_entry"] = health_result["health_at_entry"]
         pos["health_prev"] = health_result["health_prev"]
         pos["health_delta"] = health_result["health_delta"]
+        pos["health_components"] = health_result.get("components", {})
 
         if pos["direction"] == "LONG":
             re_entry = score_long_setup(df)

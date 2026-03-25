@@ -925,9 +925,10 @@ table.data.compact td {
   border-left: 4px solid;
 }
 
-.verdict-pass  { border-color: var(--good); color: var(--good); background: rgba(76, 175, 80, 0.08); }
-.verdict-fail  { border-color: var(--bad);  color: var(--bad);  background: rgba(239, 83, 80, 0.08); }
-.verdict-watch { border-color: var(--warn); color: var(--warn); background: rgba(210, 153, 34, 0.08); }
+.verdict-pass     { border-color: var(--good); color: var(--good); background: rgba(76, 175, 80, 0.08); }
+.verdict-fail     { border-color: var(--bad);  color: var(--bad);  background: rgba(239, 83, 80, 0.08); }
+.verdict-watch    { border-color: var(--warn); color: var(--warn); background: rgba(210, 153, 34, 0.08); }
+.verdict-position { border-color: var(--accent); color: var(--accent); background: rgba(66, 165, 245, 0.08); }
 
 .score-card {
   width: 100%;
