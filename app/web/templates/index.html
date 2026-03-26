@@ -1591,7 +1591,13 @@
         btn.disabled = true;
 
         fetch("/api/scan-ticker?ticker=" + encodeURIComponent(ticker))
-          .then(function(r) { return r.json(); })
+          .then(function(r) {
+            var ct = r.headers.get("content-type") || "";
+            if (!ct.includes("application/json")) {
+              throw new Error("Search requires the live Flask server (python -m app.web.server). The static GitHub Pages site cannot run real-time scans.");
+            }
+            return r.json();
+          })
           .then(function(d) {
             loadEl.style.display = "none";
             btn.disabled = false;
@@ -1605,7 +1611,7 @@
           .catch(function(e) {
             loadEl.style.display = "none";
             btn.disabled = false;
-            errEl.textContent = "Network error: " + e.message;
+            errEl.textContent = e.message;
             errEl.style.display = "block";
           });
       }
