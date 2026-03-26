@@ -8,7 +8,7 @@
     "initial_stop": 299.24,
     "risk_per_share": 8.45,
     "best_price": 287.37,
-    "days_held": 1,
+    "days_held": 2,
     "trail_atr": 299.24,
     "trail_ema": 302.97,
     "trail_hybrid": 299.24,
@@ -37,8 +37,8 @@
     "health": 8.07,
     "health_state": "STRONG",
     "health_at_entry": 7.11,
-    "health_prev": 8.11,
-    "health_delta": -0.04,
+    "health_prev": 8.07,
+    "health_delta": 0.0,
     "last_rotation_date": null,
     "re_entry_score": 5.63,
     "conviction": 6.85,
@@ -48,10 +48,11 @@
       "structure": 2.0,
       "momentum": 2.0,
       "target_distance": 0.047,
-      "options": 1.577,
+      "options": 1.576,
       "decay_penalty": 0.0,
       "stop_penalty": 0.0
-    }
+    },
+    "last_price": 289.5899963378906
   },
   {
     "ticker": "TEAM",
@@ -62,7 +63,7 @@
     "initial_stop": 73.7,
     "risk_per_share": 5.3,
     "best_price": 66.1,
-    "days_held": 1,
+    "days_held": 2,
     "trail_atr": 73.7,
     "trail_ema": 76.51,
     "trail_hybrid": 73.7,
@@ -105,7 +106,8 @@
       "options": 1.391,
       "decay_penalty": 0.0,
       "stop_penalty": 0.0
-    }
+    },
+    "last_price": 66.45999908447266
   },
   {
     "ticker": "SATS",
@@ -116,7 +118,7 @@
     "initial_stop": 112.89,
     "risk_per_share": 6.85,
     "best_price": 124.61,
-    "days_held": 0,
+    "days_held": 1,
     "trail_atr": 112.89,
     "trail_ema": 111.55,
     "trail_hybrid": 112.89,
@@ -159,6 +161,7 @@
       "options": 1.288,
       "decay_penalty": 0.0,
       "stop_penalty": 0.0
-    }
+    },
+    "last_price": 119.06999969482422
   }
 ]
