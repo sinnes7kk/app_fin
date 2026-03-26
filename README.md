@@ -1088,6 +1088,30 @@ from the current 50/30/20 (flow/price/options) to ~45/25/15/15
 Files in scope: `_enrich_dark_pool` and `combine_scores` in `pipeline.py`,
 `fetch_dark_pool` in `unusual_whales.py`.
 
+## Flow intensity threshold recalibration (all future versions)
+
+The current flow intensity thresholds `(log1p(0.01), log1p(1.0))` were calibrated
+on a single day of marketcap-based data (2026-03-26, N=100 tickers after the
+`$100M` mcap floor). The gradient looks correct for that snapshot — p75 at ~20%,
+p90 at ~66%, p95 at ~88% — but this has not been validated across different
+market regimes.
+
+**Re-validation conditions**:
+
+- High-volatility sessions (VIX > 25)
+- Low-volatility / range-bound sessions (VIX < 14)
+- FOMC announcement days
+- Monthly options expiration (OpEx) Fridays
+- Earnings-heavy weeks (e.g. mega-cap reporting)
+
+**Recommended approach**: Store per-scan distribution stats (p25/p50/p75/p90/p99
+of both bullish and bearish flow intensity in bps) to `data/flow_stats.csv` on
+every pipeline run. After accumulating 30+ trading days across varied conditions,
+analyse the combined distribution and adjust thresholds if the current bounds
+over- or under-score consistently. Ultimately, this should feed into the adaptive
+percentile-rank scoring described in the "Flow scoring — historical distribution"
+roadmap item above.
+
 ---
 
 # Known Issues

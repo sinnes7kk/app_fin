@@ -342,7 +342,7 @@
           </header>
           <dl class="card-metrics">
             <dt>Intensity</dt><dd>{{ "%.2f"|format(tf.bps) }} bps</dd>
-            <dt>Premium</dt><dd>{{ "${:,.0f}".format(tf.premium) if tf.premium else "—" }}</dd>
+            <dt>Unusual prem</dt><dd>{{ "${:,.0f}".format(tf.premium) if tf.premium else "—" }}{% if tf.count %} ({{ tf.count }} trades){% endif %}</dd>
             <dt>Flow score</dt><dd>{{ "%.1f"|format(tf.flow_score * 10) }}/10</dd>
           </dl>
         </article>

@@ -1640,6 +1640,7 @@ def index():
                 bps = (bull_int if is_bull else bear_int) * 10_000
                 label, label_cls = _prem_mcap_label(bps)
                 prem = float(r.get("bullish_premium_raw" if is_bull else "bearish_premium_raw", 0) or 0)
+                count = int(r.get("bullish_count" if is_bull else "bearish_count", 0) or 0)
                 top_flow.append({
                     "ticker": r.get("ticker", "?"),
                     "direction": "LONG" if is_bull else "SHORT",
@@ -1647,6 +1648,7 @@ def index():
                     "label": label,
                     "label_cls": label_cls,
                     "premium": prem,
+                    "count": count,
                     "flow_score": float(r.get("bullish_score" if is_bull else "bearish_score", 0) or 0),
                 })
 
