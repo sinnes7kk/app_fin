@@ -59,6 +59,7 @@ ALERT_DISPLAY_COLS = [
     "strike",
     "expiration_date",
     "premium",
+    "prem_mcap_bps",
     "flow_intensity",
     "contracts",
     "volume",
@@ -1019,6 +1020,12 @@ def _alerts_subset(df: pd.DataFrame) -> pd.DataFrame:
             df = df.copy()
             df["flow_intensity"] = None
 
+    if "premium" in df.columns and "marketcap" in df.columns:
+        mcap = pd.to_numeric(df["marketcap"], errors="coerce")
+        prem = pd.to_numeric(df["premium"], errors="coerce")
+        df["prem_mcap_bps"] = (prem / mcap * 10_000).round(2)
+        df.loc[mcap <= 0, "prem_mcap_bps"] = None
+
     cols = [c for c in ALERT_DISPLAY_COLS if c in df.columns]
     out = df[cols].copy() if cols else df.copy()
     if "event_ts" in out.columns:
@@ -1802,13 +1809,15 @@ def _compute_options_score(direction: str, opts_ctx: dict | None) -> float | Non
 def api_scan_ticker():
     """Run flow + options scoring for a single ticker and return JSON."""
     from app.features.flow_features import build_flow_feature_table
-    from app.features.options_context import fetch_options_context
+    from app.features.options_context import clear_context_cache, fetch_options_context
     from app.vendors.unusual_whales import (
         fetch_dark_pool,
         fetch_flow_for_tickers,
         fetch_flow_recent,
         fetch_net_prem_ticks,
     )
+
+    clear_context_cache()
 
     ticker = (request.args.get("ticker") or "").strip().upper()
     if not ticker or not ticker.isalpha():

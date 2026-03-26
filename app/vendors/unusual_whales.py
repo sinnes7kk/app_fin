@@ -159,6 +159,7 @@ RENAME_MAP = {
     "has_floor": "is_floor",
     "total_ask_side_prem": "ask_side_premium",
     "total_bid_side_prem": "bid_side_premium",
+    "marketcap": "marketcap",
 }
 
 
@@ -208,6 +209,7 @@ def normalize_flow_response(payload: dict) -> pd.DataFrame:
         "underlying_price",
         "ask_side_premium",
         "bid_side_premium",
+        "marketcap",
     ]
     for col in numeric_cols:
         if col in df.columns:
