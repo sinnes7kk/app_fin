@@ -192,7 +192,7 @@ _FLOW_WEIGHTS = {
 #   component, or percentile ranks against a historical lookback window.
 #   This requires storing per-run flow statistics in data/flow_stats.csv.
 _FLOW_THRESHOLDS = {
-    "flow_intensity":    (np.log1p(0.1), np.log1p(5)),
+    "flow_intensity":    (np.log1p(0.01), np.log1p(1.0)),
     "premium_per_trade": (np.log1p(5_000), np.log1p(200_000)),
     "vol_oi":            (0.5,   3.0),
     "repeat":            (1.0,  10.0),

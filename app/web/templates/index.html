@@ -910,7 +910,7 @@
     function _buildFlowComponentTable(m) {
       var dir = _dirPrefix(m);
       var components = [
-        { name: "Flow intensity", weight: "25%", val: _num(m[dir + "_flow_intensity"]) * 10000, fmtFn: function(v){ return v.toFixed(2) + " bps"; }, thresh: [2, 0.5], desc: "Directional options premium as basis points of market cap" },
+        { name: "Flow intensity", weight: "25%", val: _num(m[dir + "_flow_intensity"]) * 10000, fmtFn: function(v){ return v.toFixed(2) + " bps"; }, thresh: [0.6, 0.15], desc: "Directional options premium as basis points of market cap" },
         { name: "Premium / trade", weight: "15%", val: _num(m[dir + "_premium_per_trade"]), fmtFn: fmtPremium, thresh: [100000, 10000], desc: "Avg dollar premium per options trade" },
         { name: "Vol / OI ratio", weight: "15%", val: _num(m[dir + "_vol_oi"]), fmtFn: fmt, thresh: [2.0, 1.0], desc: "Today\u2019s volume vs open interest" },
         { name: "Flow velocity", weight: "13%", val: _num(m.flow_velocity), fmtFn: fmt, thresh: [2.0, 1.0], desc: "Rate of premium acceleration" },
