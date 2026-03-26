@@ -557,6 +557,21 @@
             <div id="search-opts-body"></div>
           </div>
         </div>
+
+        <div class="search-details-grid search-details-triple">
+          <div class="search-detail-section" id="search-netprem-section">
+            <h3>Intraday Premium</h3>
+            <div id="search-netprem-body"></div>
+          </div>
+          <div class="search-detail-section" id="search-flowrecent-section">
+            <h3>Recent Flow</h3>
+            <div id="search-flowrecent-body"></div>
+          </div>
+          <div class="search-detail-section" id="search-darkpool-section">
+            <h3>Dark Pool</h3>
+            <div id="search-darkpool-body"></div>
+          </div>
+        </div>
       </div>
     </section>
   </main>
@@ -1525,6 +1540,65 @@
         } else {
           var note = opts.note ? escHtml(opts.note) : "Options context unavailable";
           optsBody.innerHTML = '<p class="muted">' + note + '</p>';
+        }
+
+        // --- Intraday Net Premium ---
+        var npBody = document.getElementById("search-netprem-body");
+        var np = d.net_premium || {};
+        if (np.available) {
+          var dir = np.intraday_premium_direction;
+          var dirLabel = dir >= 0.65 ? "Bullish" : dir <= 0.35 ? "Bearish" : "Neutral";
+          var dirCls = dir >= 0.65 ? "gauge-bull" : dir <= 0.35 ? "gauge-bear" : "gauge-neutral";
+          var nh = '<div class="gauge-label">' + dirLabel + '</div>';
+          nh += '<div class="gauge-track"><div class="gauge-fill ' + dirCls + '" style="width:' + Math.round(dir * 100) + '%"></div></div>';
+          nh += '<table class="data compact">';
+          nh += '<tr><td>Premium direction</td><td>' + fmtScore(dir) + '</td></tr>';
+          nh += '<tr><td>Delta momentum</td><td>' + fmtScore(np.delta_momentum) + '</td></tr>';
+          nh += '<tr><td>Net delta</td><td>' + Number(np.net_delta).toLocaleString() + '</td></tr>';
+          nh += '<tr><td>Net call premium</td><td>' + fmtDollar(np.net_call_premium) + '</td></tr>';
+          nh += '<tr><td>Net put premium</td><td>' + fmtDollar(np.net_put_premium) + '</td></tr>';
+          nh += '</table>';
+          npBody.innerHTML = nh;
+        } else {
+          npBody.innerHTML = '<p class="muted">Intraday premium data unavailable</p>';
+        }
+
+        // --- Recent Flow ---
+        var frBody = document.getElementById("search-flowrecent-body");
+        var fr = d.flow_recent || {};
+        if (fr.available) {
+          var br = fr.recent_bullish_ratio;
+          var brLabel = br >= 0.60 ? "Bullish" : br <= 0.40 ? "Bearish" : "Mixed";
+          var brCls = br >= 0.60 ? "gauge-bull" : br <= 0.40 ? "gauge-bear" : "gauge-neutral";
+          var rh = '<div class="gauge-label">' + brLabel + '</div>';
+          rh += '<div class="gauge-track"><div class="gauge-fill ' + brCls + '" style="width:' + Math.round(br * 100) + '%"></div></div>';
+          rh += '<table class="data compact">';
+          rh += '<tr><td>Trade count</td><td>' + (fr.recent_flow_count || 0) + '</td></tr>';
+          rh += '<tr><td>Total premium</td><td>' + fmtDollar(fr.recent_total_premium) + '</td></tr>';
+          rh += '<tr><td>Bullish ratio</td><td>' + (br * 100).toFixed(1) + '%</td></tr>';
+          rh += '</table>';
+          frBody.innerHTML = rh;
+        } else {
+          frBody.innerHTML = '<p class="muted">Recent flow data unavailable</p>';
+        }
+
+        // --- Dark Pool ---
+        var dpBody = document.getElementById("search-darkpool-body");
+        var dp = d.dark_pool || {};
+        if (dp.available) {
+          var bias = dp.dark_pool_bias;
+          var biasLabel = bias >= 0.60 ? "Buyers" : bias <= 0.40 ? "Sellers" : "Balanced";
+          var biasCls = bias >= 0.60 ? "gauge-bull" : bias <= 0.40 ? "gauge-bear" : "gauge-neutral";
+          var dh = '<div class="gauge-label">' + biasLabel + '</div>';
+          dh += '<div class="gauge-track"><div class="gauge-fill ' + biasCls + '" style="width:' + Math.round(bias * 100) + '%"></div></div>';
+          dh += '<table class="data compact">';
+          dh += '<tr><td>Buy/sell bias</td><td>' + fmtScore(bias) + '</td></tr>';
+          dh += '<tr><td>Total volume</td><td>' + Number(dp.dark_pool_volume).toLocaleString() + '</td></tr>';
+          dh += '<tr><td>Large prints (&gt;$1M)</td><td>' + (dp.large_print_count || 0) + '</td></tr>';
+          dh += '</table>';
+          dpBody.innerHTML = dh;
+        } else {
+          dpBody.innerHTML = '<p class="muted">Dark pool data unavailable</p>';
         }
 
         resEl.style.display = "block";

@@ -1782,7 +1782,12 @@ def api_scan_ticker():
     """Run flow + options scoring for a single ticker and return JSON."""
     from app.features.flow_features import build_flow_feature_table
     from app.features.options_context import fetch_options_context
-    from app.vendors.unusual_whales import fetch_flow_for_tickers
+    from app.vendors.unusual_whales import (
+        fetch_dark_pool,
+        fetch_flow_for_tickers,
+        fetch_flow_recent,
+        fetch_net_prem_ticks,
+    )
 
     ticker = (request.args.get("ticker") or "").strip().upper()
     if not ticker or not ticker.isalpha():
@@ -1791,8 +1796,12 @@ def api_scan_ticker():
     result: dict = {"ok": True, "ticker": ticker}
     spot: float | None = None
 
+    def _sf(val, digits=2):
+        v = float(val) if val is not None else 0.0
+        return round(v, digits) if v == v else 0.0
+
     try:
-        # --- Flow ---
+        # --- Flow alerts (lowered thresholds for overview) ---
         flow_data: dict = {"available": False}
         try:
             norm = fetch_flow_for_tickers([ticker])
@@ -1802,12 +1811,11 @@ def api_scan_ticker():
                     if not prices.empty:
                         spot = round(float(prices.iloc[-1]), 2)
 
-                feature_table = build_flow_feature_table(norm)
+                feature_table = build_flow_feature_table(
+                    norm, min_premium=25_000, min_dte=1, max_dte=365,
+                )
                 if not feature_table.empty and ticker in feature_table["ticker"].values:
                     row = feature_table[feature_table["ticker"] == ticker].iloc[0]
-                    def _sf(val, digits=2):
-                        v = float(val) if val is not None else 0.0
-                        return round(v, digits) if v == v else 0.0
                     flow_data = {
                         "available": True,
                         "bullish_raw": _sf(row.get("bullish_score", 0), 4),
@@ -1834,6 +1842,36 @@ def api_scan_ticker():
 
         result["flow"] = flow_data
         result["spot"] = spot
+
+        # --- Net premium ticks (intraday direction) ---
+        net_prem: dict = {"available": False}
+        try:
+            raw_np = fetch_net_prem_ticks(ticker)
+            if raw_np:
+                net_prem = {"available": True, **raw_np}
+        except Exception:
+            pass
+        result["net_premium"] = net_prem
+
+        # --- Flow recent (all-size summary) ---
+        flow_rec: dict = {"available": False}
+        try:
+            raw_fr = fetch_flow_recent(ticker)
+            if raw_fr:
+                flow_rec = {"available": True, **raw_fr}
+        except Exception:
+            pass
+        result["flow_recent"] = flow_rec
+
+        # --- Dark pool ---
+        dp: dict = {"available": False}
+        try:
+            raw_dp = fetch_dark_pool(ticker)
+            if raw_dp:
+                dp = {"available": True, **raw_dp}
+        except Exception:
+            pass
+        result["dark_pool"] = dp
 
         # --- Options context ---
         opts_out: dict = {"available": False}
