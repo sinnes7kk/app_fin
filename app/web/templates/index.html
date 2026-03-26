@@ -62,6 +62,9 @@
         <button class="nav-item" data-tab="performance">
           <span class="nav-icon">&#9670;</span> Performance
         </button>
+        <button class="nav-item" data-tab="search">
+          <span class="nav-icon">&#128269;</span> Search
+        </button>
       </div>
     </nav>
 
@@ -486,6 +489,70 @@
       {% endif %}
 
       {% endif %}
+    </section>
+
+    <section id="panel-search" class="panel" role="tabpanel">
+      <h1 class="panel-title">Ticker Search</h1>
+      <p class="muted">Run any ticker through the full scoring pipeline &mdash; flow, price action, options context.</p>
+      <div class="search-bar">
+        <input type="text" id="search-ticker-input" class="search-input" placeholder="Enter ticker symbol…" maxlength="6" autocomplete="off" spellcheck="false">
+        <button id="search-scan-btn" class="btn-accent">Scan</button>
+      </div>
+      <div id="search-loading" class="search-loading" style="display:none;">
+        <span class="spinner"></span> Scanning&hellip; this may take 10-20 seconds
+      </div>
+      <div id="search-error" class="search-error" style="display:none;"></div>
+      <div id="search-results" style="display:none;">
+        <div class="search-header">
+          <h2 id="search-result-ticker"></h2>
+          <span id="search-result-spot" class="search-spot"></span>
+        </div>
+
+        <div class="search-scores-grid">
+          <div class="search-score-card" id="sc-long">
+            <div class="search-score-dir long-badge">LONG</div>
+            <div class="search-score-final" id="sc-long-final">—</div>
+            <div class="search-score-verdict" id="sc-long-verdict"></div>
+            <div class="search-score-breakdown">
+              <div class="score-row"><span>Flow</span><span id="sc-long-flow">—</span></div>
+              <div class="score-row"><span>Price</span><span id="sc-long-price">—</span></div>
+              <div class="score-row"><span>Options</span><span id="sc-long-opts">—</span></div>
+            </div>
+          </div>
+          <div class="search-score-card" id="sc-short">
+            <div class="search-score-dir short-badge">SHORT</div>
+            <div class="search-score-final" id="sc-short-final">—</div>
+            <div class="search-score-verdict" id="sc-short-verdict"></div>
+            <div class="search-score-breakdown">
+              <div class="score-row"><span>Flow</span><span id="sc-short-flow">—</span></div>
+              <div class="score-row"><span>Price</span><span id="sc-short-price">—</span></div>
+              <div class="score-row"><span>Options</span><span id="sc-short-opts">—</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="search-details-grid">
+          <div class="search-detail-section" id="search-flow-section">
+            <h3>Flow Analysis</h3>
+            <div id="search-flow-body"></div>
+          </div>
+          <div class="search-detail-section" id="search-opts-section">
+            <h3>Options Context</h3>
+            <div id="search-opts-body"></div>
+          </div>
+        </div>
+
+        <div class="search-details-grid">
+          <div class="search-detail-section" id="search-long-section">
+            <h3>Long Assessment</h3>
+            <div id="search-long-body"></div>
+          </div>
+          <div class="search-detail-section" id="search-short-section">
+            <h3>Short Assessment</h3>
+            <div id="search-short-body"></div>
+          </div>
+        </div>
+      </div>
     </section>
   </main>
   </div>
@@ -1370,6 +1437,183 @@
       });
       html += '</div>';
       wrap.innerHTML = html;
+    })();
+
+    /* ── Ticker Search ── */
+    (function () {
+      var inp = document.getElementById("search-ticker-input");
+      var btn = document.getElementById("search-scan-btn");
+      var loadEl = document.getElementById("search-loading");
+      var errEl = document.getElementById("search-error");
+      var resEl = document.getElementById("search-results");
+      if (!inp || !btn) return;
+
+      function verdictClass(v) {
+        if (v === "SIGNAL") return "verdict-signal";
+        if (v === "WATCHLIST") return "verdict-watchlist";
+        return "verdict-reject";
+      }
+
+      function fmtScore(v) {
+        if (v === null || v === undefined || v === "" || v !== v) return "\u2014";
+        return Number(v).toFixed(2);
+      }
+
+      function buildGateRows(checks_passed, checks_failed) {
+        var html = '<div class="gate-checklist">';
+        if (checks_passed && checks_passed.length) {
+          checks_passed.forEach(function(g) {
+            html += '<span class="gate pass">\u2705 ' + escHtml(g) + '</span>';
+          });
+        }
+        if (checks_failed && checks_failed.length) {
+          checks_failed.forEach(function(g) {
+            html += '<span class="gate fail">\u274C ' + escHtml(g) + '</span>';
+          });
+        }
+        html += '</div>';
+        return html;
+      }
+
+      function buildTradePlan(plan) {
+        if (!plan) return '<p class="muted">No valid trade plan</p>';
+        var html = '<table class="data compact search-plan-table">';
+        html += '<tr><td>Entry</td><td>$' + fmtScore(plan.entry_price) + '</td></tr>';
+        html += '<tr><td>Stop</td><td>$' + fmtScore(plan.stop_price) + '</td></tr>';
+        html += '<tr><td>Target 1</td><td>$' + fmtScore(plan.target_1) + '</td></tr>';
+        html += '<tr><td>Target 2</td><td>$' + fmtScore(plan.target_2) + '</td></tr>';
+        html += '<tr><td>R:R</td><td>' + fmtScore(plan.rr_ratio) + '</td></tr>';
+        html += '<tr><td>Risk/share</td><td>$' + fmtScore(plan.risk_per_share) + '</td></tr>';
+        html += '</table>';
+        if (plan.reasons && plan.reasons.length) {
+          html += '<div class="search-reasons">';
+          plan.reasons.forEach(function(r) { html += '<span class="reason-tag">' + escHtml(r) + '</span>'; });
+          html += '</div>';
+        }
+        return html;
+      }
+
+      function renderAssessment(container, side) {
+        var html = '';
+        html += '<div class="search-verdict-badge ' + verdictClass(side.verdict) + '">' + escHtml(side.verdict) + '</div>';
+        if (side.reject_reason) {
+          html += '<p class="muted">' + escHtml(side.reject_reason.replace(/_/g, ' ')) + '</p>';
+        }
+        html += '<div class="score-row"><span>Flow score</span><span>' + fmtScore(side.flow_score) + '</span></div>';
+        html += '<div class="score-row"><span>Price score</span><span>' + fmtScore(side.price_score) + '</span></div>';
+        if (side.final_score !== undefined) {
+          html += '<div class="score-row final"><span>Final score</span><span>' + fmtScore(side.final_score) + '</span></div>';
+        }
+        if (side.score_components) {
+          html += '<h4>Price Components</h4><table class="data compact">';
+          for (var k in side.score_components) {
+            html += '<tr><td>' + escHtml(k.replace(/_/g, ' ')) + '</td><td>' + fmtScore(side.score_components[k]) + '</td></tr>';
+          }
+          html += '</table>';
+        }
+        html += buildGateRows(side.checks_passed, side.checks_failed);
+        if (side.trade_plan) {
+          html += '<h4>Trade Plan</h4>';
+          html += buildTradePlan(side.trade_plan);
+        }
+        container.innerHTML = html;
+      }
+
+      function renderResults(d) {
+        document.getElementById("search-result-ticker").textContent = d.ticker;
+        document.getElementById("search-result-spot").textContent = "Spot: $" + fmtScore(d.spot);
+
+        var longSide = d.long || {};
+        var shortSide = d.short || {};
+        document.getElementById("sc-long-final").textContent = longSide.final_score != null ? fmtScore(longSide.final_score) : "\u2014";
+        document.getElementById("sc-long-verdict").textContent = longSide.verdict || "\u2014";
+        document.getElementById("sc-long-verdict").className = "search-score-verdict " + verdictClass(longSide.verdict);
+        document.getElementById("sc-long-flow").textContent = fmtScore(longSide.flow_score);
+        document.getElementById("sc-long-price").textContent = fmtScore(longSide.price_score);
+        document.getElementById("sc-long-opts").textContent = d.options && d.options.long_score != null ? fmtScore(d.options.long_score) : "\u2014";
+
+        document.getElementById("sc-short-final").textContent = shortSide.final_score != null ? fmtScore(shortSide.final_score) : "\u2014";
+        document.getElementById("sc-short-verdict").textContent = shortSide.verdict || "\u2014";
+        document.getElementById("sc-short-verdict").className = "search-score-verdict " + verdictClass(shortSide.verdict);
+        document.getElementById("sc-short-flow").textContent = fmtScore(shortSide.flow_score);
+        document.getElementById("sc-short-price").textContent = fmtScore(shortSide.price_score);
+        document.getElementById("sc-short-opts").textContent = d.options && d.options.short_score != null ? fmtScore(d.options.short_score) : "\u2014";
+
+        var flowBody = document.getElementById("search-flow-body");
+        if (d.flow && d.flow.available) {
+          var fh = '<table class="data compact">';
+          fh += '<tr><td>Bullish premium</td><td>$' + Number(d.flow.bullish_premium).toLocaleString() + '</td></tr>';
+          fh += '<tr><td>Bearish premium</td><td>$' + Number(d.flow.bearish_premium).toLocaleString() + '</td></tr>';
+          fh += '<tr><td>Bullish score</td><td>' + fmtScore(d.flow.bullish_scaled) + ' / 10</td></tr>';
+          fh += '<tr><td>Bearish score</td><td>' + fmtScore(d.flow.bearish_scaled) + ' / 10</td></tr>';
+          fh += '<tr><td>Flow velocity</td><td>' + fmtScore(d.flow.flow_velocity) + '</td></tr>';
+          fh += '<tr><td>Bull intensity</td><td>' + fmtScore(d.flow.bullish_flow_intensity) + '</td></tr>';
+          fh += '<tr><td>Bear intensity</td><td>' + fmtScore(d.flow.bearish_flow_intensity) + '</td></tr>';
+          fh += '<tr><td>Bull sweeps</td><td>' + (d.flow.bullish_sweep_count || 0) + '</td></tr>';
+          fh += '<tr><td>Bear sweeps</td><td>' + (d.flow.bearish_sweep_count || 0) + '</td></tr>';
+          fh += '<tr><td>Bull vol/OI</td><td>' + fmtScore(d.flow.bullish_vol_oi) + '</td></tr>';
+          fh += '<tr><td>Bear vol/OI</td><td>' + fmtScore(d.flow.bearish_vol_oi) + '</td></tr>';
+          fh += '</table>';
+          flowBody.innerHTML = fh;
+        } else {
+          flowBody.innerHTML = '<p class="muted">No qualifying flow data found' + (d.flow && d.flow.error ? ': ' + escHtml(d.flow.error) : '') + '</p>';
+        }
+
+        var optsBody = document.getElementById("search-opts-body");
+        if (d.options && d.options.available) {
+          var oh = '<table class="data compact">';
+          oh += '<tr><td>Gamma regime</td><td>' + escHtml(d.options.gamma_regime || "\u2014") + '</td></tr>';
+          oh += '<tr><td>Long opts score</td><td>' + fmtScore(d.options.long_score) + ' / 10</td></tr>';
+          oh += '<tr><td>Short opts score</td><td>' + fmtScore(d.options.short_score) + ' / 10</td></tr>';
+          oh += '<tr><td>Call wall</td><td>$' + fmtScore(d.options.nearest_call_wall) + '</td></tr>';
+          oh += '<tr><td>Put wall</td><td>$' + fmtScore(d.options.nearest_put_wall) + '</td></tr>';
+          oh += '<tr><td>Dist to call wall</td><td>' + fmtScore(d.options.distance_to_call_wall_pct) + '%</td></tr>';
+          oh += '<tr><td>Dist to put wall</td><td>' + fmtScore(d.options.distance_to_put_wall_pct) + '%</td></tr>';
+          oh += '<tr><td>P/C ratio</td><td>' + fmtScore(d.options.ticker_put_call_ratio) + '</td></tr>';
+          oh += '</table>';
+          optsBody.innerHTML = oh;
+        } else {
+          optsBody.innerHTML = '<p class="muted">Options context unavailable</p>';
+        }
+
+        renderAssessment(document.getElementById("search-long-body"), longSide);
+        renderAssessment(document.getElementById("search-short-body"), shortSide);
+
+        resEl.style.display = "block";
+      }
+
+      function doScan() {
+        var ticker = inp.value.trim().toUpperCase();
+        if (!ticker) { inp.focus(); return; }
+        errEl.style.display = "none";
+        resEl.style.display = "none";
+        loadEl.style.display = "flex";
+        btn.disabled = true;
+
+        fetch("/api/scan-ticker?ticker=" + encodeURIComponent(ticker))
+          .then(function(r) { return r.json(); })
+          .then(function(d) {
+            loadEl.style.display = "none";
+            btn.disabled = false;
+            if (!d.ok) {
+              errEl.textContent = "Error: " + (d.error || "Unknown error");
+              errEl.style.display = "block";
+              return;
+            }
+            renderResults(d);
+          })
+          .catch(function(e) {
+            loadEl.style.display = "none";
+            btn.disabled = false;
+            errEl.textContent = "Network error: " + e.message;
+            errEl.style.display = "block";
+          });
+      }
+
+      btn.addEventListener("click", doScan);
+      inp.addEventListener("keydown", function(e) {
+        if (e.key === "Enter") doScan();
+      });
     })();
   </script>
 </body>
