@@ -296,6 +296,7 @@ def _build_position(sig: dict, risk_pct: float) -> dict | None:
         "initial_stop": sig["stop_price"],
         "risk_per_share": risk_per_share,
         "best_price": sig["entry_price"],
+        "last_price": sig["entry_price"],
         "days_held": 0,
         "trail_atr": sig["stop_price"],
         "trail_ema": sig["stop_price"],
@@ -598,6 +599,7 @@ def update_positions() -> dict:
         close = float(bar["close"])
         entry_dt = date.fromisoformat(pos["entry_date"])
         pos["days_held"] = (date.today() - entry_dt).days
+        pos["last_price"] = close
 
         try:
             opts_ctx = fetch_options_context(ticker, close)

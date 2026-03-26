@@ -868,6 +868,17 @@ def _watchlist_card_fragments(rows: list[dict]) -> list[str]:
     return out
 
 
+def _format_opened_ts(raw) -> str:
+    """Parse an ISO timestamp and return a human-readable string."""
+    if not raw:
+        return ""
+    try:
+        dt = datetime.fromisoformat(str(raw))
+        return dt.strftime("%b %d, %I:%M %p UTC").lstrip("0")
+    except (ValueError, TypeError):
+        return html_escape(str(raw))
+
+
 def _positions_card_fragments(rows: list[dict]) -> list[str]:
     out: list[str] = []
     for r in rows:
@@ -886,19 +897,55 @@ def _positions_card_fragments(rows: list[dict]) -> list[str]:
             ("Unreal R", _fmt_card_num(r.get("unrealized_r"), 2)),
         ]
         metrics = _card_metrics_dl(pairs)
-        ep = _fmt_card_num(r.get("entry_price"), 2)
-        stop = _fmt_card_num(r.get("active_stop"), 2)
-        plan_p = f'<p class="data-card-plan">Entry {ep} → Stop {stop}</p>'
+
+        ep_raw = r.get("entry_price")
+        lp_raw = r.get("last_price")
+        stop_raw = r.get("active_stop")
+        t1_raw = r.get("target_1")
+        t2_raw = r.get("target_2")
+        direction = str(r.get("direction", "")).upper()
+
+        ep = _fmt_card_num(ep_raw, 2)
+        lp = _fmt_card_num(lp_raw, 2)
+        stop = _fmt_card_num(stop_raw, 2)
+        t1 = _fmt_card_num(t1_raw, 2)
+        t2 = _fmt_card_num(t2_raw, 2)
+
+        pnl_html = ""
+        if ep_raw is not None and lp_raw is not None:
+            try:
+                ep_f, lp_f = float(ep_raw), float(lp_raw)
+                if ep_f != 0:
+                    pct = ((lp_f - ep_f) / ep_f) * 100
+                    if direction == "SHORT":
+                        pct = -pct
+                    sign = "+" if pct >= 0 else ""
+                    cls = "pos-pnl-pos" if pct >= 0 else "pos-pnl-neg"
+                    pnl_html = f' <span class="{cls}">{sign}{pct:.1f}%</span>'
+            except (TypeError, ValueError):
+                pass
+
+        ladder = (
+            '<dl class="pos-price-ladder">'
+            f"<dt>Entry</dt><dd>{ep}</dd>"
+            f"<dt>Current</dt><dd>{lp}{pnl_html}</dd>"
+            f"<dt>Stop</dt><dd>{stop}</dd>"
+            f"<dt>T1</dt><dd>{t1}</dd>"
+            f"<dt>T2</dt><dd>{t2}</dd>"
+            "</dl>"
+        )
+
         opened = r.get("opened_at") or r.get("entry_date")
         od = ""
         if opened:
-            od = f'<p class="data-card-meta">Opened {html_escape(str(opened))}</p>'
+            pretty = _format_opened_ts(opened)
+            od = f'<p class="data-card-meta">Opened {pretty}</p>'
         out.append(
             _data_card_article(
                 t,
                 head_badges_html=head,
                 metrics_html=metrics,
-                extra_html=plan_p + od,
+                extra_html=ladder + od,
                 clickable=True,
                 direction=str(r.get("direction", "")),
             )

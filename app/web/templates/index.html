@@ -1147,14 +1147,43 @@
         ["Pattern / setup", p.pattern],
         ["Why (source)", p.source]
       ]);
-      var risk = detailSection("Risk & targets", [
-        ["Entry", p.entry_price],
-        ["Opened at", p.opened_at || p.entry_date],
-        ["Active stop", p.active_stop],
-        ["Initial stop", p.initial_stop],
-        ["Targets", t12],
-        ["Shares", p.shares],
-        ["Unrealized R", p.unrealized_r]
+
+      var openedRaw = p.opened_at || p.entry_date || "";
+      var openedPretty = openedRaw;
+      if (openedRaw) {
+        try {
+          var dt = new Date(openedRaw);
+          if (!isNaN(dt.getTime())) {
+            openedPretty = dt.toLocaleDateString("en-US", { month: "short", day: "numeric" }) +
+              ", " + dt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }) + " UTC";
+          }
+        } catch(e) {}
+      }
+
+      var currentVal = fmt(p.last_price);
+      if (p.last_price != null && p.entry_price != null) {
+        try {
+          var ep = parseFloat(p.entry_price), lp = parseFloat(p.last_price);
+          if (ep !== 0) {
+            var pnlPct = ((lp - ep) / ep) * 100;
+            if (String(p.direction).toUpperCase() === "SHORT") pnlPct = -pnlPct;
+            var sign = pnlPct >= 0 ? "+" : "";
+            var color = pnlPct >= 0 ? "var(--good)" : "var(--bad)";
+            currentVal = fmt(p.last_price) + ' <span style="color:' + color + ';font-weight:600">' + sign + pnlPct.toFixed(1) + '%</span>';
+          }
+        } catch(e) {}
+      }
+
+      var risk = detailSectionRaw("Risk & targets", [
+        ["Entry", fmt(p.entry_price)],
+        ["Current price", currentVal],
+        ["Opened", openedPretty],
+        ["Active stop", fmt(p.active_stop)],
+        ["Initial stop", fmt(p.initial_stop)],
+        ["Target 1", fmt(p.target_1)],
+        ["Target 2", fmt(p.target_2)],
+        ["Shares", fmt(p.shares)],
+        ["Unrealized R", fmt(p.unrealized_r)]
       ]);
       var conv = detailSectionRaw("Conviction at open", [
         ["Final score", fmtConvictionHtml(p.final_score)],
@@ -1217,14 +1246,15 @@
     }
 
     function subtabBarHtml() {
-      var ids = ["verdict", "conviction", "price", "options", "plan", "position"];
+      var ids = ["verdict", "conviction", "price", "options", "plan", "position", "chart"];
       var labels = {
         verdict: "Verdict",
         conviction: "Conviction",
         price: "Price action",
         options: "Flow & Options",
         plan: "Plan",
-        position: "Position"
+        position: "Position",
+        chart: "Chart"
       };
       return (
         '<div class="detail-subtabs" role="tablist">' +
@@ -1267,8 +1297,54 @@
         "</div>" +
         '<div class="detail-subtab-panel" data-panel="position">' +
         buildPositionDl(ticker) +
+        "</div>" +
+        '<div class="detail-subtab-panel" data-panel="chart">' +
+        '<div class="tv-chart-wrap" id="tv-chart-' + escHtml(ticker) + '"></div>' +
         "</div>"
       );
+    }
+
+    function _initTvChart(container, ticker) {
+      if (!container || container.getAttribute("data-tv-loaded")) return;
+      container.setAttribute("data-tv-loaded", "1");
+      var cfg = JSON.stringify({
+        autosize: true,
+        symbol: ticker,
+        interval: "D",
+        timezone: "America/New_York",
+        theme: "dark",
+        style: "1",
+        locale: "en",
+        hide_top_toolbar: false,
+        hide_legend: false,
+        allow_symbol_change: false,
+        save_image: false,
+        calendar: false,
+        studies: ["STD;EMA"],
+        overrides: {
+          "mainSeriesProperties.candleStyle.upColor": "#3fb950",
+          "mainSeriesProperties.candleStyle.downColor": "#f85149",
+          "mainSeriesProperties.candleStyle.wickUpColor": "#3fb950",
+          "mainSeriesProperties.candleStyle.wickDownColor": "#f85149"
+        },
+        support_host: "https://www.tradingview.com"
+      });
+      container.innerHTML =
+        '<div class="tradingview-widget-container" style="height:100%;width:100%">' +
+          '<div class="tradingview-widget-container__widget" style="height:calc(100% - 32px);width:100%"></div>' +
+          '<script type="text/javascript" src="https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js" async>' +
+            cfg +
+          '<\/script>' +
+        '</div>';
+      var scripts = container.querySelectorAll("script");
+      scripts.forEach(function(old) {
+        var s = document.createElement("script");
+        s.type = old.type;
+        s.src = old.src;
+        s.async = true;
+        s.textContent = old.textContent;
+        old.parentNode.replaceChild(s, old);
+      });
     }
 
     function bindDetailSubtabs(panel) {
@@ -1287,6 +1363,12 @@
           var on = p.getAttribute("data-panel") === id;
           p.classList.toggle("active", on);
         });
+        if (id === "chart") {
+          var rawTicker = panel.getAttribute("data-ticker") || "";
+          var chartTicker = rawTicker.split("|")[0];
+          var wrap = panel.querySelector(".tv-chart-wrap");
+          if (wrap && chartTicker) _initTvChart(wrap, chartTicker);
+        }
       });
     }
 
