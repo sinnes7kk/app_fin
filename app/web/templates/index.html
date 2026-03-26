@@ -1106,7 +1106,7 @@
         panels.forEach(function (p) { p.classList.toggle("active", p.id === "panel-" + id); });
         if (id === "performance" && !_perfChartDrawn) {
           _perfChartDrawn = true;
-          setTimeout(function() { _drawEquityChart(document.getElementById("equity-chart-perf")); }, 50);
+          setTimeout(function() { _setupEquityChart(document.getElementById("equity-chart-perf")); }, 50);
         }
       }
 
@@ -1195,64 +1195,157 @@
       function applyFilters(pid) { var f = readFilters(pid); if (!f) return; var section = document.getElementById("panel-" + pid); if (!section) return; var cards = Array.prototype.slice.call(section.querySelectorAll("article.data-card")); var shown = 0, total = cards.length; var hasAny = f.patterns.length > 0 || f.reject || f.flowMin > 0 || f.priceMin > 0 || f.optsMin > 0 || f.check; cards.forEach(function (card) { if (!hasAny || cardMatchesFilter(card, f)) { card.style.display = ""; shown++; } else { card.style.display = "none"; } }); var statusEl = document.querySelector('[data-filter-status="' + pid + '"]'); if (statusEl) statusEl.textContent = hasAny ? shown + " of " + total : ""; }
     })();
 
-    /* ── Equity curve chart ── */
+    /* ── Equity curve chart with hover tooltip ── */
     var _equityData = {{ perf.equity_curve | default([], true) | tojson }};
 
-    function _drawEquityChart(canvas) {
+    function _setupEquityChart(canvas) {
       if (!canvas || !_equityData || !_equityData.length) return;
+
       var dpr = window.devicePixelRatio || 1;
       var parent = canvas.parentElement;
       var W = parent.offsetWidth - 13;
       var H = 200;
       if (W < 100) return;
+
       canvas.width = W * dpr;
       canvas.height = H * dpr;
       canvas.style.width = W + "px";
       canvas.style.height = H + "px";
-      var ctx = canvas.getContext("2d");
-      ctx.scale(dpr, dpr);
+
       var vals = _equityData.map(function (d) { return Number(d.portfolio_value); });
       var labels = _equityData.map(function (d) { return d.date; });
+      var cash = _equityData.map(function (d) { return Number(d.cash || 0); });
+      var posVal = _equityData.map(function (d) { return Number(d.positions_value || 0); });
+      var openCt = _equityData.map(function (d) { return Number(d.open_count || 0); });
       var minV = Math.min.apply(null, vals);
       var maxV = Math.max.apply(null, vals);
       var range = maxV - minV;
       if (range < 1) { minV -= 50; maxV += 50; range = maxV - minV; }
+
       var pad = { top: 20, right: 20, bottom: 30, left: 70 };
       var cw = W - pad.left - pad.right;
       var ch = H - pad.top - pad.bottom;
-      function x(i) { return pad.left + (i / Math.max(vals.length - 1, 1)) * cw; }
-      function y(v) { return pad.top + ch - ((v - minV) / range) * ch; }
+      function xPos(i) { return pad.left + (i / Math.max(vals.length - 1, 1)) * cw; }
+      function yPos(v) { return pad.top + ch - ((v - minV) / range) * ch; }
 
-      ctx.strokeStyle = "#333"; ctx.lineWidth = 0.5;
-      for (var g = 0; g <= 4; g++) { var gy = pad.top + (ch / 4) * g; ctx.beginPath(); ctx.moveTo(pad.left, gy); ctx.lineTo(W - pad.right, gy); ctx.stroke(); }
+      function drawBase(ctx) {
+        ctx.clearRect(0, 0, W, H);
 
-      ctx.strokeStyle = "#4fc3f7"; ctx.lineWidth = 2.5; ctx.beginPath();
-      for (var i = 0; i < vals.length; i++) { if (i === 0) ctx.moveTo(x(i), y(vals[i])); else ctx.lineTo(x(i), y(vals[i])); }
-      ctx.stroke();
+        ctx.strokeStyle = "#333"; ctx.lineWidth = 0.5;
+        for (var g = 0; g <= 4; g++) {
+          var gy = pad.top + (ch / 4) * g;
+          ctx.beginPath(); ctx.moveTo(pad.left, gy); ctx.lineTo(W - pad.right, gy); ctx.stroke();
+        }
 
-      // Draw data points as circles
-      ctx.fillStyle = "#4fc3f7";
-      for (var i = 0; i < vals.length; i++) { ctx.beginPath(); ctx.arc(x(i), y(vals[i]), 3, 0, Math.PI * 2); ctx.fill(); }
+        ctx.strokeStyle = "#4fc3f7"; ctx.lineWidth = 2.5; ctx.beginPath();
+        for (var i = 0; i < vals.length; i++) {
+          if (i === 0) ctx.moveTo(xPos(i), yPos(vals[i]));
+          else ctx.lineTo(xPos(i), yPos(vals[i]));
+        }
+        ctx.stroke();
 
-      // Fill area under curve
-      ctx.beginPath();
-      for (var i = 0; i < vals.length; i++) { if (i === 0) ctx.moveTo(x(i), y(vals[i])); else ctx.lineTo(x(i), y(vals[i])); }
-      ctx.lineTo(x(vals.length - 1), pad.top + ch); ctx.lineTo(x(0), pad.top + ch); ctx.closePath();
-      ctx.fillStyle = "rgba(79,195,247,0.12)"; ctx.fill();
+        ctx.fillStyle = "#4fc3f7";
+        for (var i = 0; i < vals.length; i++) {
+          ctx.beginPath(); ctx.arc(xPos(i), yPos(vals[i]), 3, 0, Math.PI * 2); ctx.fill();
+        }
 
-      // Y-axis labels
-      ctx.fillStyle = "#aaa"; ctx.font = "11px monospace"; ctx.textAlign = "right";
-      for (var g = 0; g <= 4; g++) { var v = minV + (range / 4) * (4 - g); ctx.fillText("$" + v.toLocaleString(undefined, {maximumFractionDigits: 0}), pad.left - 6, pad.top + (ch / 4) * g + 4); }
+        ctx.beginPath();
+        for (var i = 0; i < vals.length; i++) {
+          if (i === 0) ctx.moveTo(xPos(i), yPos(vals[i]));
+          else ctx.lineTo(xPos(i), yPos(vals[i]));
+        }
+        ctx.lineTo(xPos(vals.length - 1), pad.top + ch);
+        ctx.lineTo(xPos(0), pad.top + ch);
+        ctx.closePath();
+        ctx.fillStyle = "rgba(79,195,247,0.12)"; ctx.fill();
 
-      // X-axis labels
-      ctx.textAlign = "center";
-      for (var i = 0; i < labels.length; i++) { ctx.fillText(labels[i], x(i), H - 6); }
+        ctx.fillStyle = "#aaa"; ctx.font = "11px monospace"; ctx.textAlign = "right";
+        for (var g = 0; g <= 4; g++) {
+          var v = minV + (range / 4) * (4 - g);
+          ctx.fillText("$" + v.toLocaleString(undefined, {maximumFractionDigits: 0}), pad.left - 6, pad.top + (ch / 4) * g + 4);
+        }
+        ctx.textAlign = "center";
+        for (var i = 0; i < labels.length; i++) ctx.fillText(labels[i], xPos(i), H - 6);
+      }
+
+      var rawCtx = canvas.getContext("2d");
+      rawCtx.scale(dpr, dpr);
+      drawBase(rawCtx);
+
+      // Tooltip element
+      var tip = document.createElement("div");
+      tip.style.cssText = "position:absolute;display:none;pointer-events:none;background:#1c2333;border:1px solid #30363d;border-radius:6px;padding:6px 10px;font-size:0.72rem;color:#e6edf3;z-index:10;white-space:nowrap;box-shadow:0 4px 12px rgba(0,0,0,0.4);font-family:'SF Mono','Fira Code',monospace;line-height:1.55";
+      parent.style.position = "relative";
+      parent.appendChild(tip);
+
+      function nearestIdx(mouseX) {
+        var best = 0, bestDist = Infinity;
+        for (var i = 0; i < vals.length; i++) {
+          var d = Math.abs(mouseX - xPos(i));
+          if (d < bestDist) { bestDist = d; best = i; }
+        }
+        return best;
+      }
+
+      canvas.addEventListener("mousemove", function(e) {
+        var rect = canvas.getBoundingClientRect();
+        var mx = (e.clientX - rect.left) * (W / rect.width);
+        var my = (e.clientY - rect.top) * (H / rect.height);
+
+        if (mx < pad.left || mx > W - pad.right || my < pad.top || my > pad.top + ch) {
+          tip.style.display = "none";
+          rawCtx.save(); rawCtx.setTransform(dpr, 0, 0, dpr, 0, 0); drawBase(rawCtx); rawCtx.restore();
+          return;
+        }
+
+        var idx = nearestIdx(mx);
+        var px = xPos(idx), py = yPos(vals[idx]);
+
+        rawCtx.save(); rawCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        drawBase(rawCtx);
+
+        // Crosshair
+        rawCtx.strokeStyle = "rgba(88,166,255,0.3)"; rawCtx.lineWidth = 1;
+        rawCtx.setLineDash([4, 3]);
+        rawCtx.beginPath(); rawCtx.moveTo(px, pad.top); rawCtx.lineTo(px, pad.top + ch); rawCtx.stroke();
+        rawCtx.beginPath(); rawCtx.moveTo(pad.left, py); rawCtx.lineTo(W - pad.right, py); rawCtx.stroke();
+        rawCtx.setLineDash([]);
+
+        // Highlighted dot
+        rawCtx.fillStyle = "#fff"; rawCtx.beginPath(); rawCtx.arc(px, py, 5, 0, Math.PI * 2); rawCtx.fill();
+        rawCtx.fillStyle = "#4fc3f7"; rawCtx.beginPath(); rawCtx.arc(px, py, 3, 0, Math.PI * 2); rawCtx.fill();
+        rawCtx.restore();
+
+        // P&L since start
+        var pnlFromStart = vals[idx] - vals[0];
+        var pnlPct = vals[0] ? ((pnlFromStart / vals[0]) * 100).toFixed(2) : "0.00";
+        var pnlColor = pnlFromStart >= 0 ? "#3fb950" : "#f85149";
+        var pnlSign = pnlFromStart >= 0 ? "+" : "";
+
+        tip.innerHTML =
+          "<strong>" + labels[idx] + "</strong><br>" +
+          "Portfolio: <strong>$" + vals[idx].toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) + "</strong><br>" +
+          '<span style="color:' + pnlColor + '">' + pnlSign + "$" + pnlFromStart.toFixed(2) + " (" + pnlSign + pnlPct + '%)</span><br>' +
+          "Positions: " + openCt[idx] + " open &middot; $" + posVal[idx].toLocaleString(undefined, {maximumFractionDigits: 0}) + "<br>" +
+          "Cash: $" + cash[idx].toLocaleString(undefined, {maximumFractionDigits: 0});
+        tip.style.display = "block";
+
+        var tipX = (px / W) * rect.width + 12;
+        var tipY = (py / H) * rect.height - 20;
+        if (tipX + 180 > rect.width) tipX = (px / W) * rect.width - 190;
+        if (tipY < 0) tipY = 10;
+        tip.style.left = tipX + "px";
+        tip.style.top = tipY + "px";
+      });
+
+      canvas.addEventListener("mouseleave", function() {
+        tip.style.display = "none";
+        rawCtx.save(); rawCtx.setTransform(dpr, 0, 0, dpr, 0, 0); drawBase(rawCtx); rawCtx.restore();
+      });
     }
 
-    // Draw the overview chart immediately (it's visible on load)
-    _drawEquityChart(document.getElementById("equity-chart"));
+    _setupEquityChart(document.getElementById("equity-chart"));
 
-    // Draw the perf chart when the Performance tab becomes visible
     var _perfChartDrawn = false;
     var _origActivateTab = null;
 
