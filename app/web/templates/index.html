@@ -1104,6 +1104,10 @@
       function activateTab(id) {
         tabs.forEach(function (b) { var on = b.getAttribute("data-tab") === id; b.classList.toggle("active", on); });
         panels.forEach(function (p) { p.classList.toggle("active", p.id === "panel-" + id); });
+        if (id === "performance" && !_perfChartDrawn) {
+          _perfChartDrawn = true;
+          setTimeout(function() { _drawEquityChart(document.getElementById("equity-chart-perf")); }, 50);
+        }
       }
 
       function setTabParam(id) { var url = new URL(window.location); url.searchParams.set("tab", id); history.replaceState(null, "", url); }
@@ -1192,47 +1196,65 @@
     })();
 
     /* ── Equity curve chart ── */
-    (function () {
-      var canvasIds = ["equity-chart", "equity-chart-perf"];
-      var data = {{ perf.equity_curve | default([], true) | tojson }};
-      if (!data || !data.length) return;
-      canvasIds.forEach(function(cid) {
-        var canvas = document.getElementById(cid);
-        if (!canvas) return;
-        var dpr = window.devicePixelRatio || 1;
-        var rect = canvas.parentElement.getBoundingClientRect();
-        var W = rect.width;
-        var H = canvas.height;
-        canvas.width = W * dpr;
-        canvas.height = H * dpr;
-        canvas.style.width = W + "px";
-        canvas.style.height = H + "px";
-        var ctx = canvas.getContext("2d");
-        ctx.scale(dpr, dpr);
-        var vals = data.map(function (d) { return d.portfolio_value; });
-        var labels = data.map(function (d) { return d.date; });
-        var minV = Math.min.apply(null, vals);
-        var maxV = Math.max.apply(null, vals);
-        if (maxV === minV) maxV = minV + 1;
-        var pad = { top: 20, right: 20, bottom: 30, left: 60 };
-        var cw = W - pad.left - pad.right;
-        var ch = H - pad.top - pad.bottom;
-        function x(i) { return pad.left + (i / Math.max(vals.length - 1, 1)) * cw; }
-        function y(v) { return pad.top + ch - ((v - minV) / (maxV - minV)) * ch; }
-        ctx.strokeStyle = "#333"; ctx.lineWidth = 0.5;
-        for (var g = 0; g <= 4; g++) { var gy = pad.top + (ch / 4) * g; ctx.beginPath(); ctx.moveTo(pad.left, gy); ctx.lineTo(W - pad.right, gy); ctx.stroke(); }
-        ctx.strokeStyle = "#4fc3f7"; ctx.lineWidth = 2; ctx.beginPath();
-        for (var i = 0; i < vals.length; i++) { if (i === 0) ctx.moveTo(x(i), y(vals[i])); else ctx.lineTo(x(i), y(vals[i])); }
-        ctx.stroke();
-        ctx.lineTo(x(vals.length - 1), pad.top + ch); ctx.lineTo(x(0), pad.top + ch); ctx.closePath();
-        ctx.fillStyle = "rgba(79,195,247,0.08)"; ctx.fill();
-        ctx.fillStyle = "#aaa"; ctx.font = "11px monospace"; ctx.textAlign = "right";
-        for (var g = 0; g <= 4; g++) { var v = minV + ((maxV - minV) / 4) * (4 - g); ctx.fillText("$" + v.toFixed(0), pad.left - 6, pad.top + (ch / 4) * g + 4); }
-        ctx.textAlign = "center";
-        var step = Math.max(1, Math.floor(labels.length / 8));
-        for (var i = 0; i < labels.length; i += step) ctx.fillText(labels[i], x(i), H - 6);
-      });
-    })();
+    var _equityData = {{ perf.equity_curve | default([], true) | tojson }};
+
+    function _drawEquityChart(canvas) {
+      if (!canvas || !_equityData || !_equityData.length) return;
+      var dpr = window.devicePixelRatio || 1;
+      var parent = canvas.parentElement;
+      var W = parent.offsetWidth - 13;
+      var H = 200;
+      if (W < 100) return;
+      canvas.width = W * dpr;
+      canvas.height = H * dpr;
+      canvas.style.width = W + "px";
+      canvas.style.height = H + "px";
+      var ctx = canvas.getContext("2d");
+      ctx.scale(dpr, dpr);
+      var vals = _equityData.map(function (d) { return Number(d.portfolio_value); });
+      var labels = _equityData.map(function (d) { return d.date; });
+      var minV = Math.min.apply(null, vals);
+      var maxV = Math.max.apply(null, vals);
+      var range = maxV - minV;
+      if (range < 1) { minV -= 50; maxV += 50; range = maxV - minV; }
+      var pad = { top: 20, right: 20, bottom: 30, left: 70 };
+      var cw = W - pad.left - pad.right;
+      var ch = H - pad.top - pad.bottom;
+      function x(i) { return pad.left + (i / Math.max(vals.length - 1, 1)) * cw; }
+      function y(v) { return pad.top + ch - ((v - minV) / range) * ch; }
+
+      ctx.strokeStyle = "#333"; ctx.lineWidth = 0.5;
+      for (var g = 0; g <= 4; g++) { var gy = pad.top + (ch / 4) * g; ctx.beginPath(); ctx.moveTo(pad.left, gy); ctx.lineTo(W - pad.right, gy); ctx.stroke(); }
+
+      ctx.strokeStyle = "#4fc3f7"; ctx.lineWidth = 2.5; ctx.beginPath();
+      for (var i = 0; i < vals.length; i++) { if (i === 0) ctx.moveTo(x(i), y(vals[i])); else ctx.lineTo(x(i), y(vals[i])); }
+      ctx.stroke();
+
+      // Draw data points as circles
+      ctx.fillStyle = "#4fc3f7";
+      for (var i = 0; i < vals.length; i++) { ctx.beginPath(); ctx.arc(x(i), y(vals[i]), 3, 0, Math.PI * 2); ctx.fill(); }
+
+      // Fill area under curve
+      ctx.beginPath();
+      for (var i = 0; i < vals.length; i++) { if (i === 0) ctx.moveTo(x(i), y(vals[i])); else ctx.lineTo(x(i), y(vals[i])); }
+      ctx.lineTo(x(vals.length - 1), pad.top + ch); ctx.lineTo(x(0), pad.top + ch); ctx.closePath();
+      ctx.fillStyle = "rgba(79,195,247,0.12)"; ctx.fill();
+
+      // Y-axis labels
+      ctx.fillStyle = "#aaa"; ctx.font = "11px monospace"; ctx.textAlign = "right";
+      for (var g = 0; g <= 4; g++) { var v = minV + (range / 4) * (4 - g); ctx.fillText("$" + v.toLocaleString(undefined, {maximumFractionDigits: 0}), pad.left - 6, pad.top + (ch / 4) * g + 4); }
+
+      // X-axis labels
+      ctx.textAlign = "center";
+      for (var i = 0; i < labels.length; i++) { ctx.fillText(labels[i], x(i), H - 6); }
+    }
+
+    // Draw the overview chart immediately (it's visible on load)
+    _drawEquityChart(document.getElementById("equity-chart"));
+
+    // Draw the perf chart when the Performance tab becomes visible
+    var _perfChartDrawn = false;
+    var _origActivateTab = null;
 
     /* ── Calendar heatmap ── */
     (function () {
