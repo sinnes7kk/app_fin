@@ -30,6 +30,15 @@ from app.web.data_access import (
 
 app = Flask(__name__, static_folder="static", template_folder="templates")
 
+
+@app.after_request
+def _add_cors(response):
+    origin = request.headers.get("Origin", "")
+    if origin and ("github.io" in origin or "localhost" in origin or "127.0.0.1" in origin):
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type"
+    return response
+
 _REGIME_PATH = Path(__file__).resolve().parents[2] / "data" / "market_regime.json"
 
 

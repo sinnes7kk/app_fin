@@ -493,7 +493,8 @@
 
     <section id="panel-search" class="panel" role="tabpanel">
       <h1 class="panel-title">Ticker Search</h1>
-      <p class="muted">Run any ticker through the full scoring pipeline &mdash; flow, price action, options context.</p>
+      <p class="muted">Run any ticker through the full scoring pipeline &mdash; flow, price action, options context.<br>
+        <small>Requires the local Flask server running (<code>python -m app.web.server</code>)</small></p>
       <div class="search-bar">
         <input type="text" id="search-ticker-input" class="search-input" placeholder="Enter ticker symbol…" maxlength="6" autocomplete="off" spellcheck="false">
         <button id="search-scan-btn" class="btn-accent">Scan</button>
@@ -1448,6 +1449,9 @@
       var resEl = document.getElementById("search-results");
       if (!inp || !btn) return;
 
+      var isLocal = location.hostname === "localhost" || location.hostname === "127.0.0.1";
+      var API_BASE = isLocal ? "" : "http://127.0.0.1:5050";
+
       function verdictClass(v) {
         if (v === "SIGNAL") return "verdict-signal";
         if (v === "WATCHLIST") return "verdict-watchlist";
@@ -1590,11 +1594,11 @@
         loadEl.style.display = "flex";
         btn.disabled = true;
 
-        fetch("/api/scan-ticker?ticker=" + encodeURIComponent(ticker))
+        fetch(API_BASE + "/api/scan-ticker?ticker=" + encodeURIComponent(ticker))
           .then(function(r) {
             var ct = r.headers.get("content-type") || "";
             if (!ct.includes("application/json")) {
-              throw new Error("Search requires the live Flask server (python -m app.web.server). The static GitHub Pages site cannot run real-time scans.");
+              throw new Error("Could not reach the Flask server. Start it locally with: python -m app.web.server");
             }
             return r.json();
           })
@@ -1611,7 +1615,11 @@
           .catch(function(e) {
             loadEl.style.display = "none";
             btn.disabled = false;
-            errEl.textContent = e.message;
+            var msg = e.message;
+            if (msg.indexOf("Failed to fetch") !== -1 || msg.indexOf("NetworkError") !== -1) {
+              msg = "Cannot connect to Flask server at " + (API_BASE || "localhost") + ". Start it with: python -m app.web.server";
+            }
+            errEl.textContent = msg;
             errEl.style.display = "block";
           });
       }
