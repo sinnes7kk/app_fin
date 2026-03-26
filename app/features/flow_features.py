@@ -7,13 +7,6 @@ from datetime import datetime, timezone
 import numpy as np
 import pandas as pd
 
-def _get_fetch_addv():
-    try:
-        from app.features.price_features import fetch_addv
-        return fetch_addv
-    except ImportError:
-        return lambda ticker, **kw: None
-
 
 def filter_qualifying_flow(
     df: pd.DataFrame,
@@ -199,7 +192,7 @@ _FLOW_WEIGHTS = {
 #   component, or percentile ranks against a historical lookback window.
 #   This requires storing per-run flow statistics in data/flow_stats.csv.
 _FLOW_THRESHOLDS = {
-    "flow_intensity":    (np.log1p(1), np.log1p(50)),
+    "flow_intensity":    (np.log1p(0.1), np.log1p(5)),
     "premium_per_trade": (np.log1p(5_000), np.log1p(200_000)),
     "vol_oi":            (0.5,   3.0),
     "repeat":            (1.0,  10.0),
@@ -286,7 +279,7 @@ def aggregate_flow_by_ticker(df: pd.DataFrame) -> pd.DataFrame:
                 "flow_imbalance_ratio",
                 "dominant_direction",
                 "dte_score",
-                "addv",
+                "marketcap",
                 "bullish_flow_intensity",
                 "bearish_flow_intensity",
                 "bullish_score",
@@ -456,11 +449,23 @@ def aggregate_flow_by_ticker(df: pd.DataFrame) -> pd.DataFrame:
     # DTE score
     agg["dte_score"] = agg["avg_dte"].apply(_dte_score)
 
-    # ADDV and flow intensity — normalizes premium by stock size
-    agg["addv"] = agg["ticker"].apply(_get_fetch_addv())
-    addv_safe = agg["addv"].replace(0, float("nan"))
-    agg["bullish_flow_intensity"] = agg["bullish_premium_raw"] / addv_safe
-    agg["bearish_flow_intensity"] = agg["bearish_premium_raw"] / addv_safe
+    # Market-cap-based flow intensity — premium / marketcap gives a
+    # size-normalised measure of how large the directional bet is relative
+    # to the company (basis-point scale after * 10_000 in the scorer).
+    if "marketcap" in out.columns:
+        mcap_per_ticker = (
+            pd.to_numeric(out["marketcap"], errors="coerce")
+            .groupby(out["ticker"])
+            .max()
+        )
+        agg["marketcap"] = agg["ticker"].map(mcap_per_ticker)
+    else:
+        agg["marketcap"] = np.nan
+
+    mcap_safe = agg["marketcap"].copy()
+    mcap_safe[mcap_safe < 1e8] = np.nan  # ignore ETFs / broken mcap < $100M
+    agg["bullish_flow_intensity"] = agg["bullish_premium_raw"] / mcap_safe
+    agg["bearish_flow_intensity"] = agg["bearish_premium_raw"] / mcap_safe
     agg[["bullish_flow_intensity", "bearish_flow_intensity"]] = (
         agg[["bullish_flow_intensity", "bearish_flow_intensity"]].fillna(0.0)
     )

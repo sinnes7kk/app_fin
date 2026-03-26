@@ -1036,6 +1036,8 @@ REJECTED_COLUMNS = [
     "near_term_oi",
     "swing_dte_oi",
     "long_dated_oi",
+    "iv_rank",
+    "iv_current",
     "pattern",
     "reject_reason",
     "checks_passed",
@@ -1068,6 +1070,8 @@ SIGNAL_COLUMNS = [
     "near_term_oi",
     "swing_dte_oi",
     "long_dated_oi",
+    "iv_rank",
+    "iv_current",
     "entry_price",
     "stop_price",
     "target_1",
@@ -1087,4 +1091,8 @@ def results_to_dataframe(results: list[dict]) -> pd.DataFrame:
     """Convert pipeline results into a clean signals DataFrame."""
     if not results:
         return pd.DataFrame(columns=SIGNAL_COLUMNS)
-    return pd.DataFrame(results)[SIGNAL_COLUMNS]
+    df = pd.DataFrame(results)
+    for col in SIGNAL_COLUMNS:
+        if col not in df.columns:
+            df[col] = None
+    return df[SIGNAL_COLUMNS]

@@ -326,7 +326,7 @@
     <!-- ═══════ UNUSUAL FLOW ═══════ -->
     <section id="panel-unusual-flow" class="panel" role="tabpanel">
       <h1 class="panel-title">Unusual Flow</h1>
-      <p class="tab-intro">Top 30 most unusual options trades in the last 24h, ranked by flow intensity (premium / ADDV). <strong>Prem/MCap (bps)</strong> shows trade premium as basis points of market cap — higher values signal outsized directional positioning relative to company size.</p>
+      <p class="tab-intro">Top 30 most unusual options trades in the last 24h, ranked by flow intensity (premium / market cap). <strong>Prem/MCap (bps)</strong> shows trade premium as basis points of market cap — higher values signal outsized directional positioning relative to company size.</p>
       <div id="alerts-table-wrap">
         {{ alerts_html | safe }}
       </div>
@@ -724,7 +724,7 @@
       var dir = _dirPrefix(m);
       var isLong = dir === "bullish";
       var factors = [];
-      factors.push({ label: "flow intensity", pass: _num(m[dir + "_flow_intensity"]) > 0.0005 });
+      factors.push({ label: "flow intensity", pass: _num(m[dir + "_flow_intensity"]) > 0.00001 });
       factors.push({ label: "premium per trade", pass: _num(m[dir + "_premium_per_trade"]) >= 500000 });
       factors.push({ label: "vol > OI", pass: _num(m[dir + "_vol_oi"]) > 1.0 });
       factors.push({ label: "sweep activity", pass: _num(m[dir + "_sweep_count"]) > 0 });
@@ -764,6 +764,14 @@
         ["Price conviction (" + (hasOpts ? "30%" : "40%") + ")", fmtConvictionHtml(ps)],
         ["Options context (" + (hasOpts ? "20%" : "n/a") + ")", fmtConvictionHtml(opts)]
       ];
+      if (_present(m.iv_rank)) {
+        var ivr = _num(m.iv_rank);
+        var ivrLabel = ivr.toFixed(0);
+        if (ivr >= 15 && ivr <= 45) ivrLabel = '<span class="positive">' + ivrLabel + '</span>';
+        else if (ivr > 75 || ivr <= 5) ivrLabel = '<span class="negative">' + ivrLabel + '</span>';
+        scorePairs.push(["IV rank", ivrLabel]);
+        if (_present(m.iv_current)) scorePairs.push(["Current IV", (_num(m.iv_current) * 100).toFixed(1) + "%"]);
+      }
       var raw = detailSectionRaw("Score summary", scorePairs);
       if (raw) parts.push(raw);
       if (flowScaled) {
@@ -878,7 +886,7 @@
     function _buildFlowComponentTable(m) {
       var dir = _dirPrefix(m);
       var components = [
-        { name: "Flow intensity", weight: "25%", val: _num(m[dir + "_flow_intensity"]) * 10000, fmtFn: function(v){ return v.toFixed(1) + " bps"; }, thresh: [20, 5], desc: "Options premium as % of avg daily dollar volume" },
+        { name: "Flow intensity", weight: "25%", val: _num(m[dir + "_flow_intensity"]) * 10000, fmtFn: function(v){ return v.toFixed(2) + " bps"; }, thresh: [2, 0.5], desc: "Directional options premium as basis points of market cap" },
         { name: "Premium / trade", weight: "15%", val: _num(m[dir + "_premium_per_trade"]), fmtFn: fmtPremium, thresh: [100000, 10000], desc: "Avg dollar premium per options trade" },
         { name: "Vol / OI ratio", weight: "15%", val: _num(m[dir + "_vol_oi"]), fmtFn: fmt, thresh: [2.0, 1.0], desc: "Today\u2019s volume vs open interest" },
         { name: "Flow velocity", weight: "13%", val: _num(m.flow_velocity), fmtFn: fmt, thresh: [2.0, 1.0], desc: "Rate of premium acceleration" },
@@ -914,7 +922,7 @@
       var flowFail = flowFactors.filter(function (f) { return !f.pass; });
       if (flowPass.length) parts.push(chipGroupHtml("Flow strengths", flowPass));
       if (flowFail.length) parts.push(chipGroupHtml("Flow weaknesses", flowFail));
-      var contextPairs = [["Total premium", fmtPremium(m.total_premium)], ["Flow prints", fmt(m.total_count)], ["Imbalance ratio", fmt(m.flow_imbalance_ratio)], ["Avg DTE", fmt(m.avg_dte)], ["ADDV", fmtAddv(m.addv)]];
+      var contextPairs = [["Total premium", fmtPremium(m.total_premium)], ["Flow prints", fmt(m.total_count)], ["Imbalance ratio", fmt(m.flow_imbalance_ratio)], ["Avg DTE", fmt(m.avg_dte)], ["Market cap", fmtAddv(m.marketcap)]];
       var ctxRaw = detailSectionRaw("Flow context", contextPairs);
       if (ctxRaw) parts.push(ctxRaw);
       parts.push('<hr class="section-divider">');
@@ -999,7 +1007,14 @@
         var entryRows = [["Flow conviction", fmtConvictionHtml(openPos.flow_score_scaled), ""], ["Price conviction", fmtConvictionHtml(openPos.price_score), ""], ["Final score", fmtConvictionHtml(openPos.final_score), ""]];
         var entryHtml = '<div class="detail-section"><h4>Scores at entry</h4><table class="score-card"><thead><tr><th>Layer</th><th>Score</th><th></th></tr></thead><tbody>';
         for (var ei = 0; ei < entryRows.length; ei++) { entryHtml += '<tr' + (ei === entryRows.length - 1 ? ' class="score-card-final"' : "") + "><td>" + escHtml(entryRows[ei][0]) + "</td><td>" + entryRows[ei][1] + "</td><td></td></tr>"; }
-        entryHtml += "</tbody></table></div>";
+        entryHtml += "</tbody></table>";
+        if (_present(openPos.iv_rank)) {
+          var eIvr = _num(openPos.iv_rank);
+          var eIvrCls = (eIvr >= 15 && eIvr <= 45) ? "positive" : (eIvr > 75 || eIvr <= 5) ? "negative" : "";
+          var eIvrSpan = eIvrCls ? '<span class="' + eIvrCls + '">' + eIvr.toFixed(0) + '</span>' : eIvr.toFixed(0);
+          entryHtml += '<p style="margin:0.4rem 0 0;font-size:0.82rem;opacity:0.85">IV Rank at entry: ' + eIvrSpan + '</p>';
+        }
+        entryHtml += "</div>";
         parts.push(entryHtml);
       }
 
@@ -1016,7 +1031,16 @@
       var scoreTitle = openPos ? "Current re-evaluation" : "Score card";
       var scoreHtml = '<div class="detail-section"><h4>' + scoreTitle + '</h4><table class="score-card"><thead><tr><th>Layer</th><th>Score</th><th>Weight</th></tr></thead><tbody>';
       for (var i = 0; i < scoreRows.length; i++) { scoreHtml += '<tr' + (i === scoreRows.length - 1 ? ' class="score-card-final"' : "") + "><td>" + escHtml(scoreRows[i][0]) + "</td><td>" + scoreRows[i][1] + "</td><td>" + escHtml(scoreRows[i][2]) + "</td></tr>"; }
-      scoreHtml += "</tbody></table></div>";
+      scoreHtml += "</tbody></table>";
+      if (_present(m.iv_rank)) {
+        var ivr = _num(m.iv_rank);
+        var ivrCls = (ivr >= 15 && ivr <= 45) ? "positive" : (ivr > 75 || ivr <= 5) ? "negative" : "";
+        var ivrSpan = ivrCls ? '<span class="' + ivrCls + '">' + ivr.toFixed(0) + '</span>' : ivr.toFixed(0);
+        scoreHtml += '<p style="margin:0.4rem 0 0;font-size:0.82rem;opacity:0.85">IV Rank: ' + ivrSpan;
+        if (_present(m.iv_current)) scoreHtml += ' &nbsp;|&nbsp; IV: ' + (_num(m.iv_current) * 100).toFixed(1) + '%';
+        scoreHtml += '</p>';
+      }
+      scoreHtml += "</div>";
       parts.push(scoreHtml);
 
       var passed = _csvSet(m.checks_passed);
@@ -1099,7 +1123,15 @@
       var currentVal = fmt(p.last_price);
       if (p.last_price != null && p.entry_price != null) { try { var ep = parseFloat(p.entry_price), lp = parseFloat(p.last_price); if (ep !== 0) { var pnlPct = ((lp - ep) / ep) * 100; if (String(p.direction).toUpperCase() === "SHORT") pnlPct = -pnlPct; var sign = pnlPct >= 0 ? "+" : ""; var color = pnlPct >= 0 ? "var(--good)" : "var(--bad)"; currentVal = fmt(p.last_price) + ' <span style="color:' + color + ';font-weight:600">' + sign + pnlPct.toFixed(1) + '%</span>'; } } catch(e) {} }
       var risk = detailSectionRaw("Risk & targets", [["Entry", fmt(p.entry_price)], ["Current price", currentVal], ["Opened", openedPretty], ["Active stop", fmt(p.active_stop)], ["Initial stop", fmt(p.initial_stop)], ["Target 1", fmt(p.target_1)], ["Target 2", fmt(p.target_2)], ["Shares", fmt(p.shares)], ["Unrealized R", fmt(p.unrealized_r)]]);
-      var conv = detailSectionRaw("Conviction at open", [["Final score", fmtConvictionHtml(p.final_score)], ["Flow (scaled)", fmtConvictionHtml(p.flow_score_scaled)], ["Price score", fmtConvictionHtml(p.price_score)]]);
+      var convPairs = [["Final score", fmtConvictionHtml(p.final_score)], ["Flow (scaled)", fmtConvictionHtml(p.flow_score_scaled)], ["Price score", fmtConvictionHtml(p.price_score)]];
+      if (_present(p.iv_rank)) {
+        var pIvr = _num(p.iv_rank);
+        var pIvrLabel = pIvr.toFixed(0);
+        if (pIvr >= 15 && pIvr <= 45) pIvrLabel = '<span class="positive">' + pIvrLabel + '</span>';
+        else if (pIvr > 75 || pIvr <= 5) pIvrLabel = '<span class="negative">' + pIvrLabel + '</span>';
+        convPairs.push(["IV Rank at entry", pIvrLabel]);
+      }
+      var conv = detailSectionRaw("Conviction at open", convPairs);
       var healthLabel = p.health_state ? p.health_state + " (" + fmt(p.health) + "/10)" : fmt(p.health);
       var deltaStr = p.health_delta != null ? (p.health_delta >= 0 ? "+" : "") + Number(p.health_delta).toFixed(1) : "\u2014";
       var live = detailSectionRaw("Live conviction", [["Re-entry score", fmtConvictionHtml(p.re_entry_score)], ["Health", healthLabel], ["Health \u0394 (vs prev)", deltaStr], ["Conviction (composite)", fmtConvictionHtml(p.conviction)]]);

@@ -60,7 +60,6 @@ ALERT_DISPLAY_COLS = [
     "expiration_date",
     "premium",
     "prem_mcap_bps",
-    "flow_intensity",
     "contracts",
     "volume",
     "open_interest",
@@ -112,22 +111,22 @@ _COLUMN_TOOLTIPS: dict[str, str] = {
     # Candidates
     "bullish_score": "Weighted bullish flow conviction (0\u201310)",
     "bearish_score": "Weighted bearish flow conviction (0\u201310)",
-    "bullish_flow_intensity": "Bullish premium / ADDV (scaled 1\u201310)",
-    "bearish_flow_intensity": "Bearish premium / ADDV (scaled 1\u201310)",
+    "bullish_flow_intensity": "Bullish premium / market cap (basis points)",
+    "bearish_flow_intensity": "Bearish premium / market cap (basis points)",
     "flow_imbalance_ratio": "Bullish prem \u00f7 bearish prem (\u003e1 = bullish dominant)",
     "dominant_direction": "Which side has stronger flow",
     "total_premium": "Total options premium across all flow",
     "total_count": "Count of qualifying options-flow prints rolled into this ticker row",
     "avg_dte": "Average days to expiration of flow",
     "dte_score": "DTE quality score (higher = better positioned)",
-    "addv": "Average daily dollar volume (liquidity anchor); flow intensity = premium / ADDV",
+    "marketcap": "Market capitalisation; flow intensity = premium / market cap",
     # Alerts
     "event_ts": "Timestamp of the flow event",
     "option_type": "Call or put",
     "strike": "Option strike price",
     "expiration_date": "Option expiration date",
     "premium": "Total premium of the trade",
-    "flow_intensity": "Premium / ADDV (scaled 1\u201310)",
+    "flow_intensity": "Premium / market cap (basis points)",
     "contracts": "Number of contracts traded",
     "volume": "Option volume",
     "open_interest": "Current open interest",
@@ -226,6 +225,22 @@ def _fmt_card_num(val, decimals: int = 2) -> str:
         return f"{f:.{decimals}f}"
     except (TypeError, ValueError):
         return html_escape(str(val))
+
+
+def _fmt_iv_rank(val) -> str:
+    """Format IV rank as a compact coloured string for card views."""
+    if val is None or (isinstance(val, float) and pd.isna(val)) or str(val) in ("", "nan"):
+        return "—"
+    try:
+        iv = float(val)
+    except (TypeError, ValueError):
+        return "—"
+    label = f"{iv:.0f}"
+    if 15 <= iv <= 45:
+        return f'<span class="positive">{label}</span>'
+    if iv > 75 or iv <= 5:
+        return f'<span class="negative">{label}</span>'
+    return label
 
 
 def _dir_badge_html(direction) -> str:
@@ -662,6 +677,7 @@ def _candidates_card_fragments(df: pd.DataFrame, *, clickable: bool = True) -> l
             ("Price", _conviction_span(_row_scalar(row, "price_score"))),
             ("Options", _conviction_span(_row_scalar(row, "options_context_score"))),
             ("Final", _conviction_span(_row_scalar(row, "final_score"))),
+            ("IV Rank", _fmt_iv_rank(_row_scalar(row, "iv_rank"))),
         ]
         metrics = _card_metrics_dl(pairs)
         pat = _row_scalar(row, "pattern")
@@ -711,6 +727,7 @@ def _rejected_card_fragments(df: pd.DataFrame) -> list[str]:
             ("Price", _conviction_span(_row_scalar(row, "price_score"))),
             ("Options", _conviction_span(_row_scalar(row, "options_context_score"))),
             ("Final", _conviction_span(_row_scalar(row, "final_score"))),
+            ("IV Rank", _fmt_iv_rank(_row_scalar(row, "iv_rank"))),
         ]
         metrics = _card_metrics_dl(pairs)
         out.append(
@@ -824,8 +841,16 @@ def _alerts_card_fragments(df: pd.DataFrame) -> list[str]:
             )
         prem = _fmt_money_short(_row_scalar(row, "premium"))
         head = f'<span class="data-card-badges">{direc}</span>'
+        mcap_bps = _row_scalar(row, "prem_mcap_bps")
+        mcap_bps_str = "—"
+        if mcap_bps is not None and not (isinstance(mcap_bps, float) and pd.isna(mcap_bps)):
+            try:
+                mcap_bps_str = f"{float(mcap_bps):.1f} bps"
+            except (TypeError, ValueError):
+                mcap_bps_str = "—"
         pairs = [
             ("Premium", prem),
+            ("Prem/MCap", mcap_bps_str),
             ("Strike / expiry", snip),
             ("DTE", _fmt_card_num(_row_scalar(row, "dte"), 0)),
         ]
@@ -858,6 +883,7 @@ def _watchlist_card_fragments(rows: list[dict]) -> list[str]:
         head = f'<span class="data-card-badges">{direc}</span>'
         pairs = [
             ("Flow (scaled)", _conviction_span(r.get("flow_score_scaled"))),
+            ("IV Rank", _fmt_iv_rank(r.get("iv_rank"))),
             ("Seen", html_escape(str(r.get("first_seen", "")))),
         ]
         metrics = _card_metrics_dl(pairs)
@@ -994,31 +1020,6 @@ def _df_html(df: pd.DataFrame, *, max_rows: int | None = None, badges: bool = Fa
 def _alerts_subset(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df
-
-    # Compute flow_intensity per ticker (premium / ADDV)
-    if "premium" in df.columns and "ticker" in df.columns:
-        try:
-            from app.features.price_features import fetch_addv
-
-            tickers = df["ticker"].dropna().unique()
-            addv_map = {}
-            for t in tickers:
-                try:
-                    addv_map[t] = fetch_addv(str(t))
-                except Exception:
-                    addv_map[t] = None
-            df = df.copy()
-            df["flow_intensity"] = df.apply(
-                lambda r: (
-                    round(float(r["premium"]) / addv_map[r["ticker"]], 6)
-                    if pd.notna(r.get("premium")) and addv_map.get(r["ticker"])
-                    else None
-                ),
-                axis=1,
-            )
-        except Exception:
-            df = df.copy()
-            df["flow_intensity"] = None
 
     if "premium" in df.columns and "marketcap" in df.columns:
         mcap = pd.to_numeric(df["marketcap"], errors="coerce")
