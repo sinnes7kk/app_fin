@@ -275,9 +275,11 @@ def _fetch_options_volume(ticker: str) -> dict | None:
 def _fetch_iv_context(ticker: str) -> dict | None:
     """Interpolated IV and rank from /interpolated-iv.
 
-    Returns the current ATM implied volatility and IV rank (0-100 percentile
-    vs 52-week range).  Used by the scoring layer to gauge whether options
-    are cheap (room for expansion) or expensive (IV crush risk).
+    The UW endpoint returns rows keyed by DTE horizon (1, 5, 7, 14, 30, 60,
+    90, 180, 365 days).  We use the **30-day** row as the standard IV rank
+    reference.  Fields returned by the API:
+      - ``percentile``  (0-1 scale, we convert to 0-100)
+      - ``volatility``  (annualised ATM implied vol)
     """
     url = f"{BASE_URL}/stock/{ticker}/interpolated-iv"
     try:
@@ -287,10 +289,17 @@ def _fetch_iv_context(ticker: str) -> dict | None:
     except Exception:
         return None
 
-    if not data:
+    if not data or not isinstance(data, list):
         return None
 
-    row = data[0] if isinstance(data, list) else data
+    # Prefer the 30-day horizon; fall back to closest available
+    row = None
+    for r in data:
+        if r.get("days") == 30:
+            row = r
+            break
+    if row is None:
+        row = data[0]
 
     def _safe_float(key: str) -> float | None:
         val = row.get(key)
@@ -298,18 +307,19 @@ def _fetch_iv_context(ticker: str) -> dict | None:
             return None
         try:
             f = float(val)
-            return f if f == f else None  # NaN guard
+            return f if f == f else None
         except (TypeError, ValueError):
             return None
 
-    iv_rank = _safe_float("iv_rank")
-    iv_current = _safe_float("implied_volatility") or _safe_float("iv")
+    pct = _safe_float("percentile")
+    iv_rank = round(pct * 100, 2) if pct is not None else None
+    iv_current = _safe_float("volatility")
 
     if iv_rank is None and iv_current is None:
         return None
 
     return {
-        "iv_rank": round(iv_rank, 2) if iv_rank is not None else None,
+        "iv_rank": iv_rank,
         "iv_current": round(iv_current, 4) if iv_current is not None else None,
     }
 
