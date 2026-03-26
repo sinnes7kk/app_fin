@@ -1,4 +1,4 @@
-"""Flask dashboard: tabs for positions, candidates, signals, UW alerts, watchlist."""
+"""Vector Alpha — swing-quant dashboard with sidebar navigation."""
 
 from __future__ import annotations
 
@@ -1093,7 +1093,145 @@ def _compute_performance() -> dict:
     else:
         perf["equity_curve"] = []
 
+    # Symbol breakdown
+    if "ticker" in tl.columns:
+        perf["by_symbol"] = {
+            name: _group_stats(grp)
+            for name, grp in tl.groupby("ticker")
+        }
+    else:
+        perf["by_symbol"] = {}
+
+    # Calendar data (daily P&L)
+    if "exit_date" in tl.columns and "pnl_dollar" in tl.columns:
+        cal = tl.copy()
+        cal["exit_date"] = pd.to_datetime(cal["exit_date"], errors="coerce")
+        cal = cal.dropna(subset=["exit_date"])
+        cal["date_str"] = cal["exit_date"].dt.strftime("%Y-%m-%d")
+        daily = cal.groupby("date_str")["pnl_dollar"].sum().reset_index()
+        perf["calendar"] = daily.to_dict(orient="records")
+    else:
+        perf["calendar"] = []
+
+    # Max drawdown
+    if not ec.empty and "portfolio_value" in ec.columns:
+        pv = ec["portfolio_value"].values
+        peak = pd.Series(pv).cummax()
+        dd = (pd.Series(pv) - peak) / peak * 100
+        perf["max_drawdown"] = round(float(dd.min()), 2)
+    else:
+        perf["max_drawdown"] = 0.0
+
     return perf
+
+
+def _build_overview(positions: list[dict], perf: dict, regime: dict) -> dict:
+    """Build overview summary data for the landing page."""
+    n_pos = len(positions)
+    longs = sum(1 for p in positions if p.get("direction") == "LONG")
+    shorts = n_pos - longs
+
+    total_unreal_r = 0.0
+    for p in positions:
+        total_unreal_r += float(p.get("unrealized_r") or 0)
+
+    return {
+        "open_count": n_pos,
+        "open_longs": longs,
+        "open_shorts": shorts,
+        "total_unrealized_r": round(total_unreal_r, 2),
+        "total_trades": perf.get("total_trades", 0),
+        "win_rate": perf.get("win_rate", 0.0),
+        "avg_r": perf.get("avg_r", 0.0),
+        "profit_factor": perf.get("profit_factor", 0.0),
+        "total_pnl": perf.get("total_pnl", 0.0),
+        "max_drawdown": perf.get("max_drawdown", 0.0),
+    }
+
+
+def _build_risk(positions: list[dict]) -> dict:
+    """Build portfolio risk metrics from open positions."""
+    if not positions:
+        return {"has_data": False}
+
+    long_exposure = 0.0
+    short_exposure = 0.0
+    rows = []
+
+    for p in positions:
+        entry = float(p.get("entry_price") or 0)
+        shares = float(p.get("shares") or 0)
+        current = float(p.get("last_price") or entry)
+        direction = str(p.get("direction", "")).upper()
+        notional = shares * entry
+
+        if direction == "LONG":
+            long_exposure += notional
+            pnl_pct = ((current - entry) / entry * 100) if entry else 0
+        else:
+            short_exposure += notional
+            pnl_pct = ((entry - current) / entry * 100) if entry else 0
+
+        rows.append({
+            "ticker": p.get("ticker"),
+            "direction": direction,
+            "entry": entry,
+            "current": current,
+            "shares": shares,
+            "notional": round(notional, 2),
+            "pnl_pct": round(pnl_pct, 1),
+            "health_state": p.get("health_state", "—"),
+            "days_held": p.get("days_held", 0),
+            "active_stop": p.get("active_stop"),
+        })
+
+    gross = long_exposure + short_exposure
+    net = long_exposure - short_exposure
+    net_pct = (net / gross * 100) if gross else 0
+
+    from collections import Counter
+    health_dist = Counter(p.get("health_state", "NEUTRAL") for p in positions)
+
+    return {
+        "has_data": True,
+        "long_exposure": round(long_exposure, 2),
+        "short_exposure": round(short_exposure, 2),
+        "gross_exposure": round(gross, 2),
+        "net_exposure": round(net, 2),
+        "net_pct": round(net_pct, 1),
+        "position_count": len(positions),
+        "rows": rows,
+        "health_dist": dict(health_dist),
+    }
+
+
+def _recent_activity(positions: list[dict], trades_df: pd.DataFrame, limit: int = 8) -> list[dict]:
+    """Build a recent activity feed from positions and trade log."""
+    events: list[dict] = []
+
+    for p in positions:
+        events.append({
+            "type": "entry",
+            "ticker": p.get("ticker"),
+            "direction": p.get("direction"),
+            "date": p.get("opened_at") or p.get("entry_date", ""),
+            "detail": f"Entered at {_fmt_card_num(p.get('entry_price'), 2)} — {p.get('pattern', 'unknown')}",
+        })
+
+    if not trades_df.empty:
+        for _, row in trades_df.tail(20).iterrows():
+            pnl = row.get("pnl_dollar")
+            pnl_str = f"${float(pnl):+,.0f}" if pd.notna(pnl) else ""
+            events.append({
+                "type": "exit",
+                "ticker": row.get("ticker"),
+                "direction": row.get("direction"),
+                "date": str(row.get("exit_date", "")),
+                "detail": f"Closed {pnl_str} — {row.get('exit_reason', '')}",
+            })
+
+    events.sort(key=lambda e: e.get("date", ""), reverse=True)
+    return events[:limit]
 
 
 # ---------------------------------------------------------------------------
@@ -1372,7 +1510,6 @@ def index():
     if not _validated.empty and not flow.empty and "ticker" in _validated.columns and "ticker" in flow.columns:
         _flow_cols = [c for c in flow.columns if c not in _validated.columns or c == "ticker"]
         _validated = _validated.merge(flow[_flow_cols], on="ticker", how="left")
-    sort_sig = request.args.get("sort_sig", "")
     sort_bull = request.args.get("sort_bull", "")
     sort_bear = request.args.get("sort_bear", "")
     sort_rej = request.args.get("sort_rej", "")
@@ -1421,33 +1558,31 @@ def index():
                         w[k] = v
     trades = load_trade_log_tail(80)
 
+    # Auto-load unusual flow (top 30 by flow_intensity)
     from app.vendors.unusual_whales import fetch_recent_alert_flow
 
     alerts_raw = pd.DataFrame()
     alerts_error = ""
-    if request.args.get("live_alerts") == "1" or os.environ.get("DASHBOARD_LOAD_ALERTS") == "1":
-        try:
-            alerts_raw = fetch_recent_alert_flow(limit=150, hours_back=24)
-        except Exception as e:
-            alerts_error = str(e)
+    try:
+        alerts_raw = fetch_recent_alert_flow(limit=150, hours_back=24)
+    except Exception as e:
+        alerts_error = str(e)
     alerts = _alerts_subset(alerts_raw)
+    if not alerts.empty and "flow_intensity" in alerts.columns:
+        alerts = alerts.sort_values("flow_intensity", ascending=False).head(30)
+    elif not alerts.empty:
+        alerts = alerts.head(30)
 
-    if alerts_raw.empty and not alerts_error and request.args.get("live_alerts") != "1":
-        alerts_html = (
-            '<p class="empty">Click <strong>Load / refresh alerts</strong> to query Unusual Whales '
-            "(requires <code>UNUSUAL_WHALES_API_KEY</code> in <code>.env</code>), or open "
-            '<a href="/?live_alerts=1">with alerts preloaded</a>.</p>'
-        )
-    elif alerts_error:
-        alerts_html = f'<p class="error">{alerts_error}</p>'
+    page_alt = _int_query("page_alt")
+    if alerts_error:
+        alerts_html = f'<p class="error">Unusual flow unavailable: {html_escape(alerts_error)}</p>'
     else:
-        page_alt = _int_query("page_alt")
         alerts_html = _paginate_card_fragments(
             _alerts_card_fragments(alerts),
             page=page_alt,
             per_page=TABLE_PAGE_SIZE,
             page_param="page_alt",
-            empty_msg="No alerts on this page.",
+            empty_msg="No unusual flow in last 24h.",
         )
 
     perf = _compute_performance()
@@ -1462,38 +1597,43 @@ def index():
         return src or "unknown"
     scan_timestamp = _parse_scan_ts(signals_src or rejected_src or flow_src)
 
+    # Cap rejected ("near misses") to top 15 by final_score
+    NEAR_MISS_LIMIT = 15
+    total_rejected_count = len(rejected)
+    if not rejected.empty and "final_score" in rejected.columns:
+        rejected_top = rejected.copy()
+        rejected_top["_fs"] = pd.to_numeric(rejected_top["final_score"], errors="coerce")
+        rejected_top = rejected_top.sort_values("_fs", ascending=False).head(NEAR_MISS_LIMIT)
+        rejected_top.drop(columns=["_fs"], inplace=True, errors="ignore")
+    else:
+        rejected_top = rejected.head(NEAR_MISS_LIMIT)
+
+    overview = _build_overview(positions, perf, regime)
+    risk_data = _build_risk(positions)
+    activity = _recent_activity(positions, load_trade_log_tail(20))
+
     pp = TABLE_PAGE_SIZE
-    page_sig = _int_query("page_sig")
     page_bull = _int_query("page_bull")
     page_bear = _int_query("page_bear")
+    page_near = _int_query("page_near")
     page_rej = _int_query("page_rej")
-    page_flow = _int_query("page_flow")
     page_tr = _int_query("page_tr")
     page_pos = _int_query("page_pos")
     page_wl = _int_query("page_wl")
 
-    signals_sorted = _sort_df(signals, sort_sig) if sort_sig else signals
-    rejected_sorted = _sort_df(rejected, sort_rej) if sort_rej else rejected
+    rejected_sorted = _sort_df(rejected_top, sort_rej) if sort_rej else rejected_top
 
     ctx = {
-        "signals_html": _paginate_card_fragments(
-            _signals_card_fragments(signals_sorted, clickable=True),
-            page=page_sig,
-            per_page=pp,
-            page_param="page_sig",
-            empty_msg="No final signals.",
-        ),
-        "signals_src": signals_src,
-        "signals_detail": _df_to_detail_json(signals),
         "rejected_html": _paginate_card_fragments(
             _rejected_card_fragments(rejected_sorted),
             page=page_rej,
             per_page=pp,
             page_param="page_rej",
-            empty_msg="No rejected rows.",
+            empty_msg="No near misses.",
         ),
         "rejected_src": rejected_src,
-        "rejected_detail": _df_to_detail_json(rejected),
+        "rejected_detail": _df_to_detail_json(rejected_top),
+        "total_rejected_count": total_rejected_count,
         "watchlist_detail": watchlist,
         "bull_html": _paginate_card_fragments(
             _candidates_card_fragments(bull, clickable=True),
@@ -1523,14 +1663,6 @@ def index():
         "near_detail": _df_to_detail_json(near_df),
         "near_threshold_long": round(_near_long_min, 1),
         "near_threshold_short": round(_near_short_min, 1),
-        "flow_html": _paginate_card_fragments(
-            _flow_card_fragments(flow),
-            page=page_flow,
-            per_page=pp,
-            page_param="page_flow",
-            empty_msg="No flow feature rows.",
-        ),
-        "flow_src": flow_src,
         "positions_html": _paginate_card_fragments(
             _positions_card_fragments(positions),
             page=page_pos,
@@ -1554,18 +1686,18 @@ def index():
             empty_msg="No trades in tail.",
         ),
         "alerts_html": alerts_html,
+        "alerts_count": len(alerts),
         "table_page_size": pp,
-        "alerts_count": len(alerts_raw),
-        "live_alerts_loaded": not alerts_raw.empty or bool(alerts_error),
         "perf": perf,
+        "overview": overview,
+        "risk": risk_data,
+        "activity": activity,
         "last_updated": last_updated,
-        "signals_insights": _signals_insights(signals),
         "candidates_insights": _candidates_insights(bull, bear, rejected_all),
         "positions_insights": _positions_insights(positions),
         "rejected_insights": _rejected_insights(rejected_all, watchlist),
         "trivial_rejected_count": trivial_rejected_count,
         "regime": regime,
-        "sort_sig": sort_sig,
         "sort_bull": sort_bull,
         "sort_bear": sort_bear,
         "sort_rej": sort_rej,
