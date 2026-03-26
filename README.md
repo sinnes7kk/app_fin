@@ -1059,6 +1059,35 @@ to "is this flow genuinely unusual?" rather than relying on hand-tuned threshold
   then reclaims it with volume. Currently excluded from the rules engine because
   it's a reversal (not continuation) setup and harder to code reliably.
 
+## Dark pool scoring redesign (all future versions)
+
+The current dark pool implementation adds a flat `0.05 * alignment` bonus after
+scoring — effectively invisible on a 0-10 scale. Dark pool prints account for
+~40-45% of US equity volume and large institutional prints (>$1M notional) are
+among the most reliable signals of informed directional flow. The scoring weight
+should reflect this.
+
+**Proposed**: Replace the additive bonus with a proper 0-10 composite score:
+
+- **Directional bias (0-3)**: Nonlinear curve on buy/sell ratio. A 0.70 bias is
+  qualitatively different from 0.55 — the scoring should reflect that rather than
+  scaling linearly.
+- **Large print conviction (0-3)**: `large_print_count` relative to what's normal
+  for the stock's market cap tier. Currently tracked but not scored at all.
+- **Volume significance (0-2)**: Dark pool volume as a percentage of ADDV (already
+  available from `fetch_addv`). Elevated DP volume relative to normal daily volume
+  indicates institutional accumulation/distribution.
+- **Notional concentration (0-2)**: Total notional in large prints as a fraction
+  of total dark pool notional. A session dominated by a few massive prints signals
+  higher conviction than many small ones.
+
+Then integrate into `combine_scores` as a first-class weight (~15%), changing
+from the current 50/30/20 (flow/price/options) to ~45/25/15/15
+(flow/price/options/dark_pool).
+
+Files in scope: `_enrich_dark_pool` and `combine_scores` in `pipeline.py`,
+`fetch_dark_pool` in `unusual_whales.py`.
+
 ---
 
 # Known Issues

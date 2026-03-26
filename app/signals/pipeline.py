@@ -128,14 +128,39 @@ def combine_scores(
     return round(0.60 * flow_score + 0.40 * price_score, 4)
 
 
+def _iv_rank_score(iv_rank: float | None) -> float:
+    """Piecewise linear IV rank → score (0-2.5).
+
+    Peak at the 15-45 "value zone" where options are cheap but active,
+    tapering smoothly to zero at both extremes (dead market / IV crush).
+    """
+    if iv_rank is None:
+        return 0.0
+    r = float(iv_rank)
+    if r <= 5:
+        return 0.0
+    if r <= 15:
+        return (r - 5) / 10 * 1.0
+    if r <= 45:
+        return 1.0 + (r - 15) / 30 * 1.5
+    if r <= 60:
+        return 2.5 - (r - 45) / 15 * 1.0
+    if r <= 75:
+        return 1.5 - (r - 60) / 15 * 1.0
+    if r <= 100:
+        return 0.5 - (r - 75) / 25 * 0.5
+    return 0.0
+
+
 def compute_options_context_score(direction: str, opts_ctx: dict | None) -> float | None:
     """Derive a 0-10 composite score from options context fields.
 
     Components (direction-aware):
-      Gamma alignment  0-3    regime/flip supports thesis
-      Wall proximity   0-3    supportive wall far, opposing wall near
-      OI structure     0-2    swing DTE dominant, favorable P/C ratio
-      Premium bias     0-2    daily premium aligns with direction
+      Gamma alignment  0-2.5  regime/flip supports thesis
+      Wall proximity   0-2.5  supportive wall far, opposing wall near
+      OI structure     0-1.5  swing DTE dominant, favorable P/C ratio
+      Premium bias     0-1.0  daily premium aligns with direction
+      IV rank          0-2.5  smooth piecewise curve; peak in 15-45 value zone
 
     Returns None when options data is unavailable so callers can
     distinguish "no data" from a genuine neutral score.
@@ -153,53 +178,54 @@ def compute_options_context_score(direction: str, opts_ctx: dict | None) -> floa
     bull_prem = opts_ctx.get("daily_bullish_premium")
     bear_prem = opts_ctx.get("daily_bearish_premium")
 
-    # -- Gamma alignment (0-3) --
+    # -- Gamma alignment (0-2.5) --
     if direction == "LONG":
         if regime == "NEGATIVE":
-            score += 3.0
+            score += 2.5
         elif regime == "NEUTRAL":
-            score += 1.5
-        # POSITIVE = headwind for longs → 0
+            score += 1.25
     else:
         if regime == "NEGATIVE":
-            score += 3.0
+            score += 2.5
         elif regime == "NEUTRAL":
-            score += 1.5
+            score += 1.25
 
-    # -- Wall proximity (0-3) --
+    # -- Wall proximity (0-2.5) --
     if direction == "LONG":
         if dist_call is not None:
             if dist_call > 5.0:
-                score += 3.0
+                score += 2.5
             elif dist_call > 2.0:
-                score += 1.5
-            # < 2% = overhead resistance → 0
+                score += 1.25
     else:
         if dist_put is not None:
             if dist_put > 5.0:
-                score += 3.0
+                score += 2.5
             elif dist_put > 2.0:
-                score += 1.5
+                score += 1.25
 
-    # -- OI structure (0-2) --
+    # -- OI structure (0-1.5) --
     if swing_oi > near_oi and near_oi > 0:
-        score += 1.0
+        score += 0.75
     if pcr is not None:
         if direction == "LONG" and pcr < 0.7:
-            score += 1.0
+            score += 0.75
         elif direction == "SHORT" and pcr > 1.3:
-            score += 1.0
+            score += 0.75
         elif direction == "LONG" and pcr < 1.0:
-            score += 0.5
+            score += 0.375
         elif direction == "SHORT" and pcr > 1.0:
-            score += 0.5
+            score += 0.375
 
-    # -- Premium bias (0-2) --
+    # -- Premium bias (0-1.0) --
     if bull_prem is not None and bear_prem is not None:
         total = bull_prem + bear_prem
         if total > 0:
             aligned = bull_prem / total if direction == "LONG" else bear_prem / total
-            score += min(2.0, aligned * 3.0)
+            score += min(1.0, aligned * 1.5)
+
+    # -- IV rank (0-2.5, smooth piecewise linear) --
+    score += _iv_rank_score(opts_ctx.get("iv_rank"))
 
     return round(min(10.0, score), 1)
 
@@ -338,6 +364,8 @@ def _build_rejection_row(
         "near_term_oi": opts_ctx.get("near_term_oi") if opts_ctx else None,
         "swing_dte_oi": opts_ctx.get("swing_dte_oi") if opts_ctx else None,
         "long_dated_oi": opts_ctx.get("long_dated_oi") if opts_ctx else None,
+        "iv_rank": opts_ctx.get("iv_rank") if opts_ctx else None,
+        "iv_current": opts_ctx.get("iv_current") if opts_ctx else None,
     }
     sc = price_signal.get("score_components")
     if sc:
@@ -477,6 +505,8 @@ def run_price_validation_for_bullish_candidates(
                 "near_term_oi": opts_ctx.get("near_term_oi"),
                 "swing_dte_oi": opts_ctx.get("swing_dte_oi"),
                 "long_dated_oi": opts_ctx.get("long_dated_oi"),
+                "iv_rank": opts_ctx.get("iv_rank"),
+                "iv_current": opts_ctx.get("iv_current"),
                 "source": "fresh",
                 "trade_plan": trade_plan,
                 "flow_snapshot": row.to_dict(),
@@ -620,6 +650,8 @@ def run_price_validation_for_bearish_candidates(
                 "near_term_oi": opts_ctx.get("near_term_oi"),
                 "swing_dte_oi": opts_ctx.get("swing_dte_oi"),
                 "long_dated_oi": opts_ctx.get("long_dated_oi"),
+                "iv_rank": opts_ctx.get("iv_rank"),
+                "iv_current": opts_ctx.get("iv_current"),
                 "source": "watchlist_rs_demote" if rs_demote else "fresh",
                 "trade_plan": trade_plan,
                 "flow_snapshot": row.to_dict(),

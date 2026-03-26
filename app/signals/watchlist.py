@@ -270,6 +270,8 @@ def reevaluate_watchlist(
                     "near_term_oi": opts_ctx.get("near_term_oi") if opts_ctx else None,
                     "swing_dte_oi": opts_ctx.get("swing_dte_oi") if opts_ctx else None,
                     "long_dated_oi": opts_ctx.get("long_dated_oi") if opts_ctx else None,
+                    "iv_rank": opts_ctx.get("iv_rank") if opts_ctx else None,
+                    "iv_current": opts_ctx.get("iv_current") if opts_ctx else None,
                     "source": "watchlist",
                     "first_seen": entry["first_seen"],
                     "trade_plan": trade_plan,
@@ -309,7 +311,8 @@ def reevaluate_watchlist(
                                    "nearest_call_wall", "nearest_put_wall",
                                    "distance_to_call_wall_pct", "distance_to_put_wall_pct",
                                    "ticker_call_oi", "ticker_put_oi", "ticker_put_call_ratio",
-                                   "near_term_oi", "swing_dte_oi", "long_dated_oi"):
+                                   "near_term_oi", "swing_dte_oi", "long_dated_oi",
+                                   "iv_rank", "iv_current"):
                         rej[oc_key] = opts_ctx.get(oc_key)
                 updated["pattern"] = _extract_pattern(price_signal.get("reasons", []))
                 rej["pattern"] = updated["pattern"]

@@ -318,6 +318,8 @@ def _build_position(sig: dict, risk_pct: float) -> dict | None:
         "nearest_call_wall": sig.get("nearest_call_wall"),
         "nearest_put_wall": sig.get("nearest_put_wall"),
         "gamma_flip_level_estimate": sig.get("gamma_flip_level_estimate"),
+        "iv_rank": sig.get("iv_rank"),
+        "iv_current": sig.get("iv_current"),
         "partial_pnl_pct": 0.0,
         "risk_pct": risk_pct,
         "risk_dollar": round(actual_risk_dollar, 2),
@@ -612,6 +614,8 @@ def update_positions() -> dict:
             pos["nearest_call_wall"] = opts_ctx.get("nearest_call_wall")
             pos["nearest_put_wall"] = opts_ctx.get("nearest_put_wall")
             pos["gamma_flip_level_estimate"] = opts_ctx.get("gamma_flip_level_estimate")
+            pos["iv_rank"] = opts_ctx.get("iv_rank")
+            pos["iv_current"] = opts_ctx.get("iv_current")
 
         trail_update = compute_trailing_stops(pos, df, options_ctx=opts_ctx)
         pos.update(trail_update)

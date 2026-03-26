@@ -53,6 +53,9 @@ def _empty_context() -> dict:
         "put_volume_vs_30d_avg": None,
         "call_ask_bid_ratio": None,
         "put_ask_bid_ratio": None,
+        # Implied volatility context
+        "iv_rank": None,
+        "iv_current": None,
     }
 
 
@@ -269,6 +272,48 @@ def _fetch_options_volume(ticker: str) -> dict | None:
     }
 
 
+def _fetch_iv_context(ticker: str) -> dict | None:
+    """Interpolated IV and rank from /interpolated-iv.
+
+    Returns the current ATM implied volatility and IV rank (0-100 percentile
+    vs 52-week range).  Used by the scoring layer to gauge whether options
+    are cheap (room for expansion) or expensive (IV crush risk).
+    """
+    url = f"{BASE_URL}/stock/{ticker}/interpolated-iv"
+    try:
+        resp = _uw_request(url)
+        resp.raise_for_status()
+        data = resp.json().get("data", [])
+    except Exception:
+        return None
+
+    if not data:
+        return None
+
+    row = data[0] if isinstance(data, list) else data
+
+    def _safe_float(key: str) -> float | None:
+        val = row.get(key)
+        if val is None:
+            return None
+        try:
+            f = float(val)
+            return f if f == f else None  # NaN guard
+        except (TypeError, ValueError):
+            return None
+
+    iv_rank = _safe_float("iv_rank")
+    iv_current = _safe_float("implied_volatility") or _safe_float("iv")
+
+    if iv_rank is None and iv_current is None:
+        return None
+
+    return {
+        "iv_rank": round(iv_rank, 2) if iv_rank is not None else None,
+        "iv_current": round(iv_current, 4) if iv_current is not None else None,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -276,9 +321,9 @@ def _fetch_options_volume(ticker: str) -> dict | None:
 def fetch_options_context(ticker: str, spot: float) -> dict:
     """Return a complete options context dict for *ticker* at *spot* price.
 
-    Results are cached per-run so each ticker triggers at most 4 API calls
-    (spot GEX, OI/strike, OI/expiry, options volume) across an entire
-    pipeline execution.
+    Results are cached per-run so each ticker triggers at most 5 API calls
+    (spot GEX, OI/strike, OI/expiry, options volume, interpolated IV)
+    across an entire pipeline execution.
     """
     if ticker in _CONTEXT_CACHE:
         return _CONTEXT_CACHE[ticker]
@@ -305,6 +350,11 @@ def fetch_options_context(ticker: str, spot: float) -> dict:
     if vol is not None:
         ctx.update(vol)
         sources.append("options_volume")
+
+    iv = _fetch_iv_context(ticker)
+    if iv is not None:
+        ctx.update(iv)
+        sources.append("interpolated_iv")
 
     ctx["options_context_sources_used"] = sources
     ctx["options_context_available"] = len(sources) > 0
