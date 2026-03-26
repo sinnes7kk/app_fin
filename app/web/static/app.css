@@ -1309,6 +1309,11 @@ dl.detail-grid dd {
   color: var(--fg);
   line-height: 1.2;
 }
+.search-score-label {
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin-top: -0.2rem;
+}
 .search-score-verdict {
   font-size: 0.78rem;
   font-weight: 600;

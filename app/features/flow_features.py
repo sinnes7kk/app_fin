@@ -7,7 +7,12 @@ from datetime import datetime, timezone
 import numpy as np
 import pandas as pd
 
-from app.features.price_features import fetch_addv
+def _get_fetch_addv():
+    try:
+        from app.features.price_features import fetch_addv
+        return fetch_addv
+    except ImportError:
+        return lambda ticker, **kw: None
 
 
 def filter_qualifying_flow(
@@ -452,7 +457,7 @@ def aggregate_flow_by_ticker(df: pd.DataFrame) -> pd.DataFrame:
     agg["dte_score"] = agg["avg_dte"].apply(_dte_score)
 
     # ADDV and flow intensity — normalizes premium by stock size
-    agg["addv"] = agg["ticker"].apply(fetch_addv)
+    agg["addv"] = agg["ticker"].apply(_get_fetch_addv())
     addv_safe = agg["addv"].replace(0, float("nan"))
     agg["bullish_flow_intensity"] = agg["bullish_premium_raw"] / addv_safe
     agg["bearish_flow_intensity"] = agg["bearish_premium_raw"] / addv_safe

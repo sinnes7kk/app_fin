@@ -1735,147 +1735,137 @@ def api_alerts():
         return jsonify({"ok": False, "error": str(e), "rows": []}), 200
 
 
+def _compute_options_score(direction: str, opts_ctx: dict | None) -> float | None:
+    """Derive a 0-10 composite options context score (standalone, no yfinance)."""
+    if not opts_ctx or not opts_ctx.get("options_context_available"):
+        return None
+    score = 0.0
+    regime = opts_ctx.get("gamma_regime", "NEUTRAL")
+    dist_call = opts_ctx.get("distance_to_call_wall_pct")
+    dist_put = opts_ctx.get("distance_to_put_wall_pct")
+    near_oi = opts_ctx.get("near_term_oi") or 0
+    swing_oi = opts_ctx.get("swing_dte_oi") or 0
+    pcr = opts_ctx.get("ticker_put_call_ratio")
+    bull_prem = opts_ctx.get("daily_bullish_premium")
+    bear_prem = opts_ctx.get("daily_bearish_premium")
+    if direction == "LONG":
+        if regime == "NEGATIVE": score += 3.0
+        elif regime == "NEUTRAL": score += 1.5
+    else:
+        if regime == "NEGATIVE": score += 3.0
+        elif regime == "NEUTRAL": score += 1.5
+    if direction == "LONG":
+        if dist_call is not None:
+            if dist_call > 5.0: score += 3.0
+            elif dist_call > 2.0: score += 1.5
+    else:
+        if dist_put is not None:
+            if dist_put > 5.0: score += 3.0
+            elif dist_put > 2.0: score += 1.5
+    if swing_oi > near_oi and near_oi > 0:
+        score += 1.0
+    if pcr is not None:
+        if direction == "LONG" and pcr < 0.7: score += 1.0
+        elif direction == "SHORT" and pcr > 1.3: score += 1.0
+        elif direction == "LONG" and pcr < 1.0: score += 0.5
+        elif direction == "SHORT" and pcr > 1.0: score += 0.5
+    if bull_prem is not None and bear_prem is not None:
+        total = bull_prem + bear_prem
+        if total > 0:
+            aligned = bull_prem / total if direction == "LONG" else bear_prem / total
+            score += min(2.0, aligned * 3.0)
+    return round(min(10.0, score), 1)
+
+
 @app.route("/api/scan-ticker")
 def api_scan_ticker():
-    """Run the full scoring pipeline for a single ticker and return JSON."""
+    """Run flow + options scoring for a single ticker and return JSON."""
     from app.features.flow_features import build_flow_feature_table
     from app.features.options_context import fetch_options_context
-    from app.features.price_features import clean_ohlcv, compute_features, fetch_ohlcv
-    from app.signals.pipeline import combine_scores, compute_options_context_score
-    from app.signals.scoring import quick_reject_check, score_long_setup, score_short_setup
-    from app.signals.trade_plan import build_long_trade_plan, build_short_trade_plan
-    from app.vendors.unusual_whales import fetch_flow_for_tickers, normalize_flow_response
+    from app.vendors.unusual_whales import fetch_flow_for_tickers
 
     ticker = (request.args.get("ticker") or "").strip().upper()
     if not ticker or not ticker.isalpha():
         return jsonify({"ok": False, "error": "Invalid ticker symbol"}), 400
 
-    result: dict = {"ok": True, "ticker": ticker, "long": {}, "short": {}}
+    result: dict = {"ok": True, "ticker": ticker}
+    spot: float | None = None
 
     try:
         # --- Flow ---
-        flow_data: dict = {"score": 0, "components": {}, "available": False}
+        flow_data: dict = {"available": False}
         try:
-            raw_flow = fetch_flow_for_tickers([ticker])
-            norm = normalize_flow_response(raw_flow)
+            norm = fetch_flow_for_tickers([ticker])
             if not norm.empty:
+                if "underlying_price" in norm.columns:
+                    prices = pd.to_numeric(norm["underlying_price"], errors="coerce").dropna()
+                    if not prices.empty:
+                        spot = round(float(prices.iloc[-1]), 2)
+
                 feature_table = build_flow_feature_table(norm)
                 if not feature_table.empty and ticker in feature_table["ticker"].values:
                     row = feature_table[feature_table["ticker"] == ticker].iloc[0]
+                    def _sf(val, digits=2):
+                        v = float(val) if val is not None else 0.0
+                        return round(v, digits) if v == v else 0.0
                     flow_data = {
                         "available": True,
-                        "bullish_raw": round(float(row.get("bullish_score", 0)), 4),
-                        "bearish_raw": round(float(row.get("bearish_score", 0)), 4),
-                        "bullish_scaled": round(float(row.get("bullish_score", 0)) * 10, 2),
-                        "bearish_scaled": round(float(row.get("bearish_score", 0)) * 10, 2),
-                        "bullish_premium": float(row.get("bullish_premium", 0)),
-                        "bearish_premium": float(row.get("bearish_premium", 0)),
-                        "flow_velocity": round(float(row.get("flow_velocity", 0)), 2),
-                        "bullish_flow_intensity": round(float(row.get("bullish_flow_intensity", 0)), 4),
-                        "bearish_flow_intensity": round(float(row.get("bearish_flow_intensity", 0)), 4),
-                        "bullish_sweep_count": int(row.get("bullish_sweep_count", 0)),
-                        "bearish_sweep_count": int(row.get("bearish_sweep_count", 0)),
-                        "bullish_breadth": round(float(row.get("bullish_breadth", 0)), 3),
-                        "bearish_breadth": round(float(row.get("bearish_breadth", 0)), 3),
-                        "bullish_vol_oi": round(float(row.get("bullish_vol_oi", 0)), 2),
-                        "bearish_vol_oi": round(float(row.get("bearish_vol_oi", 0)), 2),
+                        "bullish_raw": _sf(row.get("bullish_score", 0), 4),
+                        "bearish_raw": _sf(row.get("bearish_score", 0), 4),
+                        "bullish_scaled": _sf(row.get("bullish_score", 0) * 10),
+                        "bearish_scaled": _sf(row.get("bearish_score", 0) * 10),
+                        "bullish_premium": _sf(row.get("bullish_premium", 0)),
+                        "bearish_premium": _sf(row.get("bearish_premium", 0)),
+                        "flow_velocity": _sf(row.get("flow_velocity", 0)),
+                        "bullish_flow_intensity": _sf(row.get("bullish_flow_intensity", 0), 4),
+                        "bearish_flow_intensity": _sf(row.get("bearish_flow_intensity", 0), 4),
+                        "bullish_sweep_count": int(row.get("bullish_sweep_count", 0) or 0),
+                        "bearish_sweep_count": int(row.get("bearish_sweep_count", 0) or 0),
+                        "bullish_breadth": _sf(row.get("bullish_breadth", 0), 3),
+                        "bearish_breadth": _sf(row.get("bearish_breadth", 0), 3),
+                        "bullish_vol_oi": _sf(row.get("bullish_vol_oi", 0)),
+                        "bearish_vol_oi": _sf(row.get("bearish_vol_oi", 0)),
+                        "bullish_repeat_count": int(row.get("bullish_repeat_count", 0) or 0),
+                        "bearish_repeat_count": int(row.get("bearish_repeat_count", 0) or 0),
+                        "flow_imbalance_ratio": _sf(row.get("flow_imbalance_ratio", 0)),
                     }
         except Exception as fe:
             flow_data["error"] = str(fe)
 
         result["flow"] = flow_data
-
-        # --- Price ---
-        ohlcv = fetch_ohlcv(ticker)
-        ohlcv = clean_ohlcv(ohlcv)
-        ohlcv = compute_features(ohlcv)
-        spot = float(ohlcv.iloc[-1]["close"])
-        result["spot"] = round(spot, 2)
+        result["spot"] = spot
 
         # --- Options context ---
-        opts_ctx: dict | None = None
-        opts_score_long: float | None = None
-        opts_score_short: float | None = None
-        try:
-            opts_ctx = fetch_options_context(ticker, spot)
-            opts_score_long = compute_options_context_score("LONG", opts_ctx)
-            opts_score_short = compute_options_context_score("SHORT", opts_ctx)
-        except Exception:
-            pass
+        opts_out: dict = {"available": False}
+        if spot and spot > 0:
+            opts_ctx: dict | None = None
+            try:
+                opts_ctx = fetch_options_context(ticker, spot)
+                opts_score_long = _compute_options_score("LONG", opts_ctx)
+                opts_score_short = _compute_options_score("SHORT", opts_ctx)
+                if opts_ctx and opts_ctx.get("options_context_available"):
+                    opts_out = {
+                        "available": True,
+                        "long_score": opts_score_long,
+                        "short_score": opts_score_short,
+                        "gamma_regime": opts_ctx.get("gamma_regime"),
+                        "net_gex": opts_ctx.get("net_gex"),
+                        "nearest_call_wall": opts_ctx.get("nearest_call_wall"),
+                        "nearest_put_wall": opts_ctx.get("nearest_put_wall"),
+                        "distance_to_call_wall_pct": opts_ctx.get("distance_to_call_wall_pct"),
+                        "distance_to_put_wall_pct": opts_ctx.get("distance_to_put_wall_pct"),
+                        "ticker_put_call_ratio": opts_ctx.get("ticker_put_call_ratio"),
+                        "near_term_oi": opts_ctx.get("near_term_oi"),
+                        "swing_dte_oi": opts_ctx.get("swing_dte_oi"),
+                        "daily_bullish_premium": opts_ctx.get("daily_bullish_premium"),
+                        "daily_bearish_premium": opts_ctx.get("daily_bearish_premium"),
+                    }
+            except Exception:
+                pass
+        else:
+            opts_out["note"] = "No spot price available — options context requires flow data"
 
-        opts_out: dict = {"available": opts_ctx is not None and bool(opts_ctx.get("options_context_available"))}
-        if opts_out["available"]:
-            opts_out.update({
-                "long_score": opts_score_long,
-                "short_score": opts_score_short,
-                "gamma_regime": opts_ctx.get("gamma_regime"),
-                "nearest_call_wall": opts_ctx.get("nearest_call_wall"),
-                "nearest_put_wall": opts_ctx.get("nearest_put_wall"),
-                "distance_to_call_wall_pct": opts_ctx.get("distance_to_call_wall_pct"),
-                "distance_to_put_wall_pct": opts_ctx.get("distance_to_put_wall_pct"),
-                "ticker_put_call_ratio": opts_ctx.get("ticker_put_call_ratio"),
-            })
         result["options"] = opts_out
-
-        # --- Long assessment ---
-        bull_flow = flow_data.get("bullish_scaled", 0) if flow_data.get("available") else 0
-        long_out: dict = {"direction": "LONG", "flow_score": bull_flow}
-        rej, rej_reason, stub = quick_reject_check(ohlcv, "LONG")
-        if rej:
-            long_out["verdict"] = "REJECT"
-            long_out["reject_reason"] = rej_reason
-            long_out["price_score"] = stub.get("score", 0)
-        else:
-            sig = score_long_setup(ohlcv)
-            long_out["price_score"] = sig.get("score", 0)
-            long_out["is_valid"] = sig.get("is_valid", False)
-            long_out["checks_passed"] = sig.get("checks_passed", [])
-            long_out["checks_failed"] = sig.get("checks_failed", [])
-            long_out["reasons"] = sig.get("reasons", [])
-            long_out["score_components"] = sig.get("score_components", {})
-            final = combine_scores(bull_flow, float(sig.get("score", 0)), opts_score_long)
-            long_out["final_score"] = round(final, 2)
-            if sig.get("is_valid"):
-                try:
-                    plan = build_long_trade_plan(ohlcv, sig, options_ctx=opts_ctx)
-                    long_out["trade_plan"] = plan
-                    long_out["verdict"] = "SIGNAL" if final >= MIN_FINAL_SCORE else "WATCHLIST"
-                except Exception:
-                    long_out["verdict"] = "WATCHLIST"
-            else:
-                long_out["verdict"] = "REJECT"
-                long_out["reject_reason"] = "price_validation_failed"
-        result["long"] = long_out
-
-        # --- Short assessment ---
-        bear_flow = flow_data.get("bearish_scaled", 0) if flow_data.get("available") else 0
-        short_out: dict = {"direction": "SHORT", "flow_score": bear_flow}
-        rej, rej_reason, stub = quick_reject_check(ohlcv, "SHORT")
-        if rej:
-            short_out["verdict"] = "REJECT"
-            short_out["reject_reason"] = rej_reason
-            short_out["price_score"] = stub.get("score", 0)
-        else:
-            sig = score_short_setup(ohlcv)
-            short_out["price_score"] = sig.get("score", 0)
-            short_out["is_valid"] = sig.get("is_valid", False)
-            short_out["checks_passed"] = sig.get("checks_passed", [])
-            short_out["checks_failed"] = sig.get("checks_failed", [])
-            short_out["reasons"] = sig.get("reasons", [])
-            short_out["score_components"] = sig.get("score_components", {})
-            final = combine_scores(bear_flow, float(sig.get("score", 0)), opts_score_short)
-            short_out["final_score"] = round(final, 2)
-            if sig.get("is_valid"):
-                try:
-                    plan = build_short_trade_plan(ohlcv, sig, options_ctx=opts_ctx)
-                    short_out["trade_plan"] = plan
-                    short_out["verdict"] = "SIGNAL" if final >= MIN_FINAL_SCORE else "WATCHLIST"
-                except Exception:
-                    short_out["verdict"] = "WATCHLIST"
-            else:
-                short_out["verdict"] = "REJECT"
-                short_out["reject_reason"] = "price_validation_failed"
-        result["short"] = short_out
 
     except Exception as e:
         return jsonify({"ok": False, "error": str(e), "ticker": ticker}), 200
