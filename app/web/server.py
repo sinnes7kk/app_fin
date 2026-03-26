@@ -1505,7 +1505,8 @@ def index():
 
     # Filter out trivial rejections that never reached full price scoring.
     _TRIVIAL_PREFIXES = ("weak_bullish_flow", "weak_bearish_flow",
-                         "trend_not_aligned", "price_over_extended", "error:")
+                         "trend_not_aligned", "price_over_extended", "error:",
+                         "watchlist_reeval_failed")
 
     def _is_trivial(reason: str) -> bool:
         return any(str(reason).startswith(p) for p in _TRIVIAL_PREFIXES)
