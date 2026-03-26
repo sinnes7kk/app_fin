@@ -243,6 +243,23 @@ def _fmt_iv_rank(val) -> str:
     return label
 
 
+def _prem_mcap_label(bps) -> tuple[str, str]:
+    """Return (label, css_class) for a prem/mcap basis-point value."""
+    if bps is None or (isinstance(bps, float) and pd.isna(bps)):
+        return ("—", "")
+    try:
+        v = float(bps)
+    except (TypeError, ValueError):
+        return ("—", "")
+    if v > 5:
+        return ("Outsized", "positive")
+    if v >= 1:
+        return ("Notable", "")
+    if v >= 0.1:
+        return ("Normal", "")
+    return ("Minor", "")
+
+
 def _dir_badge_html(direction) -> str:
     d = str(direction or "").strip().upper()
     return _BADGE_MAP.get(d, html_escape(str(direction or "—")))
@@ -842,15 +859,16 @@ def _alerts_card_fragments(df: pd.DataFrame) -> list[str]:
         prem = _fmt_money_short(_row_scalar(row, "premium"))
         head = f'<span class="data-card-badges">{direc}</span>'
         mcap_bps = _row_scalar(row, "prem_mcap_bps")
-        mcap_bps_str = "—"
-        if mcap_bps is not None and not (isinstance(mcap_bps, float) and pd.isna(mcap_bps)):
-            try:
-                mcap_bps_str = f"{float(mcap_bps):.1f} bps"
-            except (TypeError, ValueError):
-                mcap_bps_str = "—"
+        label, label_cls = _prem_mcap_label(mcap_bps)
+        if label == "—":
+            mcap_html = "—"
+        else:
+            bps_num = f"{float(mcap_bps):.2f} bps" if mcap_bps is not None else ""
+            cls_attr = f' class="{label_cls}"' if label_cls else ""
+            mcap_html = f'<span{cls_attr}>{label}</span><br><small style="opacity:0.6">{bps_num}</small>'
         pairs = [
             ("Premium", prem),
-            ("Prem/MCap", mcap_bps_str),
+            ("Prem/MCap", mcap_html),
             ("Strike / expiry", snip),
             ("DTE", _fmt_card_num(_row_scalar(row, "dte"), 0)),
         ]
@@ -1025,7 +1043,7 @@ def _alerts_subset(df: pd.DataFrame) -> pd.DataFrame:
         mcap = pd.to_numeric(df["marketcap"], errors="coerce")
         prem = pd.to_numeric(df["premium"], errors="coerce")
         df["prem_mcap_bps"] = (prem / mcap * 10_000).round(2)
-        df.loc[mcap <= 0, "prem_mcap_bps"] = None
+        df.loc[mcap < 1e8, "prem_mcap_bps"] = None
 
     cols = [c for c in ALERT_DISPLAY_COLS if c in df.columns]
     out = df[cols].copy() if cols else df.copy()
@@ -1586,8 +1604,8 @@ def index():
     except Exception as e:
         alerts_error = str(e)
     alerts = _alerts_subset(alerts_raw)
-    if not alerts.empty and "flow_intensity" in alerts.columns:
-        alerts = alerts.sort_values("flow_intensity", ascending=False).head(30)
+    if not alerts.empty and "prem_mcap_bps" in alerts.columns:
+        alerts = alerts.sort_values("prem_mcap_bps", ascending=False, na_position="last").head(30)
     elif not alerts.empty:
         alerts = alerts.head(30)
 
@@ -1602,6 +1620,35 @@ def index():
             page_param="page_alt",
             empty_msg="No unusual flow in last 24h.",
         )
+
+    # Build top flow intensity summary from pipeline flow features (aggregated by ticker)
+    top_flow: list[dict] = []
+    if not flow.empty:
+        _tf = flow.copy()
+        for col in ("bullish_flow_intensity", "bearish_flow_intensity", "marketcap"):
+            if col in _tf.columns:
+                _tf[col] = pd.to_numeric(_tf[col], errors="coerce")
+        if "marketcap" in _tf.columns:
+            _tf = _tf[_tf["marketcap"] >= 1e8]
+        if "bullish_flow_intensity" in _tf.columns and "bearish_flow_intensity" in _tf.columns:
+            _tf["_peak"] = _tf[["bullish_flow_intensity", "bearish_flow_intensity"]].max(axis=1)
+            _tf = _tf[_tf["_peak"] > 0].sort_values("_peak", ascending=False).head(15)
+            for _, r in _tf.iterrows():
+                bull_int = float(r.get("bullish_flow_intensity", 0) or 0)
+                bear_int = float(r.get("bearish_flow_intensity", 0) or 0)
+                is_bull = bull_int >= bear_int
+                bps = (bull_int if is_bull else bear_int) * 10_000
+                label, label_cls = _prem_mcap_label(bps)
+                prem = float(r.get("bullish_premium_raw" if is_bull else "bearish_premium_raw", 0) or 0)
+                top_flow.append({
+                    "ticker": r.get("ticker", "?"),
+                    "direction": "LONG" if is_bull else "SHORT",
+                    "bps": round(bps, 2),
+                    "label": label,
+                    "label_cls": label_cls,
+                    "premium": prem,
+                    "flow_score": float(r.get("bullish_score" if is_bull else "bearish_score", 0) or 0),
+                })
 
     perf = _compute_performance()
     last_updated = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
@@ -1705,6 +1752,7 @@ def index():
         ),
         "alerts_html": alerts_html,
         "alerts_count": len(alerts),
+        "top_flow": top_flow,
         "table_page_size": pp,
         "perf": perf,
         "overview": overview,

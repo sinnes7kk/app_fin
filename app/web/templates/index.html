@@ -326,7 +326,31 @@
     <!-- ═══════ UNUSUAL FLOW ═══════ -->
     <section id="panel-unusual-flow" class="panel" role="tabpanel">
       <h1 class="panel-title">Unusual Flow</h1>
-      <p class="tab-intro">Top 30 most unusual options trades in the last 24h, ranked by flow intensity (premium / market cap). <strong>Prem/MCap (bps)</strong> shows trade premium as basis points of market cap — higher values signal outsized directional positioning relative to company size.</p>
+      <p class="tab-intro">Aggregated flow intensity by ticker (from the pipeline) and top 30 individual trades sorted by premium / market cap. Labels: <strong>Outsized</strong> (>5 bps), <strong>Notable</strong> (1-5 bps), Normal (0.1-1 bps), Minor (<0.1 bps).</p>
+
+      {% if top_flow %}
+      <h2 style="margin:1.2rem 0 0.6rem;font-size:1rem;opacity:0.9">Top Flow Intensity by Ticker</h2>
+      <div class="card-grid">
+        {% for tf in top_flow %}
+        <article class="data-card">
+          <header class="data-card-header">
+            <strong class="data-card-ticker">{{ tf.ticker }}</strong>
+            <span class="data-card-badges">
+              {% if tf.direction == "LONG" %}<span class="badge badge-long">LONG</span>{% else %}<span class="badge badge-short">SHORT</span>{% endif %}
+              {% if tf.label_cls %}<span class="{{ tf.label_cls }}" style="font-weight:600;margin-left:0.3rem">{{ tf.label }}</span>{% else %}<span style="margin-left:0.3rem;opacity:0.7">{{ tf.label }}</span>{% endif %}
+            </span>
+          </header>
+          <dl class="card-metrics">
+            <dt>Intensity</dt><dd>{{ "%.2f"|format(tf.bps) }} bps</dd>
+            <dt>Premium</dt><dd>{{ "${:,.0f}".format(tf.premium) if tf.premium else "—" }}</dd>
+            <dt>Flow score</dt><dd>{{ "%.1f"|format(tf.flow_score * 10) }}/10</dd>
+          </dl>
+        </article>
+        {% endfor %}
+      </div>
+      {% endif %}
+
+      <h2 style="margin:1.6rem 0 0.6rem;font-size:1rem;opacity:0.9">Individual Trades</h2>
       <div id="alerts-table-wrap">
         {{ alerts_html | safe }}
       </div>
