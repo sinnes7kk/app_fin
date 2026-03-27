@@ -64,6 +64,7 @@ ALERT_DISPLAY_COLS = [
     "volume",
     "open_interest",
     "dte",
+    "underlying_price",
     "direction",
     "execution_side",
     "alert_rule",
@@ -851,13 +852,36 @@ def _alerts_card_fragments(df: pd.DataFrame) -> list[str]:
         ot = row.get("option_type")
         strike = _row_scalar(row, "strike")
         exp = _row_scalar(row, "expiration_date")
+        spot = _row_scalar(row, "underlying_price")
         snip = "—"
+        otm_badge = ""
+        otm_suffix = ""
+        if strike is not None and spot is not None:
+            try:
+                s, p = float(strike), float(spot)
+                if p > 0:
+                    otm_pct = abs(s - p) / p * 100
+                    ot_str = str(ot or "").upper()
+                    is_otm = (ot_str == "CALL" and s > p) or (ot_str == "PUT" and s < p)
+                    if is_otm and otm_pct > 30:
+                        otm_badge = ' <span class="badge badge-otm-deep">Deep OTM</span>'
+                        otm_suffix = f" ({otm_pct:.0f}% OTM)"
+                    elif is_otm and otm_pct > 15:
+                        otm_badge = ' <span class="badge badge-otm-far">Far OTM</span>'
+                        otm_suffix = f" ({otm_pct:.0f}% OTM)"
+                    elif is_otm and otm_pct > 5:
+                        otm_badge = ' <span class="badge badge-otm">OTM</span>'
+                        otm_suffix = f" ({otm_pct:.0f}% OTM)"
+            except (TypeError, ValueError):
+                pass
         if strike is not None or exp is not None or ot is not None:
             snip = html_escape(
                 f"{ot or ''} {strike or ''} @ {exp or ''}".strip()
             )
+            if otm_suffix:
+                snip += html_escape(otm_suffix)
         prem = _fmt_money_short(_row_scalar(row, "premium"))
-        head = f'<span class="data-card-badges">{direc}</span>'
+        head = f'<span class="data-card-badges">{direc}{otm_badge}</span>'
         mcap_bps = _row_scalar(row, "prem_mcap_bps")
         label, label_cls = _prem_mcap_label(mcap_bps)
         if label == "—":
