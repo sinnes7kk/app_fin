@@ -293,12 +293,19 @@ def _scale_intensity_cols(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+_HIGH_PRECISION_COLS = {"bullish_flow_intensity", "bearish_flow_intensity", "iv_current"}
+
 def _round_floats(df: pd.DataFrame, decimals: int = 2) -> pd.DataFrame:
     """Round all float columns in a DataFrame for cleaner display."""
     float_cols = df.select_dtypes(include=["float64", "float32"]).columns
     if len(float_cols):
         df = df.copy()
-        df[float_cols] = df[float_cols].round(decimals)
+        normal = [c for c in float_cols if c not in _HIGH_PRECISION_COLS]
+        precise = [c for c in float_cols if c in _HIGH_PRECISION_COLS]
+        if normal:
+            df[normal] = df[normal].round(decimals)
+        if precise:
+            df[precise] = df[precise].round(6)
     return df
 
 
