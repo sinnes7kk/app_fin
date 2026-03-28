@@ -11,16 +11,22 @@ from app.rules.continuation_rules import (
     has_room_to_target_short,
     is_bounce_and_fail_long,
     is_bounce_and_fail_short,
+    is_engulfing_at_level_long,
+    is_engulfing_at_level_short,
     is_flag_breakout,
     is_flag_breakdown,
+    is_hammer_at_support,
     is_pullback_to_support,
     is_pullback_to_resistance,
     is_pullback_to_ema,
     is_rally_to_ema,
     is_retest_and_confirm_long,
     is_retest_and_confirm_short,
+    is_shooting_star_at_resistance,
     is_structural_breakout,
     is_structural_breakdown,
+    is_volume_capitulation_reversal_long,
+    is_volume_capitulation_reversal_short,
     has_volume_confirmation,
     MIN_ROOM_ATR,
 )
@@ -99,24 +105,31 @@ def _is_clean_trend(df: pd.DataFrame, is_long: bool, lookback: int = 10) -> bool
 def _pattern_score(
     structural: bool, flag: bool, pullback: bool, ema: bool, bounce: bool,
     confluence: bool = False, retest: bool = False, clean_trend: bool = False,
+    engulfing: bool = False, capitulation: bool = False, hammer_star: bool = False,
 ) -> tuple[float, str]:
     """0-2: differentiated credit by pattern quality. Returns (score, label)."""
     if structural:
         return 2.0, "structural"
+    if engulfing:
+        return 1.6, "engulfing"
     if flag:
         return 1.6, "flag"
     if confluence:
         return 1.6, "confluence"
+    if capitulation:
+        return 1.4, "capitulation"
     if pullback:
         return 1.4, "pullback"
     if retest:
         return 1.4, "retest"
+    if clean_trend:
+        return 1.4, "trend_cont"
+    if hammer_star:
+        return 1.2, "hammer"
     if ema:
         return 1.2, "ema"
     if bounce:
         return 1.0, "bounce"
-    if clean_trend:
-        return 1.4, "trend_cont"
     return 0.0, ""
 
 
@@ -257,6 +270,9 @@ _LONG_PATTERN_LABELS = {
     "ema": "ema_pullback",
     "bounce": "bounce_and_fail",
     "trend_cont": "trend_continuation",
+    "engulfing": "engulfing_at_support",
+    "capitulation": "volume_capitulation_reversal",
+    "hammer": "hammer_at_support",
 }
 
 _SHORT_PATTERN_LABELS = {
@@ -268,6 +284,9 @@ _SHORT_PATTERN_LABELS = {
     "ema": "ema_rally",
     "bounce": "bounce_and_fail",
     "trend_cont": "trend_continuation",
+    "engulfing": "engulfing_at_resistance",
+    "capitulation": "volume_capitulation_reversal",
+    "hammer": "shooting_star_at_resistance",
 }
 
 
@@ -322,14 +341,21 @@ def score_long_setup(
     )
     pullback_ema_confluence = pullback_to_level and ema_pullback
     clean_trend = _is_clean_trend(df, is_long=True)
+
+    engulfing = is_engulfing_at_level_long(df, structural_support=levels["structural_support"])
+    capitulation = is_volume_capitulation_reversal_long(df, structural_support=levels["structural_support"])
+    hammer = is_hammer_at_support(df, structural_support=levels["structural_support"])
+
     continuation_ok = (
         bounce_fail or flag or pullback_to_level or structural_bo
         or ema_pullback or retest_confirm or clean_trend
+        or engulfing or capitulation or hammer
     )
     pattern_sc, pattern_key = _pattern_score(
         structural_bo, flag, pullback_to_level, ema_pullback, bounce_fail,
         confluence=pullback_ema_confluence, retest=retest_confirm,
         clean_trend=clean_trend,
+        engulfing=engulfing, capitulation=capitulation, hammer_star=hammer,
     )
     intraday = signal_bar_offset and len(df) > 1 and df.iloc[-1].get("is_intraday", False)
     conf_vol_df = df if intraday else (df.iloc[:-1] if signal_bar_offset and len(df) > 1 else df)
@@ -394,7 +420,7 @@ def score_long_setup(
         "confirm_vol": round(vol_conf_sc, 2),
     }
 
-    if trend_opposite or not not_extended_ok:
+    if not not_extended_ok:
         state = "REJECT"
     elif score >= 7.0:
         state = "SIGNAL"
@@ -470,14 +496,21 @@ def score_short_setup(
     )
     pullback_ema_confluence = pullback_to_level and ema_rally
     clean_trend = _is_clean_trend(df, is_long=False)
+
+    engulfing = is_engulfing_at_level_short(df, structural_resistance=levels["structural_resistance"])
+    capitulation = is_volume_capitulation_reversal_short(df, structural_resistance=levels["structural_resistance"])
+    shooting_star = is_shooting_star_at_resistance(df, structural_resistance=levels["structural_resistance"])
+
     continuation_ok = (
         bounce_fail or flag or pullback_to_level or structural_bd
         or ema_rally or retest_confirm or clean_trend
+        or engulfing or capitulation or shooting_star
     )
     pattern_sc, pattern_key = _pattern_score(
         structural_bd, flag, pullback_to_level, ema_rally, bounce_fail,
         confluence=pullback_ema_confluence, retest=retest_confirm,
         clean_trend=clean_trend,
+        engulfing=engulfing, capitulation=capitulation, hammer_star=shooting_star,
     )
     intraday = signal_bar_offset and len(df) > 1 and df.iloc[-1].get("is_intraday", False)
     conf_vol_df = df if intraday else (df.iloc[:-1] if signal_bar_offset and len(df) > 1 else df)
@@ -542,7 +575,7 @@ def score_short_setup(
         "confirm_vol": round(vol_conf_sc, 2),
     }
 
-    if trend_opposite or not not_extended_ok:
+    if not not_extended_ok:
         state = "REJECT"
     elif score >= 7.0:
         state = "SIGNAL"

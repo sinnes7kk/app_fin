@@ -877,6 +877,240 @@ def has_room_to_target_short(df: pd.DataFrame, support: float) -> bool:
     return bool((close - support) / atr >= MIN_ROOM_ATR)
 
 
+# ---------------------------------------------------------------------------
+# Reversal patterns — designed for counter-trend setups
+# ---------------------------------------------------------------------------
+
+
+def _near_level(price: float, level: float, atr: float, band_atr: float) -> bool:
+    """True when *price* is within *band_atr* ATR of *level*."""
+    return abs(price - level) <= band_atr * atr
+
+
+def is_hammer_at_support(
+    df: pd.DataFrame,
+    structural_support: float | None = None,
+    band_atr: float = 0.5,
+) -> bool:
+    """Hammer candle at a key support level — bullish reversal signal.
+
+    Requires bullish_rejection_wick geometry, bar's low within *band_atr* ATR
+    of structural support or EMA50, and above-average volume.
+    """
+    if len(df) < 2:
+        return False
+    if not bullish_rejection_wick(df):
+        return False
+
+    last = df.iloc[-1]
+    atr = last.get("atr14")
+    rel_vol = last.get("rel_volume")
+    low = last.get("low")
+    if any(pd.isna(v) for v in (atr, rel_vol, low)) or atr <= 0:
+        return False
+    if rel_vol < 1.0:
+        return False
+
+    ema50 = last.get("ema50")
+    if structural_support is not None and _near_level(low, structural_support, atr, band_atr):
+        return True
+    if pd.notna(ema50) and _near_level(low, ema50, atr, band_atr):
+        return True
+    return False
+
+
+def is_shooting_star_at_resistance(
+    df: pd.DataFrame,
+    structural_resistance: float | None = None,
+    band_atr: float = 0.5,
+) -> bool:
+    """Shooting star at a key resistance level — bearish reversal signal."""
+    if len(df) < 2:
+        return False
+    if not bearish_rejection_wick(df):
+        return False
+
+    last = df.iloc[-1]
+    atr = last.get("atr14")
+    rel_vol = last.get("rel_volume")
+    high = last.get("high")
+    if any(pd.isna(v) for v in (atr, rel_vol, high)) or atr <= 0:
+        return False
+    if rel_vol < 1.0:
+        return False
+
+    ema50 = last.get("ema50")
+    if structural_resistance is not None and _near_level(high, structural_resistance, atr, band_atr):
+        return True
+    if pd.notna(ema50) and _near_level(high, ema50, atr, band_atr):
+        return True
+    return False
+
+
+def is_engulfing_at_level_long(
+    df: pd.DataFrame,
+    structural_support: float | None = None,
+    band_atr: float = 0.75,
+) -> bool:
+    """Bullish engulfing candle at support — strong reversal signal for longs.
+
+    Today's green body fully engulfs yesterday's body, today's range is at
+    least 0.7 ATR (not a doji), bar's low is near structural support or EMA50,
+    and volume is above average.
+    """
+    if len(df) < 3:
+        return False
+    last = df.iloc[-1]
+    prev = df.iloc[-2]
+
+    if last["close"] <= last["open"]:
+        return False
+    if last["open"] > min(prev["open"], prev["close"]):
+        return False
+    if last["close"] < max(prev["open"], prev["close"]):
+        return False
+
+    atr = last.get("atr14")
+    rel_vol = last.get("rel_volume")
+    low = last.get("low")
+    if any(pd.isna(v) for v in (atr, rel_vol, low)) or atr <= 0:
+        return False
+    if (last["high"] - last["low"]) < 0.7 * atr:
+        return False
+    if rel_vol < 1.0:
+        return False
+
+    ema50 = last.get("ema50")
+    if structural_support is not None and _near_level(low, structural_support, atr, band_atr):
+        return True
+    if pd.notna(ema50) and _near_level(low, ema50, atr, band_atr):
+        return True
+    return False
+
+
+def is_engulfing_at_level_short(
+    df: pd.DataFrame,
+    structural_resistance: float | None = None,
+    band_atr: float = 0.75,
+) -> bool:
+    """Bearish engulfing candle at resistance — strong reversal signal for shorts."""
+    if len(df) < 3:
+        return False
+    last = df.iloc[-1]
+    prev = df.iloc[-2]
+
+    if last["close"] >= last["open"]:
+        return False
+    if last["open"] < max(prev["open"], prev["close"]):
+        return False
+    if last["close"] > min(prev["open"], prev["close"]):
+        return False
+
+    atr = last.get("atr14")
+    rel_vol = last.get("rel_volume")
+    high = last.get("high")
+    if any(pd.isna(v) for v in (atr, rel_vol, high)) or atr <= 0:
+        return False
+    if (last["high"] - last["low"]) < 0.7 * atr:
+        return False
+    if rel_vol < 1.0:
+        return False
+
+    ema50 = last.get("ema50")
+    if structural_resistance is not None and _near_level(high, structural_resistance, atr, band_atr):
+        return True
+    if pd.notna(ema50) and _near_level(high, ema50, atr, band_atr):
+        return True
+    return False
+
+
+def is_volume_capitulation_reversal_long(
+    df: pd.DataFrame,
+    structural_support: float | None = None,
+    cap_vol_multiple: float = 2.0,
+    lookback: int = 3,
+) -> bool:
+    """Exhaustion selling followed by a reversal bar — bullish capitulation.
+
+    One of the previous *lookback* bars had volume >= *cap_vol_multiple* x avg
+    and touched structural support or EMA50.  Today's bar is green and closes
+    above that spike bar's midpoint.
+    """
+    needed = lookback + 1
+    if len(df) < needed:
+        return False
+
+    last = df.iloc[-1]
+    if last["close"] <= last["open"]:
+        return False
+
+    atr = last.get("atr14")
+    if pd.isna(atr) or atr <= 0:
+        return False
+
+    window = df.iloc[-needed:-1]
+    for _, bar in window.iterrows():
+        rv = bar.get("rel_volume")
+        b_atr = bar.get("atr14")
+        b_low = bar.get("low")
+        if any(pd.isna(v) for v in (rv, b_atr, b_low)) or b_atr <= 0:
+            continue
+        if rv < cap_vol_multiple:
+            continue
+        bar_mid = (bar["high"] + bar["low"]) / 2.0
+
+        ema50 = bar.get("ema50")
+        near_support = (
+            (structural_support is not None and _near_level(b_low, structural_support, b_atr, 0.75))
+            or (pd.notna(ema50) and _near_level(b_low, ema50, b_atr, 0.75))
+        )
+        if near_support and last["close"] > bar_mid:
+            return True
+
+    return False
+
+
+def is_volume_capitulation_reversal_short(
+    df: pd.DataFrame,
+    structural_resistance: float | None = None,
+    cap_vol_multiple: float = 2.0,
+    lookback: int = 3,
+) -> bool:
+    """Exhaustion buying followed by a reversal bar — bearish capitulation."""
+    needed = lookback + 1
+    if len(df) < needed:
+        return False
+
+    last = df.iloc[-1]
+    if last["close"] >= last["open"]:
+        return False
+
+    atr = last.get("atr14")
+    if pd.isna(atr) or atr <= 0:
+        return False
+
+    window = df.iloc[-needed:-1]
+    for _, bar in window.iterrows():
+        rv = bar.get("rel_volume")
+        b_atr = bar.get("atr14")
+        b_high = bar.get("high")
+        if any(pd.isna(v) for v in (rv, b_atr, b_high)) or b_atr <= 0:
+            continue
+        if rv < cap_vol_multiple:
+            continue
+        bar_mid = (bar["high"] + bar["low"]) / 2.0
+
+        ema50 = bar.get("ema50")
+        near_resistance = (
+            (structural_resistance is not None and _near_level(b_high, structural_resistance, b_atr, 0.75))
+            or (pd.notna(ema50) and _near_level(b_high, ema50, b_atr, 0.75))
+        )
+        if near_resistance and last["close"] < bar_mid:
+            return True
+
+    return False
+
+
 def evaluate_long_setup(df: pd.DataFrame) -> dict:
     """
     Evaluate a simple long swing continuation setup.
