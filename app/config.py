@@ -52,6 +52,9 @@ VIX_SIZING_HIGH = 0.50
 # counter-regime trades).  At regime_score=0.5 both sides get half the boost.
 REGIME_THRESHOLD_BOOST = 1.0
 
+# Counter-trend trades need higher conviction to pass
+COUNTER_TREND_PREMIUM = 1.0
+
 # Relative strength
 RS_LOOKBACK_DAYS = 20
 RS_LONG_MIN = -0.02   # longs must not be lagging SPY by more than 2%

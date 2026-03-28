@@ -17,6 +17,7 @@ from app.features.options_context import clear_context_cache, fetch_options_cont
 from app.features.price_features import clean_ohlcv, clear_price_cache, compute_features, fetch_ohlcv
 from app.signals.scoring import quick_reject_check, score_long_setup, score_short_setup
 from app.config import (
+    COUNTER_TREND_PREMIUM,
     MIN_FINAL_SCORE,
     REGIME_THRESHOLD_BOOST,
     RS_LONG_MIN,
@@ -410,7 +411,7 @@ def run_price_validation_for_bullish_candidates(
             df = clean_ohlcv(df)
             df = compute_features(df)
 
-            should_reject, rej_reason, stub = quick_reject_check(df, "LONG")
+            should_reject, rej_reason, stub, counter_trend = quick_reject_check(df, "LONG")
             if should_reject:
                 _rej = _build_rejection_row(
                     ticker, "LONG", flow_raw, stub, LONG_ALL_REASONS,
@@ -507,6 +508,7 @@ def run_price_validation_for_bullish_candidates(
                 "long_dated_oi": opts_ctx.get("long_dated_oi"),
                 "iv_rank": opts_ctx.get("iv_rank"),
                 "iv_current": opts_ctx.get("iv_current"),
+                "counter_trend": counter_trend,
                 "source": "fresh",
                 "trade_plan": trade_plan,
                 "flow_snapshot": row.to_dict(),
@@ -563,7 +565,7 @@ def run_price_validation_for_bearish_candidates(
             df = clean_ohlcv(df)
             df = compute_features(df)
 
-            should_reject, rej_reason, stub = quick_reject_check(df, "SHORT")
+            should_reject, rej_reason, stub, counter_trend = quick_reject_check(df, "SHORT")
             if should_reject:
                 _rej = _build_rejection_row(
                     ticker, "SHORT", flow_raw, stub, SHORT_ALL_REASONS,
@@ -652,6 +654,7 @@ def run_price_validation_for_bearish_candidates(
                 "long_dated_oi": opts_ctx.get("long_dated_oi"),
                 "iv_rank": opts_ctx.get("iv_rank"),
                 "iv_current": opts_ctx.get("iv_current"),
+                "counter_trend": counter_trend,
                 "source": "watchlist_rs_demote" if rs_demote else "fresh",
                 "trade_plan": trade_plan,
                 "flow_snapshot": row.to_dict(),
@@ -959,7 +962,10 @@ def run_flow_to_price_pipeline(
     short_min = MIN_FINAL_SCORE + regime_score * REGIME_THRESHOLD_BOOST
     final_results = [
         r for r in final_results
-        if r["final_score"] >= (long_min if r["direction"] == "LONG" else short_min)
+        if r["final_score"] >= (
+            (long_min if r["direction"] == "LONG" else short_min)
+            + (COUNTER_TREND_PREMIUM if r.get("counter_trend") else 0)
+        )
     ]
 
     # Post-ranking enrichment: add aggregated options premium/volume bonus

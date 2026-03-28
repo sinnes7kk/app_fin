@@ -193,7 +193,7 @@ _FLOW_WEIGHTS = {
 #   This requires storing per-run flow statistics in data/flow_stats.csv.
 _FLOW_THRESHOLDS = {
     "flow_intensity":    (np.log1p(0.01), np.log1p(1.0)),
-    "premium_per_trade": (np.log1p(5_000), np.log1p(200_000)),
+    "premium_per_trade": (np.log1p(0.005), np.log1p(0.5)),
     "vol_oi":            (0.5,   3.0),
     "repeat":            (1.0,  10.0),
     "sweep":             (0.0,   8.0),
@@ -470,6 +470,13 @@ def aggregate_flow_by_ticker(df: pd.DataFrame) -> pd.DataFrame:
         agg[["bullish_flow_intensity", "bearish_flow_intensity"]].fillna(0.0)
     )
 
+    # Premium-per-trade normalised to basis points of market cap
+    agg["bullish_ppt_bps"] = agg["bullish_premium_per_trade"] / mcap_safe * 10_000
+    agg["bearish_ppt_bps"] = agg["bearish_premium_per_trade"] / mcap_safe * 10_000
+    agg[["bullish_ppt_bps", "bearish_ppt_bps"]] = (
+        agg[["bullish_ppt_bps", "bearish_ppt_bps"]].fillna(0.0)
+    )
+
     # Round selected columns
     round_cols = [
         "avg_dte",
@@ -491,7 +498,7 @@ def aggregate_flow_by_ticker(df: pd.DataFrame) -> pd.DataFrame:
     agg["bullish_score"] = _weighted_flow_score(
         agg,
         flow_intensity_col="bullish_flow_intensity",
-        ppt_col="bullish_premium_per_trade",
+        ppt_col="bullish_ppt_bps",
         vol_oi_col="bullish_vol_oi",
         repeat_col="bullish_repeat_count",
         sweep_col="bullish_sweep_count",
@@ -502,7 +509,7 @@ def aggregate_flow_by_ticker(df: pd.DataFrame) -> pd.DataFrame:
     agg["bearish_score"] = _weighted_flow_score(
         agg,
         flow_intensity_col="bearish_flow_intensity",
-        ppt_col="bearish_premium_per_trade",
+        ppt_col="bearish_ppt_bps",
         vol_oi_col="bearish_vol_oi",
         repeat_col="bearish_repeat_count",
         sweep_col="bearish_sweep_count",

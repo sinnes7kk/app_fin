@@ -683,6 +683,7 @@ table.data tbody tr:hover { background: rgba(88, 166, 255, 0.07); }
 .badge-otm      { color: #8b949e; background: rgba(139, 148, 158, 0.12); }
 .badge-otm-far  { color: #d29922; background: rgba(210, 153, 34, 0.15); }
 .badge-otm-deep { color: #f85149; background: rgba(248, 81, 73, 0.15); font-weight: 600; }
+.badge-counter-trend { color: #d29922; background: rgba(210, 153, 34, 0.15); font-weight: 600; }
 
 /* ── Utility ── */
 

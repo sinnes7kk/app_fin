@@ -774,7 +774,7 @@
 
     function buildConvictionDl(m) {
       var parts = [];
-      parts.push('<p class="tab-intro">Score breakdown. Final score = weighted blend of flow (50%), price (30%), and options (20%). Minimum final score of 7.0 required; counter-regime trades face a +1.0 threshold penalty.</p>');
+      parts.push('<p class="tab-intro">Score breakdown. Final score = weighted blend of flow (50%), price (30%), and options (20%). Minimum final score of 7.0 required; counter-regime trades face a +1.0 threshold boost. Counter-trend setups (trend opposes direction) require an additional +1.0.</p>');
       var dir = _dirPrefix(m);
       parts.push(buildConvictionVerdict(m));
       var fs = _finalScore(m);
@@ -911,7 +911,7 @@
       var dir = _dirPrefix(m);
       var components = [
         { name: "Flow intensity", weight: "25%", val: _num(m[dir + "_flow_intensity"]) * 10000, fmtFn: function(v){ return v.toFixed(2) + " bps"; }, thresh: [0.6, 0.15], desc: "Directional options premium as basis points of market cap" },
-        { name: "Premium / trade", weight: "15%", val: _num(m[dir + "_premium_per_trade"]), fmtFn: fmtPremium, thresh: [100000, 10000], desc: "Avg dollar premium per options trade" },
+        { name: "Premium / trade", weight: "15%", val: _num(m[dir + "_ppt_bps"]), fmtFn: function(v){ return v.toFixed(3) + " bps"; }, thresh: [0.3, 0.03], desc: "Avg per-trade premium as basis points of market cap" },
         { name: "Vol / OI ratio", weight: "15%", val: _num(m[dir + "_vol_oi"]), fmtFn: fmt, thresh: [2.0, 1.0], desc: "Today\u2019s volume vs open interest" },
         { name: "Flow velocity", weight: "13%", val: _num(m.flow_velocity), fmtFn: fmt, thresh: [2.0, 1.0], desc: "Rate of premium acceleration" },
         { name: "Repeat flow count", weight: "12%", val: _num(m.repeat_flow_count), fmtFn: fmt, thresh: [5, 3], desc: "Separate trades in same direction" },
@@ -974,7 +974,7 @@
     function _gateGroupHtml(title, rows) { if (!rows.length) return ""; return '<div class="gate-group"><h4>' + escHtml(title) + "</h4>" + rows.join("") + "</div>"; }
 
     function _buildPriceFixMessage(passed, failed, m) {
-      if (failed.trend_aligned) return "Trend not aligned \u2014 hard gate.";
+      if (failed.trend_aligned) return "Trend not aligned \u2014 counter-trend premium (+1.0) applied to threshold.";
       if (failed.not_extended) return "Price too extended from EMA20 \u2014 wait for pullback.";
       var ps = _num(m.price_score);
       var failedSoft = [];
@@ -1067,6 +1067,10 @@
       scoreHtml += "</div>";
       parts.push(scoreHtml);
 
+      if (m.counter_trend) {
+        parts.push('<p class="verdict-fix" style="border-left:3px solid #d29922;padding-left:0.6rem;margin:0.6rem 0"><strong>Counter-trend setup</strong> \u2014 trend opposes trade direction. Threshold raised by +1.0 (requires \u2265 8.0 + regime boost).</p>');
+      }
+
       var passed = _csvSet(m.checks_passed);
       var failed = _csvSet(m.checks_failed);
       var dir = _dirPrefix(m);
@@ -1082,8 +1086,8 @@
       var allChecks = Object.keys(passed).concat(Object.keys(failed));
       if (allChecks.length > 0) {
         var pt = _num(m.price_trend), pe = _num(m.price_extension), pr = _num(m.price_room), pp = _num(m.price_pattern), pcv = _num(m.price_confirm_vol), pmom = _num(m.price_momentum);
-        priceGates.push(_gateRow(!!passed.trend_aligned, "Trend quality", pt ? pt.toFixed(2) + " / 3.0" : "0"));
-        priceGates.push(_gateRow(!!passed.not_extended, "Price extension", pe ? pe.toFixed(2) + " / 1.0" : "0"));
+        priceGates.push(_gateRow(!!passed.trend_aligned, "Trend quality (soft)", pt ? pt.toFixed(2) + " / 3.0" : "0"));
+        priceGates.push(_gateRow(!!passed.not_extended, "Price extension (hard gate)", pe ? pe.toFixed(2) + " / 1.0" : "0"));
         priceGates.push(_gateRow(!!passed.room_to_target, "Room to target", pr ? pr.toFixed(2) + " / 1.0" : "0"));
         priceGates.push(_gateRow(!!passed.continuation_pattern || !!passed.structural_breakout || !!passed.structural_breakdown, "Continuation pattern", pp ? pp.toFixed(1) + " / 2.0" : "0"));
         priceGates.push(_gateRow(!!passed.confirmation_volume, "Confirmation volume", pcv ? pcv.toFixed(2) + " / 1.0" : "0"));

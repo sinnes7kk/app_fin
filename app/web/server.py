@@ -114,6 +114,8 @@ _COLUMN_TOOLTIPS: dict[str, str] = {
     "bearish_score": "Weighted bearish flow conviction (0\u201310)",
     "bullish_flow_intensity": "Bullish premium / market cap (basis points)",
     "bearish_flow_intensity": "Bearish premium / market cap (basis points)",
+    "bullish_ppt_bps": "Bullish premium-per-trade (bps of market cap)",
+    "bearish_ppt_bps": "Bearish premium-per-trade (bps of market cap)",
     "flow_imbalance_ratio": "Bullish prem \u00f7 bearish prem (\u003e1 = bullish dominant)",
     "dominant_direction": "Which side has stronger flow",
     "total_premium": "Total options premium across all flow",
@@ -293,7 +295,11 @@ def _scale_intensity_cols(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-_HIGH_PRECISION_COLS = {"bullish_flow_intensity", "bearish_flow_intensity", "iv_current"}
+_HIGH_PRECISION_COLS = {
+    "bullish_flow_intensity", "bearish_flow_intensity",
+    "bullish_ppt_bps", "bearish_ppt_bps",
+    "iv_current",
+}
 
 def _round_floats(df: pd.DataFrame, decimals: int = 2) -> pd.DataFrame:
     """Round all float columns in a DataFrame for cleaner display."""
@@ -653,7 +659,8 @@ def _signals_card_fragments(df: pd.DataFrame, *, clickable: bool = True) -> list
             continue
         direc = _dir_badge_html(row.get("direction"))
         gamma = _gamma_badge_html(row.get("gamma_regime"))
-        head = f'<span class="data-card-badges">{direc}{gamma}</span>'
+        ct_badge = '<span class="badge badge-counter-trend">Counter-trend</span>' if _row_scalar(row, "counter_trend") else ""
+        head = f'<span class="data-card-badges">{direc}{gamma}{ct_badge}</span>'
         pairs: list[tuple[str, str]] = [
             ("Final", _conviction_span(_row_scalar(row, "final_score"))),
             ("Flow", _conviction_span(_row_scalar(row, "flow_score_scaled"))),
@@ -696,7 +703,8 @@ def _candidates_card_fragments(df: pd.DataFrame, *, clickable: bool = True) -> l
             continue
         direc = _dir_badge_html(row.get("direction"))
         gamma = _gamma_badge_html(row.get("gamma_regime"))
-        head = f'<span class="data-card-badges">{direc}{gamma}</span>'
+        ct_badge = '<span class="badge badge-counter-trend">Counter-trend</span>' if _row_scalar(row, "counter_trend") else ""
+        head = f'<span class="data-card-badges">{direc}{gamma}{ct_badge}</span>'
         pairs: list[tuple[str, str]] = [
             ("Flow", _conviction_span(_row_scalar(row, "flow_score_scaled"))),
             ("Price", _conviction_span(_row_scalar(row, "price_score"))),

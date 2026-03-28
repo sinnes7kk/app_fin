@@ -168,7 +168,7 @@ def reevaluate_watchlist(
 
             all_reasons = LONG_ALL_REASONS if direction == "LONG" else SHORT_ALL_REASONS
 
-            should_reject, rej_reason, stub = quick_reject_check(df, direction)
+            should_reject, rej_reason, stub, _counter_trend = quick_reject_check(df, direction)
             if should_reject:
                 rej = _build_rejection_row(
                     ticker, direction, flow_raw, stub, all_reasons,

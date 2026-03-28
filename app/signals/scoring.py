@@ -205,11 +205,11 @@ def _build_result(
 def quick_reject_check(
     df: pd.DataFrame,
     direction: str,
-) -> tuple[bool, str | None, dict]:
-    """Cheap hard-gate check using only price data.
+) -> tuple[bool, str | None, dict, bool]:
+    """Pre-filter using only price data.
 
-    Returns (should_reject, reject_reason, price_signal_stub).
-    The stub carries enough info for _build_rejection_row.
+    Returns (should_reject, reject_reason, price_signal_stub, counter_trend).
+    Only price extension is a hard gate; trend misalignment is a soft flag.
     """
     trend = detect_trend(df)
     trend_dir = trend["trend"]
@@ -222,17 +222,16 @@ def quick_reject_check(
     _, ext_sc = _extension_score(df, MAX_DISTANCE_FROM_EMA20_ATR)
     not_extended_ok = ext_sc > 0
 
-    if not trend_opposite and not_extended_ok:
-        return False, None, {}
+    if not_extended_ok:
+        return False, None, {}, trend_opposite
 
-    reason = "trend_not_aligned" if trend_opposite else "price_over_extended"
     stub: dict = {
         "score": 0,
         "is_valid": False,
         "state": "REJECT",
         "reasons": [],
         "checks_passed": [],
-        "checks_failed": ["trend_aligned"] if trend_opposite else ["not_extended"],
+        "checks_failed": ["not_extended"],
         "score_components": {
             "trend": 0.0,
             "extension": round(ext_sc, 2),
@@ -242,7 +241,7 @@ def quick_reject_check(
             "confirm_vol": 0.0,
         },
     }
-    return True, reason, stub
+    return True, "price_over_extended", stub, trend_opposite
 
 
 # ---------------------------------------------------------------------------
