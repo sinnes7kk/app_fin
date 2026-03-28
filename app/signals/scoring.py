@@ -106,6 +106,7 @@ def _pattern_score(
     structural: bool, flag: bool, pullback: bool, ema: bool, bounce: bool,
     confluence: bool = False, retest: bool = False, clean_trend: bool = False,
     engulfing: bool = False, capitulation: bool = False, hammer_star: bool = False,
+    consolidation: bool = False,
 ) -> tuple[float, str]:
     """0-2: differentiated credit by pattern quality. Returns (score, label)."""
     if structural:
@@ -124,6 +125,8 @@ def _pattern_score(
         return 1.4, "retest"
     if clean_trend:
         return 1.4, "trend_cont"
+    if consolidation:
+        return 1.2, "consolidation"
     if hammer_star:
         return 1.2, "hammer"
     if ema:
@@ -273,6 +276,7 @@ _LONG_PATTERN_LABELS = {
     "engulfing": "engulfing_at_support",
     "capitulation": "volume_capitulation_reversal",
     "hammer": "hammer_at_support",
+    "consolidation": "consolidation_breakout",
 }
 
 _SHORT_PATTERN_LABELS = {
@@ -287,6 +291,7 @@ _SHORT_PATTERN_LABELS = {
     "engulfing": "engulfing_at_resistance",
     "capitulation": "volume_capitulation_reversal",
     "hammer": "shooting_star_at_resistance",
+    "consolidation": "consolidation_breakdown",
 }
 
 
@@ -307,26 +312,33 @@ def score_long_setup(
     range_ceiling_touches = levels.get("range_ceiling_touches", 0)
 
     structural_bo = (
-        (range_ceiling_touches >= 2
-         and range_ceiling is not None
-         and is_structural_breakout(df, range_ceiling))
-        or (levels["structural_resistance_touches"] >= 2
-            and is_structural_breakout(df, levels["structural_resistance"]))
+        levels["structural_resistance_touches"] >= 2
+        and is_structural_breakout(df, levels["structural_resistance"])
     )
+    consolidation_bo = (
+        not structural_bo
+        and range_ceiling_touches >= 2
+        and range_ceiling is not None
+        and is_structural_breakout(df, range_ceiling)
+    )
+
     _bo_broken_level: float | None = None
     if structural_bo:
-        if (range_ceiling is not None and range_ceiling_touches >= 2
-                and is_structural_breakout(df, range_ceiling)):
-            _bo_broken_level = range_ceiling
-        else:
-            _bo_broken_level = levels["structural_resistance"]
+        _bo_broken_level = levels["structural_resistance"]
+    elif consolidation_bo:
+        _bo_broken_level = range_ceiling
 
-    max_dist = BREAKOUT_MAX_DISTANCE_ATR if structural_bo else MAX_DISTANCE_FROM_EMA20_ATR
+    if structural_bo:
+        max_dist = BREAKOUT_MAX_DISTANCE_ATR
+    elif consolidation_bo:
+        max_dist = 3.0
+    else:
+        max_dist = MAX_DISTANCE_FROM_EMA20_ATR
     not_extended_ok, ext_sc = _extension_score(df, max_dist)
 
     room_ok = has_room_to_target_long(df, levels["structural_resistance"])
     room_sc = _room_score(df, levels["structural_resistance"], is_long=True)
-    if structural_bo:
+    if structural_bo or consolidation_bo:
         room_sc = 1.0
 
     bounce_fail = is_bounce_and_fail_long(df)
@@ -348,7 +360,7 @@ def score_long_setup(
 
     continuation_ok = (
         bounce_fail or flag or pullback_to_level or structural_bo
-        or ema_pullback or retest_confirm or clean_trend
+        or consolidation_bo or ema_pullback or retest_confirm or clean_trend
         or engulfing or capitulation or hammer
     )
     pattern_sc, pattern_key = _pattern_score(
@@ -356,6 +368,7 @@ def score_long_setup(
         confluence=pullback_ema_confluence, retest=retest_confirm,
         clean_trend=clean_trend,
         engulfing=engulfing, capitulation=capitulation, hammer_star=hammer,
+        consolidation=consolidation_bo,
     )
     intraday = signal_bar_offset and len(df) > 1 and df.iloc[-1].get("is_intraday", False)
     conf_vol_df = df if intraday else (df.iloc[:-1] if signal_bar_offset and len(df) > 1 else df)
@@ -386,7 +399,7 @@ def score_long_setup(
     else:
         checks_failed.append("not_extended")
 
-    if room_ok or structural_bo:
+    if room_ok or structural_bo or consolidation_bo:
         reasons.append("room_to_target")
         checks_passed.append("room_to_target")
     else:
@@ -462,26 +475,33 @@ def score_short_setup(
     range_floor_touches = levels.get("range_floor_touches", 0)
 
     structural_bd = (
-        (range_floor_touches >= 2
-         and range_floor is not None
-         and is_structural_breakdown(df, range_floor))
-        or (levels["structural_support_touches"] >= 2
-            and is_structural_breakdown(df, levels["structural_support"]))
+        levels["structural_support_touches"] >= 2
+        and is_structural_breakdown(df, levels["structural_support"])
     )
+    consolidation_bd = (
+        not structural_bd
+        and range_floor_touches >= 2
+        and range_floor is not None
+        and is_structural_breakdown(df, range_floor)
+    )
+
     _bd_broken_level: float | None = None
     if structural_bd:
-        if (range_floor is not None and range_floor_touches >= 2
-                and is_structural_breakdown(df, range_floor)):
-            _bd_broken_level = range_floor
-        else:
-            _bd_broken_level = levels["structural_support"]
+        _bd_broken_level = levels["structural_support"]
+    elif consolidation_bd:
+        _bd_broken_level = range_floor
 
-    max_dist = BREAKOUT_MAX_DISTANCE_ATR if structural_bd else MAX_DISTANCE_FROM_EMA20_ATR
+    if structural_bd:
+        max_dist = BREAKOUT_MAX_DISTANCE_ATR
+    elif consolidation_bd:
+        max_dist = 3.0
+    else:
+        max_dist = MAX_DISTANCE_FROM_EMA20_ATR
     not_extended_ok, ext_sc = _extension_score(df, max_dist)
 
     room_ok = has_room_to_target_short(df, levels["structural_support"])
     room_sc = _room_score(df, levels["structural_support"], is_long=False)
-    if structural_bd:
+    if structural_bd or consolidation_bd:
         room_sc = 1.0
 
     bounce_fail = is_bounce_and_fail_short(df)
@@ -503,7 +523,7 @@ def score_short_setup(
 
     continuation_ok = (
         bounce_fail or flag or pullback_to_level or structural_bd
-        or ema_rally or retest_confirm or clean_trend
+        or consolidation_bd or ema_rally or retest_confirm or clean_trend
         or engulfing or capitulation or shooting_star
     )
     pattern_sc, pattern_key = _pattern_score(
@@ -511,6 +531,7 @@ def score_short_setup(
         confluence=pullback_ema_confluence, retest=retest_confirm,
         clean_trend=clean_trend,
         engulfing=engulfing, capitulation=capitulation, hammer_star=shooting_star,
+        consolidation=consolidation_bd,
     )
     intraday = signal_bar_offset and len(df) > 1 and df.iloc[-1].get("is_intraday", False)
     conf_vol_df = df if intraday else (df.iloc[:-1] if signal_bar_offset and len(df) > 1 else df)
@@ -541,7 +562,7 @@ def score_short_setup(
     else:
         checks_failed.append("not_extended")
 
-    if room_ok or structural_bd:
+    if room_ok or structural_bd or consolidation_bd:
         reasons.append("room_to_target")
         checks_passed.append("room_to_target")
     else:

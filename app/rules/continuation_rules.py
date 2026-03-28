@@ -51,7 +51,9 @@ def detect_trend(df: pd.DataFrame) -> dict:
     return {"trend": "NEUTRAL", "is_valid": False, "strength": 0.0}
 
 
-STRUCTURAL_LOOKBACK = 60
+STRUCTURAL_LOOKBACK = 120
+STRUCTURAL_PIVOT_ORDER = 5
+MIN_STRUCT_SPAN = 20
 PIVOT_ORDER = 3
 CLUSTER_ATR_BAND = 0.5
 RANGE_FLOOR_LOOKBACK = 10
@@ -98,6 +100,63 @@ def _cluster_levels(pivots: list[float], atr: float, band: float = CLUSTER_ATR_B
             clusters.append((sum(current_group) / len(current_group), len(current_group)))
             current_group = [p]
     clusters.append((sum(current_group) / len(current_group), len(current_group)))
+    clusters.sort(key=lambda x: x[1], reverse=True)
+    return clusters
+
+
+def _find_swing_highs_indexed(highs: pd.Series, order: int = PIVOT_ORDER) -> list[tuple[float, int]]:
+    """Like _find_swing_highs but returns (price, bar_index) tuples."""
+    pivots: list[tuple[float, int]] = []
+    for i in range(order, len(highs) - order):
+        window = highs.iloc[i - order: i + order + 1]
+        if highs.iloc[i] == window.max():
+            pivots.append((float(highs.iloc[i]), i))
+    return pivots
+
+
+def _find_swing_lows_indexed(lows: pd.Series, order: int = PIVOT_ORDER) -> list[tuple[float, int]]:
+    """Like _find_swing_lows but returns (price, bar_index) tuples."""
+    pivots: list[tuple[float, int]] = []
+    for i in range(order, len(lows) - order):
+        window = lows.iloc[i - order: i + order + 1]
+        if lows.iloc[i] == window.min():
+            pivots.append((float(lows.iloc[i]), i))
+    return pivots
+
+
+def _structural_cluster_levels(
+    indexed_pivots: list[tuple[float, int]],
+    atr: float,
+    band: float = CLUSTER_ATR_BAND,
+    min_span: int = MIN_STRUCT_SPAN,
+) -> list[tuple[float, int]]:
+    """Cluster indexed pivots, keeping only clusters whose touches span >= min_span bars.
+
+    Returns (level, touch_count) sorted by touch count descending.
+    """
+    if not indexed_pivots or atr <= 0:
+        return []
+    sorted_by_price = sorted(indexed_pivots, key=lambda x: x[0])
+    threshold = band * atr
+    clusters: list[tuple[float, int]] = []
+    group_prices: list[float] = [sorted_by_price[0][0]]
+    group_indices: list[int] = [sorted_by_price[0][1]]
+
+    for price, idx in sorted_by_price[1:]:
+        if price - group_prices[-1] <= threshold:
+            group_prices.append(price)
+            group_indices.append(idx)
+        else:
+            span = max(group_indices) - min(group_indices) if len(group_indices) > 1 else 0
+            if len(group_prices) >= 2 and span >= min_span:
+                clusters.append((sum(group_prices) / len(group_prices), len(group_prices)))
+            group_prices = [price]
+            group_indices = [idx]
+
+    span = max(group_indices) - min(group_indices) if len(group_indices) > 1 else 0
+    if len(group_prices) >= 2 and span >= min_span:
+        clusters.append((sum(group_prices) / len(group_prices), len(group_prices)))
+
     clusters.sort(key=lambda x: x[1], reverse=True)
     return clusters
 
@@ -205,14 +264,14 @@ def find_support_resistance(df: pd.DataFrame, lookback: int = 20) -> dict:
     support = sup_result[0] if sup_result else float(recent["low"].min())
     resistance = res_result[0] if res_result else float(recent["high"].max())
 
-    # Structural S/R (longer window)
+    # Structural S/R (longer window, higher pivot order, span-filtered)
     struct_bars = min(STRUCTURAL_LOOKBACK, len(df) - 1)
     structural = df.iloc[-(struct_bars + 1): -1]
 
-    struct_lows = _find_swing_lows(structural["low"])
-    struct_highs = _find_swing_highs(structural["high"])
-    struct_low_clusters = _cluster_levels(struct_lows, atr)
-    struct_high_clusters = _cluster_levels(struct_highs, atr)
+    struct_lows_ix = _find_swing_lows_indexed(structural["low"], order=STRUCTURAL_PIVOT_ORDER)
+    struct_highs_ix = _find_swing_highs_indexed(structural["high"], order=STRUCTURAL_PIVOT_ORDER)
+    struct_low_clusters = _structural_cluster_levels(struct_lows_ix, atr)
+    struct_high_clusters = _structural_cluster_levels(struct_highs_ix, atr)
 
     struct_sup_result = _best_level_below(struct_low_clusters, close)
     struct_res_result = _best_level_above(struct_high_clusters, close)
