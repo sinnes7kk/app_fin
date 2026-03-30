@@ -1062,10 +1062,81 @@ Extend agents to open-position review: evaluate whether the thesis is still inta
 whether to tighten stops, or whether a better opportunity warrants rotation. Agents
 receive the current chart, entry context, and position health metrics.
 
-## V5 — Autonomous execution
+## V5 — VM deployment + IBKR autonomous execution
 
-Brokerage integration with agent-approved order execution. Requires high confidence
-in agent consistency from V3-V4 shadow testing.
+Migrate from GitHub Actions (stateless hourly cron) to a persistent VM process
+connected to Interactive Brokers for real-time execution. This is the production
+deployment target.
+
+### Infrastructure
+
+- **VM**: AWS EC2 `t3.small` or equivalent (~$15/month). Runs 24/7 with systemd
+  auto-restart.
+- **IBKR Gateway**: TWS Gateway running headless via IBC (auto-login). Provides
+  persistent API connection for order placement, fills, and real-time market data.
+- **Dashboard**: Flask served behind nginx on the VM. No more static site
+  generation — the dashboard reads live data directly. Search tab works natively.
+- **Storage**: Migrate from JSON files (`positions.json`, `watchlist.json`) to
+  SQLite or Postgres for concurrent access safety and transaction support.
+
+### Architecture
+
+```
+Scheduler (APScheduler / cron)
+  → Signal pipeline (every 15-30 min during market hours)
+    → IBKR adapter (app/broker/ibkr.py)
+      → ib_insync → TWS Gateway → IBKR
+        → Fill callbacks → position reconciliation
+
+Real-time price stream (IBKR market data)
+  → Stop/target monitor (continuous)
+    → Trailing stop updates
+    → Partial exit at T1
+    → Full exit at T2 / active_stop breach
+```
+
+### IBKR adapter (`app/broker/ibkr.py`)
+
+New module that translates pipeline output into IBKR orders:
+
+- **Entry**: Bracket order (limit entry + stop-loss + take-profit as linked OCO
+  group). Uses `entry_price`, `stop_price`, `target_1` from trade plan.
+- **Partial exit at T1**: Separate limit order for `partial_exit_pct * shares`.
+- **Trailing stop updates**: Each scan cycle modifies the stop-loss order to the
+  new `active_stop` value from `compute_trailing_stops`.
+- **Position reconciliation**: Syncs `positions.json` (or DB) with IBKR's actual
+  fills. Handles partial fills, slippage, missed orders, and TWS disconnects.
+
+### UW API budget (40K requests/day)
+
+With 40K daily requests:
+- Full scan every 15 min during market hours (26 scans × ~200 calls = ~5,200)
+- Real-time flow monitoring on open positions (~50 calls/position/hour)
+- Remaining budget (~30K) for search, dark pool checks, and options context
+  refreshes between scans
+
+### Safety controls
+
+- **Kill switch**: Emergency halt that cancels all open orders and flattens
+  positions. Triggered by max daily loss, API errors, or manual override.
+- **Max daily loss**: Hard limit (e.g., 2% of portfolio). Stops new entries and
+  optionally flattens if breached.
+- **Order size limits**: Per-position and portfolio-wide caps. Already have
+  `MAX_POSITIONS`, `RISK_PER_TRADE_PCT`, and `MAX_PORTFOLIO_HEAT`.
+- **Market hours enforcement**: No orders outside RTH unless explicitly enabled.
+- **Heartbeat monitoring**: Alert (email/Slack) if the process crashes or TWS
+  disconnects.
+
+### Migration path
+
+1. Build `app/broker/ibkr.py` adapter with `ib_insync`
+2. Run in **shadow mode** on the VM — adapter logs what it would do, no real
+   orders. Compare against paper trading results for 2-4 weeks.
+3. Go live with **reduced position sizes** (e.g., 25% of target) for first 2
+   weeks
+4. Scale to full position sizes after confirming fill quality, slippage, and
+   reliability
+5. Retire GitHub Actions workflow once VM is stable
 
 ## Flow scoring — historical distribution (all future versions)
 
