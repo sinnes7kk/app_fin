@@ -820,6 +820,35 @@ def save_run_outputs(
     return paths
 
 
+_FLOW_STAT_COLS = [
+    "bullish_flow_intensity", "bearish_flow_intensity",
+    "bullish_ppt_bps", "bearish_ppt_bps",
+]
+_FLOW_STAT_PCTS = [0.25, 0.50, 0.75, 0.90, 0.99]
+
+
+def _log_flow_stats(feature_table: pd.DataFrame) -> None:
+    """Append per-scan distribution percentiles to data/flow_stats.csv."""
+    stats_path = DATA_ROOT / "flow_stats.csv"
+    row: dict = {
+        "timestamp": datetime.utcnow().isoformat(timespec="seconds"),
+        "ticker_count": len(feature_table),
+    }
+    for col in _FLOW_STAT_COLS:
+        if col not in feature_table.columns:
+            continue
+        series = feature_table[col].dropna()
+        if series.empty:
+            continue
+        for pct in _FLOW_STAT_PCTS:
+            label = f"{col}_p{int(pct * 100)}"
+            row[label] = round(float(series.quantile(pct)), 6)
+
+    header = not stats_path.exists()
+    stats_path.parent.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame([row]).to_csv(stats_path, mode="a", header=header, index=False)
+
+
 def run_flow_to_price_pipeline(
     flow_limit: int = 2000,
     top_n: int = 50,
@@ -997,6 +1026,8 @@ def run_flow_to_price_pipeline(
         )
         for name, path in saved_paths.items():
             print(f"  saved {name} -> {path}")
+        if not feature_table.empty:
+            _log_flow_stats(feature_table)
 
     print_api_summary()
 

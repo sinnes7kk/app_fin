@@ -197,8 +197,8 @@ def _find_replaceable_by_health(existing: list[dict], new_score: float) -> dict 
     """Find the weakest position eligible for conviction-based rotation, or None.
 
     Compares the new candidate's final_score against each open position's
-    composite conviction (0.5 * re_entry_score + 0.5 * health).  Falls back
-    to raw health when conviction hasn't been computed yet.
+    composite conviction (0.2 * re_entry + 0.3 * thesis_intact + 0.5 * health).
+    Falls back to raw health when conviction hasn't been computed yet.
 
       - STRONG: never replaceable
       - NEUTRAL: replaceable only if new_score exceeds conviction by a margin
@@ -332,6 +332,7 @@ def _build_position(sig: dict, risk_pct: float) -> dict | None:
         "health_delta": 0.0,
         "last_rotation_date": None,
         "re_entry_score": None,
+        "thesis_intact_score": None,
         "conviction": None,
     }
 
@@ -582,6 +583,7 @@ def update_positions() -> dict:
             pos.setdefault("last_rotation_date", None)
         if "conviction" not in pos:
             pos.setdefault("re_entry_score", None)
+            pos.setdefault("thesis_intact_score", None)
             pos.setdefault("conviction", None)
 
     still_open: list[dict] = []
@@ -648,7 +650,20 @@ def update_positions() -> dict:
         else:
             re_entry = score_short_setup(df)
         pos["re_entry_score"] = re_entry["score"]
-        pos["conviction"] = round(0.5 * re_entry["score"] + 0.5 * pos["health"], 2)
+        comps = re_entry.get("score_components", {})
+        thesis_score = min(10.0, (
+            comps.get("trend", 0)
+            + comps.get("extension", 0)
+            + comps.get("room", 0)
+            + comps.get("momentum", 0)
+        ) * (10.0 / 7.0))
+        pos["thesis_intact_score"] = round(thesis_score, 2)
+        pos["conviction"] = round(
+            0.2 * re_entry["score"]
+            + 0.3 * thesis_score
+            + 0.5 * pos["health"],
+            2,
+        )
 
         # Don't check exits on entry day — give the trade at least one full bar
         if pos["entry_date"] == str(date.today()):

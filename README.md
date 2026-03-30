@@ -951,6 +951,27 @@ build signal generator
 add logs/tests/replay scripts
 
 ---
+# Changes
+
+trailing stop loss after Reaching target.
+
+## Recent completed changes
+
+- **Trend alignment demoted to soft penalty**: Trend misalignment no longer kills
+  trades outright. Instead adds +1.0 counter-trend premium to the required final
+  score. Only price extension remains a hard gate.
+
+- **Reversal patterns added**: Hammer at support, shooting star at resistance,
+  engulfing at level, and volume capitulation reversal patterns integrated into
+  scoring for counter-trend setups.
+
+- **Structural breakout rework**: `STRUCTURAL_LOOKBACK` increased from 60 to 120
+  bars (~6 months). Structural pivots use order=5 (11-bar window). Clusters require
+  touches spanning 20+ bars apart. 10-bar range ceiling/floor breakouts demoted to
+  "consolidation breakout" (1.2 pts) from "structural breakout" (2.0 pts).
+
+- **Flow scoring normalized by market cap**: Premium-per-trade converted from raw
+  dollars to bps of market cap. Flow intensity thresholds recalibrated.
 
 # Future Roadmap
 
@@ -1055,9 +1076,14 @@ to "is this flow genuinely unusual?" rather than relying on hand-tuned threshold
 
 ## Pattern additions (V3+)
 
-- **Reclaim / V-recovery / capitulation bottom** — price breaks below key support,
-  then reclaims it with volume. Currently excluded from the rules engine because
-  it's a reversal (not continuation) setup and harder to code reliably.
+- ~~**Reclaim / V-recovery / capitulation bottom**~~ — **DONE**. Implemented as
+  `is_volume_capitulation_reversal_long/short` (1.4 pts), `is_engulfing_at_level_long/short`
+  (1.6 pts), and `is_hammer_at_support` / `is_shooting_star_at_resistance` (1.2 pts).
+  These reversal patterns fire at structural support/resistance and are scored in the
+  existing pattern hierarchy. Counter-trend setups require +1.0 final score premium.
+
+- **Remaining**: More exotic reversal patterns (island reversals, three-bar reversals,
+  gap-and-reclaim) could be added as V3 agent judgments rather than hard-coded rules.
 
 ## Dark pool scoring redesign (all future versions)
 
@@ -1088,13 +1114,18 @@ from the current 50/30/20 (flow/price/options) to ~45/25/15/15
 Files in scope: `_enrich_dark_pool` and `combine_scores` in `pipeline.py`,
 `fetch_dark_pool` in `unusual_whales.py`.
 
-## Flow intensity threshold recalibration (all future versions)
+## Flow intensity threshold recalibration (ongoing)
 
-The current flow intensity thresholds `(log1p(0.01), log1p(1.0))` were calibrated
-on a single day of marketcap-based data (2026-03-26, N=100 tickers after the
-`$100M` mcap floor). The gradient looks correct for that snapshot — p75 at ~20%,
-p90 at ~66%, p95 at ~88% — but this has not been validated across different
-market regimes.
+**Initial calibration DONE**: Thresholds recalibrated from absolute dollars to
+marketcap-normalized bps. Premium-per-trade now uses `bullish_ppt_bps` /
+`bearish_ppt_bps` (premium / mcap * 10,000). Flow intensity thresholds set to
+`(log1p(0.01), log1p(1.0))`.
+
+**Still needed**: validation across different market regimes. Current thresholds
+were calibrated on a single day of marketcap-based data (2026-03-26, N=100
+tickers after the `$100M` mcap floor). The gradient looks correct for that
+snapshot — p75 at ~20%, p90 at ~66%, p95 at ~88% — but has not been validated
+across different conditions.
 
 **Re-validation conditions**:
 
@@ -1116,41 +1147,21 @@ roadmap item above.
 
 # Known Issues
 
-## re_entry_score deflation for working positions
+## ~~re_entry_score deflation for working positions~~ — FIXED
 
-`re_entry_score` re-runs the full entry scoring (`score_long_setup` / `score_short_setup`)
-on current data every update cycle. Entry patterns (structural breakout, flag breakout,
-pullback to support, etc.) are one-time events — they fire on the entry bar and then
-stop matching. A position that entered on a clean structural breakdown and is now
-grinding in a healthy downtrend will get a low `re_entry_score` because no entry
-pattern fires, even though the thesis is fully intact.
+`re_entry_score` re-runs the full entry scoring on current data every update cycle.
+Entry patterns (structural breakout, flag, pullback) are one-time events that stop
+matching after the entry bar, deflating conviction for working positions.
 
-Since `conviction = 0.5 * re_entry_score + 0.5 * health`, this deflates conviction
-for working positions and could make them vulnerable to rotation.
+**Fix implemented**: Added a `thesis_intact_score` that uses only the persistent
+components (trend, extension, room, momentum) normalized to 0-10, stripping one-time
+pattern and confirmation volume. Conviction formula changed from
+`0.5 * re_entry + 0.5 * health` to:
 
-**Mitigations already in place**: The `trend_continuation` pattern (1.4 pts) fires
-as a fallback for clean-trending stocks, which cushions the problem.
+```
+conviction = 0.2 * re_entry + 0.3 * thesis_intact + 0.5 * health
+```
 
-**Potential fixes** (evaluate after live testing data is available):
-- Reweight to `0.2 * re_entry_score + 0.8 * health` to make health dominant
-- Create a "thesis-intact" score that only uses trend, extension, room, and momentum
-  (stripping one-time entry patterns and confirmation volume)
-- Only use `re_entry_score` for rotation comparison, not as a position metric
-
-## Candle quality is unreliable during intraday scans
-
-The `_pattern_candle_bonus` component (0-0.5 pts) evaluates candle shape — close
-position within the bar range, wick-to-body ratio — to amplify pattern scores.
-During market hours, the current daily bar is still forming, so candle metrics are
-mostly noise. The code mitigates this by primarily evaluating yesterday's completed
-bar and applying a time-of-day discount to today's developing bar, but yesterday's
-candle shape is often irrelevant to today's pattern.
-
-This causes candle quality to show as 0 (red) in most intraday scans, adding visual
-noise to the UI without meaningful signal. Since it's a 0-0.5 bonus (not a gate),
-it cannot block signals — but it does suppress up to 0.5 points of price score.
-
-**Potential fixes**:
-- Suppress the candle quality row in the UI during intraday scans
-- Only evaluate candle quality on after-hours/overnight scans when bars are complete
-- V3 agent layer can reason about partial candles contextually
+Health dominates (profitable, well-trending positions stay high conviction).
+Thesis-intact catches degradation without punishing missing one-time patterns.
+re_entry_score is retained for rotation comparison.
