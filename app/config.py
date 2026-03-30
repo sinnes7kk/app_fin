@@ -19,8 +19,9 @@ WATCHLIST = ["AAPL", "NVDA", "MSFT", "AMZN", "META", "TSLA"]
 
 WATCHLIST_TTL_DAYS = 5
 
-ATR_TRAIL_MULT = 3.0
+ATR_TRAIL_MULT = 2.5
 HYBRID_TRAIL_MULT = 2.0
+POST_T1_TRAIL_ATR = 1.0
 PARTIAL_EXIT_PCT = 0.5
 # Conviction-scaled partial sizing: (min_score, partial_pct)
 # Higher conviction → smaller partial exit at T1 to let runners develop

@@ -301,6 +301,7 @@ def _build_position(sig: dict, risk_pct: float) -> dict | None:
         "trail_atr": sig["stop_price"],
         "trail_ema": sig["stop_price"],
         "trail_hybrid": sig["stop_price"],
+        "trail_post_t1": None,
         "active_stop": sig["stop_price"],
         "target_1": sig["target_1"],
         "target_2": sig["target_2"],
@@ -585,6 +586,7 @@ def update_positions() -> dict:
             pos.setdefault("re_entry_score", None)
             pos.setdefault("thesis_intact_score", None)
             pos.setdefault("conviction", None)
+        pos.setdefault("trail_post_t1", None)
 
     still_open: list[dict] = []
     closed_rows: list[dict] = []

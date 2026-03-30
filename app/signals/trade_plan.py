@@ -12,6 +12,7 @@ from app.config import (
     GAMMA_POSITIVE_TRAIL_MULT,
     HYBRID_TRAIL_MULT,
     MAX_HOLD_DAYS,
+    POST_T1_TRAIL_ATR,
     WALL_PROXIMITY_WARNING_ATR,
     WALL_PROXIMITY_WARNING_PCT,
 )
@@ -497,21 +498,40 @@ def compute_trailing_stops(
     if days >= 4 and unrealized_r < 0.5:
         trail_hybrid = entry
 
+    # Post-T1 trail: after partial exit, lock in T1 minus 1 ATR
+    trail_post_t1 = None
+    if pos.get("partial_filled"):
+        t1 = pos.get("target_1")
+        if t1 is not None:
+            if is_long:
+                trail_post_t1 = t1 - POST_T1_TRAIL_ATR * atr
+            else:
+                trail_post_t1 = t1 + POST_T1_TRAIL_ATR * atr
+
     # Never let a trail be worse than the initial stop
     if is_long:
         trail_atr = max(trail_atr, initial_stop)
         trail_hybrid = max(trail_hybrid, initial_stop)
-        active_stop = max(trail_atr, trail_ema, trail_hybrid)
+        candidates = [trail_atr, trail_ema, trail_hybrid]
+        if trail_post_t1 is not None:
+            trail_post_t1 = max(trail_post_t1, initial_stop)
+            candidates.append(trail_post_t1)
+        active_stop = max(candidates)
     else:
         trail_atr = min(trail_atr, initial_stop)
         trail_hybrid = min(trail_hybrid, initial_stop)
-        active_stop = min(trail_atr, trail_ema, trail_hybrid)
+        candidates = [trail_atr, trail_ema, trail_hybrid]
+        if trail_post_t1 is not None:
+            trail_post_t1 = min(trail_post_t1, initial_stop)
+            candidates.append(trail_post_t1)
+        active_stop = min(candidates)
 
     return {
         "best_price": round(best, 2),
         "trail_atr": round(trail_atr, 2),
         "trail_ema": round(trail_ema, 2),
         "trail_hybrid": round(trail_hybrid, 2),
+        "trail_post_t1": round(trail_post_t1, 2) if trail_post_t1 is not None else None,
         "active_stop": round(active_stop, 2),
         "unrealized_r": round(unrealized_r, 2),
     }

@@ -1150,7 +1150,10 @@
       if (openedRaw) { try { var dt = new Date(openedRaw); if (!isNaN(dt.getTime())) { openedPretty = dt.toLocaleDateString("en-US", { month: "short", day: "numeric" }) + ", " + dt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }) + " UTC"; } } catch(e) {} }
       var currentVal = fmt(p.last_price);
       if (p.last_price != null && p.entry_price != null) { try { var ep = parseFloat(p.entry_price), lp = parseFloat(p.last_price); if (ep !== 0) { var pnlPct = ((lp - ep) / ep) * 100; if (String(p.direction).toUpperCase() === "SHORT") pnlPct = -pnlPct; var sign = pnlPct >= 0 ? "+" : ""; var color = pnlPct >= 0 ? "var(--good)" : "var(--bad)"; currentVal = fmt(p.last_price) + ' <span style="color:' + color + ';font-weight:600">' + sign + pnlPct.toFixed(1) + '%</span>'; } } catch(e) {} }
-      var risk = detailSectionRaw("Risk & targets", [["Entry", fmt(p.entry_price)], ["Current price", currentVal], ["Opened", openedPretty], ["Active stop", fmt(p.active_stop)], ["Initial stop", fmt(p.initial_stop)], ["Target 1", fmt(p.target_1)], ["Target 2", fmt(p.target_2)], ["Shares", fmt(p.shares)], ["Unrealized R", fmt(p.unrealized_r)]]);
+      var riskPairs = [["Entry", fmt(p.entry_price)], ["Current price", currentVal], ["Opened", openedPretty], ["Active stop", fmt(p.active_stop)], ["Initial stop", fmt(p.initial_stop)]];
+      if (p.trail_post_t1 != null) riskPairs.push(["Post-T1 trail", fmt(p.trail_post_t1)]);
+      riskPairs.push(["Target 1", fmt(p.target_1)], ["Target 2", fmt(p.target_2)], ["Shares", fmt(p.shares)], ["Unrealized R", fmt(p.unrealized_r)]);
+      var risk = detailSectionRaw("Risk & targets", riskPairs);
       var convPairs = [["Final score", fmtConvictionHtml(p.final_score)], ["Flow (scaled)", fmtConvictionHtml(p.flow_score_scaled)], ["Price score", fmtConvictionHtml(p.price_score)]];
       if (_present(p.iv_rank)) {
         var pIvr = _num(p.iv_rank);
