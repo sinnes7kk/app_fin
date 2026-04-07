@@ -95,3 +95,36 @@ def load_equity_curve() -> pd.DataFrame:
         return pd.read_csv(p)
     except Exception:
         return pd.DataFrame()
+
+
+# ---------------------------------------------------------------------------
+# Agent shadow portfolio loaders
+# ---------------------------------------------------------------------------
+
+def load_positions_agent() -> list[dict]:
+    return read_json_list(DATA_ROOT / "positions_agent.json")
+
+
+def load_trade_log_agent() -> pd.DataFrame:
+    p = DATA_ROOT / "trade_log_agent.csv"
+    if not p.is_file():
+        return pd.DataFrame()
+    try:
+        return pd.read_csv(p)
+    except Exception:
+        return pd.DataFrame()
+
+
+def load_trade_log_agent_tail(n: int = 100) -> pd.DataFrame:
+    df = load_trade_log_agent()
+    return df.tail(n) if len(df) > n else df
+
+
+def load_equity_curve_agent() -> pd.DataFrame:
+    p = DATA_ROOT / "equity_curve_agent.csv"
+    if not p.is_file():
+        return pd.DataFrame()
+    try:
+        return pd.read_csv(p)
+    except Exception:
+        return pd.DataFrame()

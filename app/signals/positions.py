@@ -38,6 +38,17 @@ POSITIONS_PATH = DATA_DIR / "positions.json"
 TRADE_LOG_PATH = DATA_DIR / "trade_log.csv"
 EQUITY_CURVE_PATH = DATA_DIR / "equity_curve.csv"
 
+
+def _paths(portfolio: str = "default") -> tuple[Path, Path, Path]:
+    """Return (positions_path, trade_log_path, equity_curve_path) for a portfolio."""
+    if portfolio == "agent":
+        return (
+            DATA_DIR / "positions_agent.json",
+            DATA_DIR / "trade_log_agent.csv",
+            DATA_DIR / "equity_curve_agent.csv",
+        )
+    return (POSITIONS_PATH, TRADE_LOG_PATH, EQUITY_CURVE_PATH)
+
 EQUITY_CURVE_COLUMNS = [
     "date",
     "portfolio_value",
@@ -69,23 +80,26 @@ TRADE_LOG_COLUMNS = [
 ]
 
 
-def _load_positions() -> list[dict]:
-    if POSITIONS_PATH.exists():
-        return json.loads(POSITIONS_PATH.read_text())
+def _load_positions(portfolio: str = "default") -> list[dict]:
+    pos_path = _paths(portfolio)[0]
+    if pos_path.exists():
+        return json.loads(pos_path.read_text())
     return []
 
 
-def _save_positions(positions: list[dict]) -> None:
-    POSITIONS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    POSITIONS_PATH.write_text(json.dumps(positions, indent=2, default=str))
+def _save_positions(positions: list[dict], portfolio: str = "default") -> None:
+    pos_path = _paths(portfolio)[0]
+    pos_path.parent.mkdir(parents=True, exist_ok=True)
+    pos_path.write_text(json.dumps(positions, indent=2, default=str))
 
 
-def _append_trade_log(rows: list[dict]) -> None:
+def _append_trade_log(rows: list[dict], portfolio: str = "default") -> None:
     if not rows:
         return
-    TRADE_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    write_header = not TRADE_LOG_PATH.exists()
-    with open(TRADE_LOG_PATH, "a", newline="") as f:
+    tl_path = _paths(portfolio)[1]
+    tl_path.parent.mkdir(parents=True, exist_ok=True)
+    write_header = not tl_path.exists()
+    with open(tl_path, "a", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=TRADE_LOG_COLUMNS, extrasaction="ignore")
         if write_header:
             writer.writeheader()
@@ -95,8 +109,11 @@ def _append_trade_log(rows: list[dict]) -> None:
 def _append_equity_curve(
     still_open: list[dict],
     realized_pnl: float,
+    portfolio: str = "default",
 ) -> None:
     """Append one row to the equity curve CSV with today's portfolio snapshot."""
+    ec_path = _paths(portfolio)[2]
+
     positions_value = 0.0
     for pos in still_open:
         price = pos.get("best_price", pos["entry_price"])
@@ -119,33 +136,32 @@ def _append_equity_curve(
         "daily_realized_pnl": round(realized_pnl, 2),
     }
 
-    EQUITY_CURVE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    ec_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # With 8 runs/day, keep only the latest snapshot per calendar date
-    # (overwrite today's row if it exists to avoid distorting drawdown math).
     today_str = row["date"]
     existing_rows: list[dict] = []
-    if EQUITY_CURVE_PATH.exists():
-        with open(EQUITY_CURVE_PATH, "r", newline="") as f:
+    if ec_path.exists():
+        with open(ec_path, "r", newline="") as f:
             reader = csv.DictReader(f)
             existing_rows = [r for r in reader if r.get("date") != today_str]
 
-    with open(EQUITY_CURVE_PATH, "w", newline="") as f:
+    with open(ec_path, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=EQUITY_CURVE_COLUMNS, extrasaction="ignore")
         writer.writeheader()
         writer.writerows(existing_rows)
         writer.writerow(row)
 
 
-def _current_drawdown() -> float:
+def _current_drawdown(portfolio: str = "default") -> float:
     """Compute current drawdown from peak as a positive fraction (0.0 = no drawdown).
 
     Reads the equity curve CSV.  Returns 0.0 if data is insufficient.
     """
-    if not EQUITY_CURVE_PATH.exists():
+    ec_path = _paths(portfolio)[2]
+    if not ec_path.exists():
         return 0.0
     try:
-        eq = pd.read_csv(EQUITY_CURVE_PATH)
+        eq = pd.read_csv(ec_path)
         if eq.empty or "portfolio_value" not in eq.columns:
             return 0.0
         values = pd.to_numeric(eq["portfolio_value"], errors="coerce").dropna()
@@ -338,7 +354,7 @@ def _build_position(sig: dict, risk_pct: float) -> dict | None:
     }
 
 
-def open_positions(signals: list[dict]) -> dict:
+def open_positions(signals: list[dict], portfolio: str = "default") -> dict:
     """Convert pipeline signals into new position entries.
 
     Filters by MIN_FINAL_SCORE, sizes by conviction tier, respects
@@ -347,21 +363,21 @@ def open_positions(signals: list[dict]) -> dict:
 
     Returns a dict with 'opened', 'rotated_out', and 'skipped' lists.
     """
-    drawdown = _current_drawdown()
+    tag = f"[{portfolio}] " if portfolio != "default" else ""
+    drawdown = _current_drawdown(portfolio)
     if drawdown >= DRAWDOWN_HALT_PCT:
-        print(f"  [circuit-breaker] drawdown {drawdown:.1%} >= halt threshold — no new entries")
+        print(f"  {tag}[circuit-breaker] drawdown {drawdown:.1%} >= halt threshold — no new entries")
         return {"opened": [], "rotated_out": [], "skipped": [
             {"ticker": "*", "reason": f"drawdown halt ({drawdown:.1%})"}
         ]}
     drawdown_mult = DRAWDOWN_SIZING_MULT if drawdown >= DRAWDOWN_THROTTLE_PCT else 1.0
     if drawdown_mult < 1.0:
-        print(f"  [circuit-breaker] drawdown {drawdown:.1%} — sizing reduced to {drawdown_mult:.0%}")
+        print(f"  {tag}[circuit-breaker] drawdown {drawdown:.1%} — sizing reduced to {drawdown_mult:.0%}")
 
-    existing = _load_positions()
+    existing = _load_positions(portfolio)
     open_tickers = {(p["ticker"], p["direction"]) for p in existing}
     heat = _current_portfolio_heat(existing)
 
-    # Build sector counts for the sector concentration guard
     sector_counts: dict[tuple[str, str], int] = {}
     for p in existing:
         key_sd = (get_sector(p["ticker"]), p["direction"])
@@ -428,12 +444,12 @@ def open_positions(signals: list[dict]) -> dict:
         open_tickers.add(key)
         sector_counts[sector_key] = sector_counts.get(sector_key, 0) + 1
 
-    if skipped:
+    if skipped and portfolio == "default":
         for s in skipped:
             print(f"  [sizing] skipped {s['ticker']}: {s['reason']}")
 
-    _save_positions(existing)
-    _append_trade_log(rotated_out)
+    _save_positions(existing, portfolio)
+    _append_trade_log(rotated_out, portfolio)
 
     return {"opened": opened, "rotated_out": rotated_out, "skipped": skipped}
 
@@ -563,12 +579,12 @@ def _check_partial(pos: dict, bar: pd.Series) -> tuple[bool, float]:
     return False, 0.0
 
 
-def update_positions() -> dict:
+def update_positions(portfolio: str = "default") -> dict:
     """Daily update loop: refresh stops, check exits, log trades.
 
     Returns a summary dict with lists of closed trades and updated positions.
     """
-    positions = _load_positions()
+    positions = _load_positions(portfolio)
     if not positions:
         return {"closed": [], "still_open": [], "partial_fills": []}
 
@@ -695,11 +711,11 @@ def update_positions() -> dict:
         else:
             still_open.append(pos)
 
-    _save_positions(still_open)
-    _append_trade_log(closed_rows)
+    _save_positions(still_open, portfolio)
+    _append_trade_log(closed_rows, portfolio)
 
     realized_pnl = sum(r.get("pnl_dollar", 0.0) for r in closed_rows)
-    _append_equity_curve(still_open, realized_pnl)
+    _append_equity_curve(still_open, realized_pnl, portfolio)
 
     return {
         "closed": closed_rows,

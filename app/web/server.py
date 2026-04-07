@@ -19,11 +19,14 @@ from flask import Flask, jsonify, render_template, request
 from app.config import MIN_FINAL_SCORE, REGIME_THRESHOLD_BOOST
 from app.web.data_access import (
     load_equity_curve,
+    load_equity_curve_agent,
     load_final_signals,
     load_flow_features,
     load_positions,
+    load_positions_agent,
     load_rejected,
     load_trade_log,
+    load_trade_log_agent,
     load_trade_log_tail,
     load_watchlist,
 )
@@ -1096,10 +1099,15 @@ def _alerts_subset(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def _compute_performance() -> dict:
+def _compute_performance(
+    tl: pd.DataFrame | None = None,
+    ec: pd.DataFrame | None = None,
+) -> dict:
     """Build all performance analytics from the trade log and equity curve."""
-    tl = load_trade_log()
-    ec = load_equity_curve()
+    if tl is None:
+        tl = load_trade_log()
+    if ec is None:
+        ec = load_equity_curve()
     perf: dict = {"has_data": not tl.empty, "equity_curve": []}
 
     if tl.empty:
@@ -1692,6 +1700,13 @@ def index():
                 })
 
     perf = _compute_performance()
+
+    # Agent shadow portfolio
+    positions_agent = load_positions_agent()
+    tl_agent = load_trade_log_agent()
+    ec_agent = load_equity_curve_agent()
+    perf_agent = _compute_performance(tl=tl_agent, ec=ec_agent)
+
     last_updated = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
     def _parse_scan_ts(src: str) -> str:
@@ -1809,6 +1824,16 @@ def index():
         "sort_bear": sort_bear,
         "sort_rej": sort_rej,
         "scan_timestamp": scan_timestamp,
+        # Agent shadow portfolio
+        "positions_agent": positions_agent,
+        "positions_agent_html": _paginate_card_fragments(
+            _positions_card_fragments(positions_agent),
+            page=_int_query("page_pos_agent"),
+            per_page=pp,
+            page_param="page_pos_agent",
+            empty_msg="No agent portfolio positions. Agent portfolio populates once the OpenAI API key is configured and agents run.",
+        ),
+        "perf_agent": perf_agent,
     }
     return render_template("index.html", **ctx)
 

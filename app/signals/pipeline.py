@@ -785,6 +785,375 @@ def _enrich_dark_pool(results: list[dict]) -> list[dict]:
     return results
 
 
+def _run_options_agent_shadow(results: list[dict]) -> None:
+    """Run the Options Context Agent in shadow mode for each final result.
+
+    Logs assessments to ``data/agent_shadow/options_context/`` for offline
+    analysis.  Does NOT modify any scores or results.  Silently skips if
+    the agent is unavailable (no OpenAI key).
+    """
+    from app.agents.options_context import is_agent_available, run_options_context_shadow
+
+    if not is_agent_available():
+        return
+
+    n_run = 0
+    for r in results:
+        ticker = r["ticker"]
+        direction = r["direction"]
+        price = r.get("entry_price", 0.0)
+        opts_ctx = r.get("options_context") or {}
+        flow_snapshot = r.get("flow_snapshot")
+
+        dp: dict | None = None
+        if r.get("dark_pool_bias") is not None:
+            dp = {
+                "dark_pool_bias": r.get("dark_pool_bias"),
+                "dark_pool_volume": r.get("dark_pool_volume"),
+                "large_print_count": r.get("large_print_count"),
+            }
+
+        npt: dict | None = None
+        if r.get("intraday_premium_direction") is not None:
+            npt = {
+                "intraday_premium_direction": r.get("intraday_premium_direction"),
+                "delta_momentum": r.get("delta_momentum"),
+                "net_delta": r.get("net_delta"),
+            }
+
+        atr_val = None
+        tp = r.get("trade_plan")
+        if tp and tp.get("risk_per_share"):
+            atr_val = tp.get("risk_per_share")
+
+        assessment = run_options_context_shadow(
+            ticker=ticker,
+            direction=direction,
+            price=price,
+            atr=atr_val,
+            flow_row=flow_snapshot,
+            opts_ctx=opts_ctx,
+            dark_pool=dp,
+            net_prem_ticks=npt,
+        )
+        if assessment is not None:
+            n_run += 1
+            r["agent_options_conviction"] = assessment.directional_conviction
+            r["agent_hedging_probability"] = assessment.hedging_probability
+            r["agent_signal_consistency"] = assessment.signal_consistency
+
+    if n_run > 0:
+        print(f"  [agent:options_context] shadow assessed {n_run} candidates")
+
+
+def _run_sr_quality_agent_shadow(results: list[dict]) -> None:
+    """Run the S/R Quality Agent in shadow mode for each final result."""
+    from app.agents.sr_quality import is_agent_available, run_sr_quality_shadow
+
+    if not is_agent_available():
+        return
+
+    n_run = 0
+    for r in results:
+        ticker = r["ticker"]
+        direction = r["direction"]
+        price = r.get("entry_price", 0.0)
+        price_snapshot = r.get("price_snapshot") or {}
+        trade_plan = r.get("trade_plan") or {}
+
+        atr_val = None
+        if trade_plan.get("risk_per_share"):
+            atr_val = trade_plan["risk_per_share"]
+
+        assessment = run_sr_quality_shadow(
+            ticker=ticker,
+            direction=direction,
+            price=price,
+            atr=atr_val,
+            price_snapshot=price_snapshot,
+            trade_plan=trade_plan,
+        )
+        if assessment is not None:
+            n_run += 1
+            r["agent_sr_quality"] = assessment.overall_sr_quality
+            r["agent_sr_key_level_quality"] = assessment.key_level_quality
+
+    if n_run > 0:
+        print(f"  [agent:sr_quality] shadow assessed {n_run} candidates")
+
+
+def _run_trade_plan_agent_shadow(results: list[dict]) -> None:
+    """Run the Trade Plan Agent in shadow mode for each final result."""
+    from app.agents.trade_plan import is_agent_available, run_trade_plan_shadow
+
+    if not is_agent_available():
+        return
+
+    n_run = 0
+    for r in results:
+        ticker = r["ticker"]
+        direction = r["direction"]
+        price = r.get("entry_price", 0.0)
+        price_snapshot = r.get("price_snapshot") or {}
+        trade_plan = r.get("trade_plan") or {}
+        opts_ctx = r.get("options_context") or {}
+
+        atr_val = None
+        if trade_plan.get("risk_per_share"):
+            atr_val = trade_plan["risk_per_share"]
+
+        assessment = run_trade_plan_shadow(
+            ticker=ticker,
+            direction=direction,
+            price=price,
+            atr=atr_val,
+            price_snapshot=price_snapshot,
+            trade_plan=trade_plan,
+            opts_ctx=opts_ctx,
+        )
+        if assessment is not None:
+            n_run += 1
+            r["agent_plan_score"] = assessment.plan_score
+            r["agent_rr_assessment"] = assessment.rr_assessment
+            r["agent_stop_quality"] = assessment.stop_quality
+
+    if n_run > 0:
+        print(f"  [agent:trade_plan] shadow assessed {n_run} candidates")
+
+
+def _run_entry_timing_agent_shadow(results: list[dict]) -> None:
+    """Run the Entry/Timing Agent in shadow mode for each final result."""
+    from app.agents.entry_timing import is_agent_available, run_entry_timing_shadow
+
+    if not is_agent_available():
+        return
+
+    n_run = 0
+    for r in results:
+        ticker = r["ticker"]
+        direction = r["direction"]
+        price = r.get("entry_price", 0.0)
+        price_snapshot = r.get("price_snapshot") or {}
+        trade_plan = r.get("trade_plan") or {}
+        flow_sc = r.get("flow_score_scaled")
+
+        atr_val = None
+        if trade_plan.get("risk_per_share"):
+            atr_val = trade_plan["risk_per_share"]
+
+        assessment = run_entry_timing_shadow(
+            ticker=ticker,
+            direction=direction,
+            price=price,
+            atr=atr_val,
+            price_snapshot=price_snapshot,
+            trade_plan=trade_plan,
+            flow_score=flow_sc,
+        )
+        if assessment is not None:
+            n_run += 1
+            r["agent_entry_score"] = assessment.entry_score
+            r["agent_chasing_risk"] = assessment.chasing_risk
+            r["agent_entry_timing"] = assessment.entry_timing
+
+    if n_run > 0:
+        print(f"  [agent:entry_timing] shadow assessed {n_run} candidates")
+
+
+def _run_devils_advocate_agent_shadow(results: list[dict]) -> None:
+    """Run the Devil's Advocate Agent in shadow mode for each final result."""
+    from app.agents.devils_advocate import is_agent_available, run_devils_advocate_shadow
+
+    if not is_agent_available():
+        return
+
+    n_run = 0
+    for r in results:
+        ticker = r["ticker"]
+        direction = r["direction"]
+        price = r.get("entry_price", 0.0)
+        trade_plan = r.get("trade_plan") or {}
+        price_snapshot = r.get("price_snapshot") or {}
+        flow_snapshot = r.get("flow_snapshot")
+        opts_ctx = r.get("options_context") or {}
+
+        atr_val = None
+        if trade_plan.get("risk_per_share"):
+            atr_val = trade_plan["risk_per_share"]
+
+        assessment = run_devils_advocate_shadow(
+            ticker=ticker,
+            direction=direction,
+            price=price,
+            atr=atr_val,
+            final_score=r.get("final_score"),
+            flow_score=r.get("flow_score_scaled"),
+            price_score=r.get("price_score"),
+            options_score=r.get("options_context_score"),
+            price_snapshot=price_snapshot,
+            trade_plan=trade_plan,
+            flow_snapshot=flow_snapshot,
+            opts_ctx=opts_ctx,
+            counter_trend=bool(r.get("counter_trend")),
+            sector=r.get("sector"),
+        )
+        if assessment is not None:
+            n_run += 1
+            r["agent_risk_score"] = assessment.risk_score
+            r["agent_earnings_risk"] = assessment.earnings_risk
+            r["agent_kill_reasons"] = assessment.kill_reasons
+
+    if n_run > 0:
+        print(f"  [agent:devils_advocate] shadow assessed {n_run} candidates")
+
+
+def _run_orchestrator_shadow(results: list[dict]) -> None:
+    """Run the V3 deterministic orchestrator in shadow mode.
+
+    Reconstructs all 5 agent schema objects from shadow fields on each result
+    dict and passes them to ``compute_agent_conviction()``.  Logs conviction
+    alongside the deterministic ``final_score`` for offline comparison.
+    Does NOT alter any scores used for actual decisions.
+    """
+    from app.agents.orchestrator import compute_agent_conviction
+
+    shadow_dir = Path(__file__).resolve().parents[2] / "data" / "agent_shadow" / "orchestrator"
+    shadow_dir.mkdir(parents=True, exist_ok=True)
+
+    _AGENT_KEYS = [
+        "agent_options_conviction", "agent_sr_quality",
+        "agent_plan_score", "agent_entry_score", "agent_risk_score",
+    ]
+    has_any_agent = any(
+        any(r.get(k) is not None for k in _AGENT_KEYS) for r in results
+    )
+    if not has_any_agent:
+        return
+
+    import json
+    from datetime import datetime as _dt
+    from app.agents.schemas import (
+        DevilsAdvocateAssessment,
+        EntryTimingAssessment,
+        LevelAssessment,
+        OptionsContextAssessment,
+        SRQualityOutput,
+        TradePlanAssessment,
+    )
+
+    def _rebuild_oc(r: dict) -> OptionsContextAssessment | None:
+        if r.get("agent_options_conviction") is None:
+            return None
+        return OptionsContextAssessment(
+            directional_conviction=r["agent_options_conviction"],
+            hedging_probability=r.get("agent_hedging_probability", 0.3),
+            hedging_reasoning="from shadow",
+            signal_consistency=r.get("agent_signal_consistency", "mixed"),
+            consistency_detail="from shadow",
+            gamma_significance="medium", gamma_reasoning="from shadow",
+            wall_impact="neutral", wall_reasoning="from shadow",
+            iv_assessment="fair", iv_reasoning="from shadow",
+            institutional_confidence="medium", institutional_reasoning="from shadow",
+            dark_pool_alignment="no_data", intraday_flow_alignment="no_data",
+            key_concern="none", reasoning="reconstructed from shadow fields",
+        )
+
+    def _rebuild_sr(r: dict) -> SRQualityOutput | None:
+        if r.get("agent_sr_quality") is None:
+            return None
+        _la = LevelAssessment(
+            level_price=0, source="algo", touch_count=0, quality="tactical",
+            confidence=0.5, reasoning="shadow stub", volume_confirmed=False,
+            clean_rejections=False, recently_violated=False,
+        )
+        return SRQualityOutput(
+            support_assessment=_la, resistance_assessment=_la,
+            structural_support_assessment=_la, structural_resistance_assessment=_la,
+            overall_sr_quality=r["agent_sr_quality"],
+            key_level_for_trade=0, invalidation_level=0,
+            key_level_quality=r.get("agent_sr_key_level_quality", "tactical"),
+            key_level_source="algo",
+            reasoning="reconstructed from shadow fields",
+        )
+
+    def _rebuild_tp(r: dict) -> TradePlanAssessment | None:
+        if r.get("agent_plan_score") is None:
+            return None
+        return TradePlanAssessment(
+            stop_quality=r.get("agent_stop_quality", "good"),
+            stop_reasoning="from shadow",
+            t1_quality="good", t1_reasoning="from shadow",
+            t2_quality="good",
+            rr_assessment=r.get("agent_rr_assessment", "favorable"),
+            true_rr_estimate=2.5, hold_time_suggestion=10,
+            hold_reasoning="from shadow", partial_at_t1_pct=0.5,
+            plan_score=r["agent_plan_score"],
+            reasoning="reconstructed from shadow fields",
+        )
+
+    def _rebuild_et(r: dict) -> EntryTimingAssessment | None:
+        if r.get("agent_entry_score") is None:
+            return None
+        return EntryTimingAssessment(
+            entry_timing=r.get("agent_entry_timing", "enter_now"),
+            confidence=0.7,
+            chasing_risk=r.get("agent_chasing_risk", "low"),
+            chasing_reasoning="from shadow",
+            gap_risk="low", gap_reasoning="from shadow",
+            bar_quality="acceptable", bar_reasoning="from shadow",
+            entry_score=r["agent_entry_score"],
+            reasoning="reconstructed from shadow fields",
+        )
+
+    def _rebuild_da(r: dict) -> DevilsAdvocateAssessment | None:
+        if r.get("agent_risk_score") is None:
+            return None
+        return DevilsAdvocateAssessment(
+            risk_score=r["agent_risk_score"],
+            earnings_risk=r.get("agent_earnings_risk", "unknown"),
+            earnings_detail="from shadow",
+            trap_probability=0.3, trap_reasoning="from shadow",
+            liquidity_concern="none", liquidity_reasoning="from shadow",
+            concentration_risk="none", concentration_detail="from shadow",
+            catalyst_type="unknown", catalyst_reasoning="from shadow",
+            crowded_trade_risk="low",
+            kill_reasons=r.get("agent_kill_reasons", []),
+            reasoning="reconstructed from shadow fields",
+        )
+
+    n_run = 0
+    rows: list[dict] = []
+
+    for r in results:
+        orch_result = compute_agent_conviction(
+            sr=_rebuild_sr(r),
+            tp=_rebuild_tp(r),
+            oc=_rebuild_oc(r),
+            et=_rebuild_et(r),
+            da=_rebuild_da(r),
+        )
+
+        r["agent_conviction"] = orch_result.conviction
+        r["agent_vetoed"] = orch_result.vetoed
+        r["agent_veto_reason"] = orch_result.veto_reason
+        r["agent_penalties"] = orch_result.penalties_applied
+        n_run += 1
+
+        rows.append({
+            "ticker": r["ticker"],
+            "direction": r["direction"],
+            "final_score": r.get("final_score"),
+            **orch_result.to_dict(),
+        })
+
+    if n_run > 0:
+        stamp = _dt.utcnow().strftime("%Y%m%d_%H%M%S")
+        log_path = shadow_dir / f"orchestrator_{stamp}.json"
+        with open(log_path, "w") as f:
+            json.dump(rows, f, indent=2, default=str)
+        print(f"  [orchestrator] shadow scored {n_run} candidates → {log_path.name}")
+
+
 DATA_ROOT = Path(__file__).resolve().parents[2] / "data"
 
 
@@ -847,6 +1216,26 @@ def _log_flow_stats(feature_table: pd.DataFrame) -> None:
     header = not stats_path.exists()
     stats_path.parent.mkdir(parents=True, exist_ok=True)
     pd.DataFrame([row]).to_csv(stats_path, mode="a", header=header, index=False)
+
+
+def apply_agent_filter(results: list[dict]) -> list[dict]:
+    """Filter pipeline results using agent orchestrator decisions.
+
+    Returns a new list suitable for ``open_positions(filtered, portfolio="agent")``.
+    Vetoed signals are removed; remaining signals use ``agent_conviction`` for sizing.
+    """
+    filtered: list[dict] = []
+    for r in results:
+        if r.get("agent_vetoed"):
+            continue
+
+        sig = dict(r)
+        conviction = sig.get("agent_conviction")
+        if conviction is not None and conviction > 0:
+            sig["final_score"] = conviction
+        filtered.append(sig)
+
+    return filtered
 
 
 def run_flow_to_price_pipeline(
@@ -1001,6 +1390,14 @@ def run_flow_to_price_pipeline(
     final_results = _enrich_agg_options(final_results)
     final_results = _enrich_net_prem_ticks(final_results)
     final_results = _enrich_dark_pool(final_results)
+
+    # V3 agent shadow: all 5 agents + orchestrator (logged, does NOT modify scores)
+    _run_options_agent_shadow(final_results)
+    _run_sr_quality_agent_shadow(final_results)
+    _run_trade_plan_agent_shadow(final_results)
+    _run_entry_timing_agent_shadow(final_results)
+    _run_devils_advocate_agent_shadow(final_results)
+    _run_orchestrator_shadow(final_results)
 
     final_results = sorted(final_results, key=lambda x: x["final_score"], reverse=True)
     final_results = apply_directional_balance(final_results)

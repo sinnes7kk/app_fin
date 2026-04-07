@@ -1,7 +1,7 @@
 import argparse
 
 from app.config import MAX_POSITIONS
-from app.signals.pipeline import run_flow_to_price_pipeline
+from app.signals.pipeline import apply_agent_filter, run_flow_to_price_pipeline
 from app.signals.positions import open_positions, update_positions
 
 
@@ -170,6 +170,10 @@ def main() -> None:
         print("Updating existing positions...")
         result = update_positions()
         _print_positions({"opened": [], "rotated_out": [], "skipped": []}, result)
+        # Agent shadow portfolio
+        agent_result = update_positions(portfolio="agent")
+        if agent_result["closed"] or agent_result["still_open"]:
+            print(f"  [agent portfolio] {len(agent_result['still_open'])} open, {len(agent_result['closed'])} closed")
         return
 
     out = run_flow_to_price_pipeline(flow_limit=2000, top_n=50, min_premium=50_000, alert_hours_back=48)
@@ -183,6 +187,17 @@ def main() -> None:
 
     update_result = update_positions()
     _print_positions(open_result, update_result)
+
+    # Agent shadow portfolio: same universe, filtered by orchestrator decisions
+    agent_signals = apply_agent_filter(results)
+    agent_open = open_positions(agent_signals, portfolio="agent")
+    agent_update = update_positions(portfolio="agent")
+    n_vetoed = len(results) - len(agent_signals)
+    if n_vetoed > 0 or agent_open["opened"] or agent_update["closed"]:
+        print(f"\n  [agent portfolio] vetoed {n_vetoed} signals, "
+              f"opened {len(agent_open['opened'])}, "
+              f"closed {len(agent_update['closed'])}, "
+              f"open {len(agent_update['still_open'])}")
 
 
 if __name__ == "__main__":

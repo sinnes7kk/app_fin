@@ -3,3 +3,5 @@ python-dotenv
 requests
 yfinance
 flask
+openai>=1.30
+pydantic>=2.0
