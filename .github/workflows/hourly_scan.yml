@@ -55,6 +55,10 @@ jobs:
             data/ranked_candidates/ \
             data/flow_features/ \
             data/market_regime.json \
+            data/positions_agent.json \
+            data/trade_log_agent.csv \
+            data/equity_curve_agent.csv \
+            data/agent_shadow/ \
             || true
           git diff --cached --quiet && echo "No data changes to commit" && exit 0
           git commit -m "auto: hourly scan $(date -u +%Y-%m-%dT%H:%M:%SZ)"
