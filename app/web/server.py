@@ -23,6 +23,7 @@ from app.config import (
     REGIME_THRESHOLD_BOOST,
 )
 from app.features.flow_tracker import compute_multi_day_flow
+from app.features.sentiment_tracker import compute_sentiment_trend
 from app.web.data_access import (
     load_equity_curve,
     load_equity_curve_agent,
@@ -270,6 +271,27 @@ def _prem_mcap_label(bps) -> tuple[str, str]:
     if v >= 0.1:
         return ("Normal", "")
     return ("Minor", "")
+
+
+def _enrich_flow_tracker_sentiment(flow_tracker: list[dict]) -> list[dict]:
+    """Merge sentiment trend data into each Flow Tracker ticker dict."""
+    if not flow_tracker:
+        return flow_tracker
+    tickers = [ft["ticker"] for ft in flow_tracker]
+    sentiment = compute_sentiment_trend(tickers)
+    for ft in flow_tracker:
+        sent = sentiment.get(ft["ticker"], {})
+        ft["sentiment"] = sent if sent else {
+            "combined_label": "neutral",
+            "combined_sentiment": 0.5,
+            "mention_spike": False,
+            "st_messages": 0,
+            "st_mention_trend": "stable",
+            "rd_mentions": 0,
+            "rd_mention_trend": "stable",
+            "daily_mentions": [],
+        }
+    return flow_tracker
 
 
 def _dir_badge_html(direction) -> str:
@@ -1840,8 +1862,10 @@ def index():
             empty_msg="No agent portfolio positions. Agent portfolio populates once the OpenAI API key is configured and agents run.",
         ),
         "perf_agent": perf_agent,
-        # Multi-day flow tracker
-        "flow_tracker": compute_multi_day_flow(FLOW_TRACKER_LOOKBACK_DAYS, FLOW_TRACKER_MIN_ACTIVE_DAYS),
+        # Multi-day flow tracker enriched with sentiment
+        "flow_tracker": _enrich_flow_tracker_sentiment(
+            compute_multi_day_flow(FLOW_TRACKER_LOOKBACK_DAYS, FLOW_TRACKER_MIN_ACTIVE_DAYS)
+        ),
         "flow_tracker_lookback": FLOW_TRACKER_LOOKBACK_DAYS,
     }
     return render_template("index.html", **ctx)

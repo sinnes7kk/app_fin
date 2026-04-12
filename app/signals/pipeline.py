@@ -1297,6 +1297,16 @@ def run_flow_to_price_pipeline(
         from app.features.flow_tracker import save_screener_snapshot
         save_screener_snapshot(screener_rows)
 
+        # Fetch social sentiment for tickers that qualify on the multi-day tracker
+        try:
+            from app.features.flow_tracker import compute_multi_day_flow
+            from app.features.sentiment_tracker import fetch_and_save_sentiment
+            qualified = compute_multi_day_flow()
+            if qualified:
+                fetch_and_save_sentiment([t["ticker"] for t in qualified])
+        except Exception as se:
+            print(f"  [sentiment] skipped: {se}")
+
         for sr in screener_rows:
             sym = (sr.get("ticker") or "").upper().strip()
             if sym and sym not in NON_EQUITY_TICKERS:

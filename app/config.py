@@ -86,6 +86,11 @@ SIZING_TIERS = [
 FLOW_TRACKER_LOOKBACK_DAYS = 5
 FLOW_TRACKER_MIN_ACTIVE_DAYS = 2
 
+# Sentiment APIs (optional — gracefully skipped if missing)
+STOCKTWITS_API_KEY = os.environ.get("STOCKTWITS_API_KEY", "")
+REDDIT_USER_AGENT = "flow_tracker/1.0 by app_fin"
+REDDIT_SUBREDDITS = ["wallstreetbets", "options", "stocks", "investing"]
+
 # Position health and rotation
 HEALTH_STRONG_THRESHOLD = 7
 HEALTH_WEAK_THRESHOLD = 4

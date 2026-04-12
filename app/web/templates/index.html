@@ -507,6 +507,16 @@
               {% else %}
                 <span class="badge" style="background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.5)">Steady</span>
               {% endif %}
+              {% if ft.sentiment %}
+                {% if ft.sentiment.combined_label == "bullish" %}
+                  <span class="badge" style="background:rgba(63,185,80,0.15);color:#3fb950" title="Social sentiment">Bullish Sentiment</span>
+                {% elif ft.sentiment.combined_label == "bearish" %}
+                  <span class="badge" style="background:rgba(248,81,73,0.15);color:#f85149" title="Social sentiment">Bearish Sentiment</span>
+                {% endif %}
+                {% if ft.sentiment.mention_spike %}
+                  <span class="badge" style="background:rgba(255,152,0,0.18);color:#ff9800" title="Today's mentions are 2x+ the window average">Mention Spike</span>
+                {% endif %}
+              {% endif %}
             </span>
           </header>
           <dl class="card-metrics">
@@ -550,16 +560,56 @@
             <dt>IV Rank</dt><dd>{{ ft.latest_iv_rank }}</dd>
             <dt>P/C Ratio</dt><dd>{{ ft.latest_put_call_ratio }}</dd>
             <dt>Price</dt><dd>${{ "%.2f"|format(ft.latest_close) }}</dd>
-          </dl>
-          <div class="ft-sparkline" title="Daily premium">
-            {% set max_prem = ft.daily_snapshots | map(attribute='premium') | max %}
-            {% for snap in ft.daily_snapshots %}
-              {% if max_prem and max_prem > 0 %}
-                <div class="ft-bar{% if not snap.active %} ft-bar-empty{% endif %}" style="height:{{ (snap.premium / max_prem * 100) | int }}%" title="{{ snap.date }}: ${{ '{:,.0f}'.format(snap.premium) }}"></div>
+            {% if ft.sentiment and (ft.sentiment.st_messages or ft.sentiment.rd_mentions) %}
+            <dt>StockTwits</dt>
+            <dd>
+              {{ ft.sentiment.st_messages }} msgs
+              {% if ft.sentiment.st_mention_trend == "growing" %}
+                <span style="color:#3fb950">&#x25B2;</span>
+              {% elif ft.sentiment.st_mention_trend == "declining" %}
+                <span style="color:#f85149">&#x25BC;</span>
+              {% elif ft.sentiment.st_mention_trend == "new" %}
+                <span style="color:#ff9800">NEW</span>
               {% else %}
-                <div class="ft-bar ft-bar-empty" style="height:5%" title="{{ snap.date }}"></div>
+                <span style="opacity:0.4">&#x2500;</span>
               {% endif %}
-            {% endfor %}
+            </dd>
+            <dt>Reddit</dt>
+            <dd>
+              {{ ft.sentiment.rd_mentions }} mentions
+              {% if ft.sentiment.rd_mention_trend == "growing" %}
+                <span style="color:#3fb950">&#x25B2;</span>
+              {% elif ft.sentiment.rd_mention_trend == "declining" %}
+                <span style="color:#f85149">&#x25BC;</span>
+              {% elif ft.sentiment.rd_mention_trend == "new" %}
+                <span style="color:#ff9800">NEW</span>
+              {% else %}
+                <span style="opacity:0.4">&#x2500;</span>
+              {% endif %}
+            </dd>
+            {% endif %}
+          </dl>
+          <div class="ft-sparkline-row">
+            <div class="ft-sparkline" title="Daily premium">
+              {% set max_prem = ft.daily_snapshots | map(attribute='premium') | max %}
+              {% for snap in ft.daily_snapshots %}
+                {% if max_prem and max_prem > 0 %}
+                  <div class="ft-bar{% if not snap.active %} ft-bar-empty{% endif %}" style="height:{{ (snap.premium / max_prem * 100) | int }}%" title="{{ snap.date }}: ${{ '{:,.0f}'.format(snap.premium) }}"></div>
+                {% else %}
+                  <div class="ft-bar ft-bar-empty" style="height:5%" title="{{ snap.date }}"></div>
+                {% endif %}
+              {% endfor %}
+            </div>
+            {% if ft.sentiment and ft.sentiment.daily_mentions %}
+              {% set max_ment = ft.sentiment.daily_mentions | map(attribute='total') | max %}
+              {% if max_ment and max_ment > 0 %}
+              <div class="ft-sparkline ft-sparkline--sentiment" title="Daily social mentions">
+                {% for m in ft.sentiment.daily_mentions %}
+                  <div class="ft-bar ft-bar--mention{% if m.total == 0 %} ft-bar-empty{% endif %}" style="height:{{ (m.total / max_ment * 100) | int }}%" title="{{ m.date }}: {{ m.total }} mentions (ST:{{ m.st }}, RD:{{ m.rd }})"></div>
+                {% endfor %}
+              </div>
+              {% endif %}
+            {% endif %}
           </div>
         </article>
         {% endfor %}
@@ -1593,6 +1643,18 @@
 
       function fmtDollar(v) { if (!v && v !== 0) return "—"; if (v >= 1e9) return "$" + (v / 1e9).toFixed(2) + "B"; if (v >= 1e6) return "$" + (v / 1e6).toFixed(2) + "M"; if (v >= 1e3) return "$" + (v / 1e3).toFixed(1) + "K"; return "$" + v.toFixed(0); }
 
+      function _sentimentBadge(label) {
+        if (label === "bullish") return '<span class="badge badge-long">Bullish</span>';
+        if (label === "bearish") return '<span class="badge badge-short">Bearish</span>';
+        return '<span class="badge" style="opacity:0.5">Neutral</span>';
+      }
+      function _trendArrow(t) {
+        if (t === "growing") return '<span style="color:#3fb950">&#x25B2; growing</span>';
+        if (t === "declining") return '<span style="color:#f85149">&#x25BC; declining</span>';
+        if (t === "new") return '<span style="color:#ff9800">NEW</span>';
+        return '<span style="opacity:0.5">stable</span>';
+      }
+
       function ftSummaryHtml(d) {
         var trendCls = d.trend === "accelerating" ? "positive" : d.trend === "fading" ? "negative" : "";
         var dirCls = d.direction === "BULLISH" ? "badge-long" : "badge-short";
@@ -1614,6 +1676,25 @@
         html += '<dt>Net premium</dt><dd>' + fmtDollar(d.cumulative_net) + '</dd>';
         html += '<dt>Market cap</dt><dd>' + fmtDollar(d.marketcap) + '</dd>';
         html += '</dl>';
+
+        var s = d.sentiment;
+        if (s && (s.st_messages || s.rd_mentions)) {
+          html += '<h3 style="margin:1.2rem 0 0.5rem;font-size:0.9rem;color:rgba(255,255,255,0.6);border-top:1px solid rgba(255,255,255,0.08);padding-top:0.8rem">Social Sentiment</h3>';
+          html += '<dl class="card-metrics" style="column-count:2;column-gap:2rem">';
+          html += '<dt>Combined sentiment</dt><dd>' + _sentimentBadge(s.combined_label) + ' <span style="opacity:0.5;font-size:0.8rem">(' + (s.combined_sentiment * 100).toFixed(0) + '%)</span></dd>';
+          html += '<dt>Mention spike</dt><dd>' + (s.mention_spike ? '<span style="color:#ff9800;font-weight:600">Yes — 2x+ avg</span>' : '<span style="opacity:0.5">No</span>') + '</dd>';
+          html += '<dt>StockTwits messages</dt><dd>' + (s.st_messages || 0) + ' ' + _trendArrow(s.st_mention_trend) + '</dd>';
+          html += '<dt>ST sentiment</dt><dd>' + ((s.st_sentiment || 0.5) * 100).toFixed(0) + '% bullish (' + (s.st_bullish || 0) + 'B / ' + (s.st_bearish || 0) + 'b)</dd>';
+          html += '<dt>Reddit mentions</dt><dd>' + (s.rd_mentions || 0) + ' ' + _trendArrow(s.rd_mention_trend) + '</dd>';
+          html += '<dt>Reddit posts</dt><dd>' + (s.rd_posts || 0) + '</dd>';
+          html += '<dt>Reddit comments</dt><dd>' + (s.rd_comments || 0) + '</dd>';
+          html += '<dt>Top subreddit</dt><dd>r/' + escHtml(s.rd_top_sub || "—") + '</dd>';
+          html += '<dt>Reddit lean</dt><dd>' + _sentimentBadge(s.rd_sentiment) + '</dd>';
+          html += '</dl>';
+        } else {
+          html += '<p style="margin-top:1rem;opacity:0.4;font-size:0.85rem">Social sentiment data not yet available. Configure StockTwits/Reddit API keys to enable.</p>';
+        }
+
         return html;
       }
 
