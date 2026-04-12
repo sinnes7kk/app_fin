@@ -16,7 +16,13 @@ import numpy as np
 import pandas as pd
 from flask import Flask, jsonify, render_template, request
 
-from app.config import MIN_FINAL_SCORE, REGIME_THRESHOLD_BOOST
+from app.config import (
+    FLOW_TRACKER_LOOKBACK_DAYS,
+    FLOW_TRACKER_MIN_ACTIVE_DAYS,
+    MIN_FINAL_SCORE,
+    REGIME_THRESHOLD_BOOST,
+)
+from app.features.flow_tracker import compute_multi_day_flow
 from app.web.data_access import (
     load_equity_curve,
     load_equity_curve_agent,
@@ -1834,6 +1840,9 @@ def index():
             empty_msg="No agent portfolio positions. Agent portfolio populates once the OpenAI API key is configured and agents run.",
         ),
         "perf_agent": perf_agent,
+        # Multi-day flow tracker
+        "flow_tracker": compute_multi_day_flow(FLOW_TRACKER_LOOKBACK_DAYS, FLOW_TRACKER_MIN_ACTIVE_DAYS),
+        "flow_tracker_lookback": FLOW_TRACKER_LOOKBACK_DAYS,
     }
     return render_template("index.html", **ctx)
 

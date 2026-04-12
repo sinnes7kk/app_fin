@@ -1292,6 +1292,11 @@ def run_flow_to_price_pipeline(
     screener_meta: dict[str, dict] = {}
     try:
         screener_rows = fetch_stock_screener()
+
+        # Persist screener snapshot for multi-day flow tracker
+        from app.features.flow_tracker import save_screener_snapshot
+        save_screener_snapshot(screener_rows)
+
         for sr in screener_rows:
             sym = (sr.get("ticker") or "").upper().strip()
             if sym and sym not in NON_EQUITY_TICKERS:

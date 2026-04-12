@@ -1460,6 +1460,49 @@ dl.detail-grid dd {
 .gauge-bear { background: var(--red); }
 .gauge-neutral { background: var(--muted); }
 
+/* ── Flow Tracker ── */
+.ft-day-bar {
+  display: inline-flex;
+  gap: 3px;
+  align-items: center;
+  vertical-align: middle;
+}
+.ft-day-seg {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+}
+.ft-day-active {
+  background: var(--accent);
+}
+.ft-day-empty {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+.ft-sparkline {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 36px;
+  margin-top: 0.5rem;
+  padding-top: 0.25rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+.ft-bar {
+  flex: 1;
+  min-height: 2px;
+  border-radius: 2px 2px 0 0;
+  background: var(--accent);
+  opacity: 0.8;
+  transition: opacity 0.15s;
+}
+.ft-bar:hover { opacity: 1; }
+.ft-bar-empty {
+  background: rgba(255, 255, 255, 0.06);
+  opacity: 0.4;
+}
+
 @media (max-width: 900px) {
   .search-details-triple { grid-template-columns: 1fr 1fr; }
 }

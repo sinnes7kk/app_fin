@@ -128,3 +128,17 @@ def load_equity_curve_agent() -> pd.DataFrame:
         return pd.read_csv(p)
     except Exception:
         return pd.DataFrame()
+
+
+# ---------------------------------------------------------------------------
+# Screener snapshots (flow tracker)
+# ---------------------------------------------------------------------------
+
+def load_screener_snapshots() -> pd.DataFrame:
+    p = DATA_ROOT / "screener_snapshots.csv"
+    if not p.is_file():
+        return pd.DataFrame()
+    try:
+        return pd.read_csv(p)
+    except Exception:
+        return pd.DataFrame()

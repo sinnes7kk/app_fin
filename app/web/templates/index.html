@@ -56,6 +56,10 @@
           <span class="nav-icon">&#9889;</span> Unusual Flow
           {% if alerts_count %}<span class="nav-badge">{{ alerts_count }}</span>{% endif %}
         </button>
+        <button class="nav-item" data-tab="flow-tracker">
+          <span class="nav-icon">&#9850;</span> Flow Tracker
+          {% if flow_tracker %}<span class="nav-badge">{{ flow_tracker | length }}</span>{% endif %}
+        </button>
       </div>
 
       <div class="nav-section">
@@ -457,6 +461,115 @@
       <div id="alerts-table-wrap">
         {{ alerts_html | safe }}
       </div>
+    </section>
+
+    <!-- ═══════ FLOW TRACKER ═══════ -->
+    <section id="panel-flow-tracker" class="panel" role="tabpanel">
+      <h1 class="panel-title">Flow Tracker</h1>
+      <p class="tab-intro">Tickers with <strong>repeat unusual options activity</strong> over the last {{ flow_tracker_lookback }} trading days. Only tickers flagged by the UW screener on 2+ distinct days appear here. Ranked by persistence-weighted premium / market cap.</p>
+
+      {% if flow_tracker %}
+      <div class="perf-grid" style="margin-bottom:1.2rem">
+        <div class="perf-card">
+          <span class="perf-label">Qualified tickers</span>
+          <span class="perf-value">{{ flow_tracker | length }}</span>
+        </div>
+        <div class="perf-card">
+          <span class="perf-label">3+ active days</span>
+          <span class="perf-value">{{ flow_tracker | selectattr('active_days', 'ge', 3) | list | length }}</span>
+        </div>
+        <div class="perf-card">
+          <span class="perf-label">Top accumulator</span>
+          <span class="perf-value" style="font-size:1rem">{{ flow_tracker[0].ticker }}</span>
+        </div>
+        <div class="perf-card">
+          <span class="perf-label">Window</span>
+          <span class="perf-value">{{ flow_tracker_lookback }} days</span>
+        </div>
+      </div>
+
+      <div class="data-card-list" id="ft-card-list">
+        {% for ft in flow_tracker %}
+        <article class="data-card data-card--interactive" data-ticker="{{ ft.ticker }}" style="cursor:pointer">
+          <header class="data-card-header data-card-head">
+            <strong class="data-card-ticker">{{ ft.ticker }}</strong>
+            <span class="data-card-badges">
+              <span class="badge" style="opacity:0.7;font-size:0.7rem">{{ ft.sector }}</span>
+              {% if ft.direction == "BULLISH" %}
+                <span class="badge badge-long">NET BULLISH</span>
+              {% else %}
+                <span class="badge badge-short">NET BEARISH</span>
+              {% endif %}
+              {% if ft.trend == "accelerating" %}
+                <span class="badge" style="background:rgba(63,185,80,0.15);color:#3fb950">Accelerating</span>
+              {% elif ft.trend == "fading" %}
+                <span class="badge" style="background:rgba(248,81,73,0.15);color:#f85149">Fading</span>
+              {% else %}
+                <span class="badge" style="background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.5)">Steady</span>
+              {% endif %}
+            </span>
+          </header>
+          <dl class="card-metrics">
+            <dt>Cumulative premium</dt>
+            <dd>
+              ${{ "{:,.0f}".format(ft.cumulative_premium) }}
+              <span style="opacity:0.5;font-size:0.75rem;margin-left:0.3rem">({{ ft.bull_pct }}% bull)</span>
+            </dd>
+            <dt>Prem/Mcap</dt>
+            <dd>
+              {{ "%.2f"|format(ft.prem_mcap_bps) }} bps
+              {% if ft.prem_mcap_bps > 5 %}
+                <span style="color:#ff9800;font-weight:600;margin-left:0.3rem">Outsized</span>
+              {% elif ft.prem_mcap_bps > 1 %}
+                <span style="color:#4fc3f7;font-weight:600;margin-left:0.3rem">Notable</span>
+              {% elif ft.prem_mcap_bps > 0.1 %}
+                <span style="opacity:0.6;margin-left:0.3rem">Normal</span>
+              {% else %}
+                <span style="opacity:0.4;margin-left:0.3rem">Minor</span>
+              {% endif %}
+            </dd>
+            <dt>Active days</dt>
+            <dd>
+              <span class="ft-day-bar">
+                {% for snap in ft.daily_snapshots %}
+                  {% if snap.active %}
+                    <span class="ft-day-seg ft-day-active" title="{{ snap.date }}: ${{ '{:,.0f}'.format(snap.premium) }}"></span>
+                  {% else %}
+                    <span class="ft-day-seg ft-day-empty" title="{{ snap.date }}: no flow"></span>
+                  {% endif %}
+                {% endfor %}
+              </span>
+              <span style="margin-left:0.4rem">{{ ft.active_days }}/{{ ft.total_days }}</span>
+            </dd>
+            <dt>Avg vol vs 30d</dt>
+            <dd>{{ "%.1f"|format(ft.avg_vol_ratio_30d) }}x</dd>
+            <dt>OI change</dt>
+            <dd class="{{ 'positive' if ft.latest_oi_change > 0 else 'negative' if ft.latest_oi_change < 0 else '' }}">
+              {{ "%+.1f"|format(ft.latest_oi_change) }}%
+            </dd>
+            <dt>IV Rank</dt><dd>{{ ft.latest_iv_rank }}</dd>
+            <dt>P/C Ratio</dt><dd>{{ ft.latest_put_call_ratio }}</dd>
+            <dt>Price</dt><dd>${{ "%.2f"|format(ft.latest_close) }}</dd>
+          </dl>
+          <div class="ft-sparkline" title="Daily premium">
+            {% set max_prem = ft.daily_snapshots | map(attribute='premium') | max %}
+            {% for snap in ft.daily_snapshots %}
+              {% if max_prem and max_prem > 0 %}
+                <div class="ft-bar{% if not snap.active %} ft-bar-empty{% endif %}" style="height:{{ (snap.premium / max_prem * 100) | int }}%" title="{{ snap.date }}: ${{ '{:,.0f}'.format(snap.premium) }}"></div>
+              {% else %}
+                <div class="ft-bar ft-bar-empty" style="height:5%" title="{{ snap.date }}"></div>
+              {% endif %}
+            {% endfor %}
+          </div>
+        </article>
+        {% endfor %}
+      </div>
+
+      <div id="detail-flow-tracker" class="detail-panel" style="display:none"></div>
+
+      {% else %}
+      <p class="empty">No tickers with repeat unusual flow detected yet. The tracker requires at least 2 days of screener data to identify sustained activity. Data accumulates with each scan.</p>
+      {% endif %}
     </section>
 
     <!-- ═══════ TRADE LOG ═══════ -->
@@ -1459,6 +1572,87 @@
       if (rejPanel) wirePanelCardClicks(rejPanel, "detail-rejected", "rejected", IDX.rejected);
       if (wlPanel) wirePanelCardClicks(wlPanel, "detail-watchlist", "watchlist", IDX.watchlist);
       if (posPanel) wirePanelCardClicks(posPanel, "detail-positions", "position", POSITIONS_IDX);
+    })();
+
+    /* ── Flow Tracker detail modal ── */
+    (function () {
+      var ftList = document.getElementById("ft-card-list");
+      var ftPanel = document.getElementById("detail-flow-tracker");
+      if (!ftList || !ftPanel) return;
+
+      var ftData = {{ flow_tracker | default([], true) | tojson }};
+      var ftIdx = {};
+      ftData.forEach(function (d) { ftIdx[d.ticker] = d; });
+
+      function ftSubtabBar() {
+        return '<div class="detail-subtabs" role="tablist">' +
+          '<button type="button" class="detail-subtab active" role="tab" aria-selected="true" data-subtab="summary">Flow Summary</button>' +
+          '<button type="button" class="detail-subtab" role="tab" aria-selected="false" data-subtab="chart">Chart</button>' +
+          '</div>';
+      }
+
+      function fmtDollar(v) { if (!v && v !== 0) return "—"; if (v >= 1e9) return "$" + (v / 1e9).toFixed(2) + "B"; if (v >= 1e6) return "$" + (v / 1e6).toFixed(2) + "M"; if (v >= 1e3) return "$" + (v / 1e3).toFixed(1) + "K"; return "$" + v.toFixed(0); }
+
+      function ftSummaryHtml(d) {
+        var trendCls = d.trend === "accelerating" ? "positive" : d.trend === "fading" ? "negative" : "";
+        var dirCls = d.direction === "BULLISH" ? "badge-long" : "badge-short";
+        var html = '<dl class="card-metrics" style="column-count:2;column-gap:2rem">';
+        html += '<dt>Direction</dt><dd><span class="badge ' + dirCls + '">NET ' + d.direction + '</span></dd>';
+        html += '<dt>Cumulative premium</dt><dd>' + fmtDollar(d.cumulative_premium) + ' <span style="opacity:0.5;font-size:0.8rem">(' + d.bull_pct + '% bull)</span></dd>';
+        html += '<dt>Prem/Mcap</dt><dd>' + d.prem_mcap_bps.toFixed(2) + ' bps</dd>';
+        html += '<dt>Active days</dt><dd>' + d.active_days + ' / ' + d.total_days + '</dd>';
+        html += '<dt>Persistence</dt><dd>' + (d.persistence_ratio * 100).toFixed(0) + '%</dd>';
+        html += '<dt>Trend</dt><dd class="' + trendCls + '">' + d.trend + '</dd>';
+        html += '<dt>Avg vol vs 30d</dt><dd>' + d.avg_vol_ratio_30d.toFixed(1) + 'x</dd>';
+        html += '<dt>OI change</dt><dd class="' + (d.latest_oi_change > 0 ? "positive" : d.latest_oi_change < 0 ? "negative" : "") + '">' + (d.latest_oi_change > 0 ? "+" : "") + d.latest_oi_change.toFixed(1) + '%</dd>';
+        html += '<dt>IV Rank</dt><dd>' + d.latest_iv_rank + '</dd>';
+        html += '<dt>P/C Ratio</dt><dd>' + d.latest_put_call_ratio + '</dd>';
+        html += '<dt>Price</dt><dd>$' + d.latest_close.toFixed(2) + '</dd>';
+        html += '<dt>Sector</dt><dd>' + (d.sector || "—") + '</dd>';
+        html += '<dt>Bullish premium</dt><dd>' + fmtDollar(d.cumulative_bull) + '</dd>';
+        html += '<dt>Bearish premium</dt><dd>' + fmtDollar(d.cumulative_bear) + '</dd>';
+        html += '<dt>Net premium</dt><dd>' + fmtDollar(d.cumulative_net) + '</dd>';
+        html += '<dt>Market cap</dt><dd>' + fmtDollar(d.marketcap) + '</dd>';
+        html += '</dl>';
+        return html;
+      }
+
+      function ftPanelsHtml(d, ticker) {
+        return '<div class="detail-subtab-panel active" data-panel="summary">' + ftSummaryHtml(d) + '</div>' +
+          '<div class="detail-subtab-panel" data-panel="chart"><div class="tv-chart-wrap" id="tv-chart-ft-' + escHtml(ticker) + '"></div></div>';
+      }
+
+      ftList.addEventListener("click", function (e) {
+        var head = e.target.closest(".data-card-head");
+        if (!head) return;
+        var card = head.closest("article.data-card--interactive");
+        if (!card || !ftList.contains(card)) return;
+        var ticker = card.getAttribute("data-ticker");
+        if (!ticker) return;
+
+        if (ftPanel.classList.contains("detail-panel--modal-open") && ftPanel.getAttribute("data-ticker") === ticker) {
+          closeTickerDetailModal(ftPanel); return;
+        }
+        document.querySelectorAll(".detail-panel.detail-panel--modal-open").forEach(closeTickerDetailModal);
+
+        var d = ftIdx[ticker];
+        var body;
+        if (d) {
+          body = '<div class="detail-subtabs-wrap">' + ftSubtabBar() + '<div class="detail-subtab-panels">' + ftPanelsHtml(d, ticker) + '</div></div>';
+        } else {
+          body = '<p class="empty">No detail for ' + escHtml(ticker) + '.</p>';
+        }
+        ftPanel.innerHTML = wrapDetailModal(
+          '<div class="detail-header"><span class="detail-ticker">' + escHtml(ticker) + '</span><button type="button" class="detail-close" aria-label="Close">&times;</button></div>' +
+          '<div class="detail-body">' + body + '</div>'
+        );
+        bindDetailSubtabs(ftPanel);
+        attachModalClose(ftPanel);
+        ftPanel.setAttribute("data-ticker", ticker);
+        ftPanel.classList.add("detail-panel--modal-open");
+        ftPanel.style.display = "flex";
+        document.body.style.overflow = "hidden";
+      });
     })();
 
     /* ── Filter system ── */

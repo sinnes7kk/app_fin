@@ -82,6 +82,10 @@ SIZING_TIERS = [
     (7.0, 0.015),   # score >= 7.0 → risk 1.5%
 ]
 
+# Multi-day flow tracker
+FLOW_TRACKER_LOOKBACK_DAYS = 5
+FLOW_TRACKER_MIN_ACTIVE_DAYS = 2
+
 # Position health and rotation
 HEALTH_STRONG_THRESHOLD = 7
 HEALTH_WEAK_THRESHOLD = 4
