@@ -37,10 +37,10 @@
     "health": 7.59,
     "health_state": "STRONG",
     "health_at_entry": 6.74,
-    "health_prev": 7.41,
-    "health_delta": 0.18,
+    "health_prev": 7.59,
+    "health_delta": 0.0,
     "last_rotation_date": null,
-    "re_entry_score": 4.64,
+    "re_entry_score": 4.65,
     "conviction": 6.54,
     "unrealized_r": 1.64,
     "health_components": {
@@ -48,7 +48,7 @@
       "structure": 2.0,
       "momentum": 1.0,
       "target_distance": 0.492,
-      "options": 1.443,
+      "options": 1.44,
       "decay_penalty": 0.0,
       "stop_penalty": 0.0
     },
