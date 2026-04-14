@@ -1020,6 +1020,9 @@ table.data.compact th, table.data.compact td { padding: 0.3rem 0.45rem; }
 .flow-components td:first-child { color: var(--text); }
 .flow-components td:nth-child(2) { color: var(--muted); font-size: 0.72rem; }
 .flow-components td:nth-child(3) { font-family: "SF Mono", "Fira Code", monospace; }
+.flow-score-cell { font-family: "SF Mono", "Fira Code", monospace; font-size: 0.74rem; color: var(--accent, #8bb4f0); }
+.flow-total-row td { border-top: 1px solid rgba(255,255,255,0.15); padding-top: 0.4rem; }
+.flow-total-row .flow-score-cell { color: var(--text); }
 
 .flow-desc {
   display: block;

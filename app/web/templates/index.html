@@ -1173,28 +1173,41 @@
       return '<span class="rating rating-weak">weak</span>';
     }
 
+    function _clipScale(v, floor, ceiling) {
+      if (ceiling === floor) return 0.5;
+      var clamped = Math.min(Math.max(v, floor), ceiling);
+      return (clamped - floor) / (ceiling - floor);
+    }
+
     function _buildFlowComponentTable(m) {
       var dir = _dirPrefix(m);
+      var l1p = Math.log1p;
       var components = [
-        { name: "Flow intensity", weight: "25%", val: _num(m[dir + "_flow_intensity"]) * 10000, fmtFn: function(v){ return v.toFixed(2) + " bps"; }, thresh: [0.6, 0.15], desc: "Directional options premium as basis points of market cap" },
-        { name: "Premium / trade", weight: "15%", val: _num(m[dir + "_ppt_bps"]), fmtFn: function(v){ return v.toFixed(3) + " bps"; }, thresh: [0.3, 0.03], desc: "Avg per-trade premium as basis points of market cap" },
-        { name: "Vol / OI ratio", weight: "15%", val: _num(m[dir + "_vol_oi"]), fmtFn: fmt, thresh: [2.0, 1.0], desc: "Today\u2019s volume vs open interest" },
-        { name: "Flow velocity", weight: "13%", val: _num(m.flow_velocity), fmtFn: fmt, thresh: [2.0, 1.0], desc: "Rate of premium acceleration" },
-        { name: "Repeat flow count", weight: "12%", val: _num(m.repeat_flow_count), fmtFn: fmt, thresh: [5, 3], desc: "Separate trades in same direction" },
-        { name: "Sweep count", weight: "10%", val: _num(m[dir + "_sweep_count"]), fmtFn: fmt, thresh: [5, 1], desc: "Multi-exchange sweeps" },
-        { name: "DTE quality", weight: "5%", val: _num(m.dte_score), fmtFn: fmt, thresh: [0.8, 0.5], desc: "Expiration profile quality" },
-        { name: "Breadth", weight: "5%", val: _num(m[dir + "_breadth"]), fmtFn: fmt, thresh: [0.5, 0.2], desc: "Strike diversity" }
+        { name: "Flow intensity", w: 0.25, weight: "25%", val: _num(m[dir + "_flow_intensity"]) * 10000, fmtFn: function(v){ return v.toFixed(2) + " bps"; }, thresh: [0.6, 0.15], scoreFn: function(v){ return _clipScale(l1p(v), l1p(0.01), l1p(1.0)); }, desc: "Directional options premium as basis points of market cap" },
+        { name: "Premium / trade", w: 0.15, weight: "15%", val: _num(m[dir + "_ppt_bps"]), fmtFn: function(v){ return v.toFixed(3) + " bps"; }, thresh: [0.3, 0.03], scoreFn: function(v){ return _clipScale(l1p(v), l1p(0.005), l1p(0.5)); }, desc: "Avg per-trade premium as basis points of market cap" },
+        { name: "Vol / OI ratio", w: 0.15, weight: "15%", val: _num(m[dir + "_vol_oi"]), fmtFn: fmt, thresh: [2.0, 1.0], scoreFn: function(v){ return _clipScale(v, 0.5, 3.0); }, desc: "Today\u2019s volume vs open interest" },
+        { name: "Flow velocity", w: 0.13, weight: "13%", val: _num(m.flow_velocity), fmtFn: fmt, thresh: [2.0, 1.0], scoreFn: function(v){ return _clipScale(v, 0.0, 3.0); }, desc: "Rate of premium acceleration" },
+        { name: "Repeat flow count", w: 0.12, weight: "12%", val: _num(m.repeat_flow_count), fmtFn: fmt, thresh: [5, 3], scoreFn: function(v){ return _clipScale(v, 1.0, 10.0); }, desc: "Separate trades in same direction" },
+        { name: "Sweep count", w: 0.10, weight: "10%", val: _num(m[dir + "_sweep_count"]), fmtFn: fmt, thresh: [5, 1], scoreFn: function(v){ return _clipScale(v, 0.0, 8.0); }, desc: "Multi-exchange sweeps" },
+        { name: "DTE quality", w: 0.05, weight: "5%", val: _num(m.dte_score), fmtFn: fmt, thresh: [0.8, 0.5], scoreFn: function(v){ return _clipScale(v, 0.3, 1.0); }, desc: "Expiration profile quality" },
+        { name: "Breadth", w: 0.05, weight: "5%", val: _num(m[dir + "_breadth"]), fmtFn: fmt, thresh: [0.5, 0.2], scoreFn: function(v){ return _clipScale(v, 0.1, 0.8); }, desc: "Strike diversity" }
       ];
       var allZero = components.every(function(c) { return c.val === 0; });
       var flowScore = _num(m.flow_score_scaled);
       if (allZero && flowScore > 3) {
         return '<div class="detail-section"><h4>Flow score components</h4><p class="tab-intro">Component breakdown unavailable for this watchlist entry. Flow score (' + flowScore.toFixed(2) + '/10) was computed at discovery.</p></div>';
       }
-      var html = '<div class="detail-section"><h4>Flow score components</h4><table class="flow-components"><thead><tr><th>Component</th><th>Weight</th><th>Value</th><th>Rating</th></tr></thead><tbody>';
+      var html = '<div class="detail-section"><h4>Flow score components</h4><table class="flow-components"><thead><tr><th>Component</th><th>Weight</th><th>Value</th><th>Score</th><th>Rating</th></tr></thead><tbody>';
+      var computedTotal = 0;
       for (var i = 0; i < components.length; i++) {
         var c = components[i];
-        html += "<tr><td>" + escHtml(c.name) + (c.desc ? '<br><span class="flow-desc">' + escHtml(c.desc) + '</span>' : '') + "</td><td>" + c.weight + "</td><td>" + c.fmtFn(c.val) + "</td><td>" + _flowRating(c.val, c.thresh) + "</td></tr>";
+        var norm = c.scoreFn(c.val);
+        var pts = c.w * norm * 10;
+        computedTotal += pts;
+        var maxPts = c.w * 10;
+        html += "<tr><td>" + escHtml(c.name) + (c.desc ? '<br><span class="flow-desc">' + escHtml(c.desc) + '</span>' : '') + "</td><td>" + c.weight + "</td><td>" + c.fmtFn(c.val) + '</td><td class="flow-score-cell">' + pts.toFixed(2) + " / " + maxPts.toFixed(1) + "</td><td>" + _flowRating(c.val, c.thresh) + "</td></tr>";
       }
+      html += '<tr class="flow-total-row"><td colspan="3"><strong>Total</strong></td><td class="flow-score-cell"><strong>' + computedTotal.toFixed(2) + ' / 10</strong></td><td></td></tr>';
       html += "</tbody></table></div>";
       return html;
     }
@@ -1205,8 +1218,6 @@
       var dir = _dirPrefix(m);
       parts.push(buildConvictionVerdict(m));
       parts.push(_buildFlowComponentTable(m));
-      var flowScore = _num(m.flow_score_scaled);
-      if (flowScore) parts.push('<p class="batch-note">Flow score ' + flowScore.toFixed(2) + "/10.</p>");
       var flowFactors = buildFlowFactors(m);
       var flowPass = flowFactors.filter(function (f) { return f.pass; });
       var flowFail = flowFactors.filter(function (f) { return !f.pass; });
