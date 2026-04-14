@@ -1,3 +1,6 @@
 ticker,direction,pattern,entry_date,exit_date,entry_price,exit_price,shares,risk_pct,pnl_pct,pnl_dollar,r_multiple,days_held,exit_reason,trail_method,final_score,flow_score_scaled,partial_pnl_pct
 GLNG,LONG,unknown,2026-03-21,2026-03-23,52.67,52.67,47,0.03,0.0,0.0,0.0,4,stop,hybrid,9.2,10.0,0.0
 SATS,LONG,structural_breakout,2026-03-25,2026-03-26,119.74,112.89,21,0.015,-0.0572,-143.85,-1.0,1,stop,atr_chandelier,8.0433,7.102249426050653,0.0
+GOOG,SHORT,structural_breakdown,2026-03-24,2026-04-14,290.79,281.7,13,0.01125,0.0313,118.17,1.08,21,stop,active_stop,7.7759,5.982497315996008,0.0292
+IREN,SHORT,structural_breakdown,2026-03-26,2026-04-14,37.45,37.45,30,0.01125,0.0,0.0,0.0,19,stop,hybrid,7.7975,7.151503674747557,0.0
+FAS,SHORT,structural_breakdown,2026-03-27,2026-04-14,112.12,112.12,25,0.01125,0.0,0.0,0.0,18,stop,hybrid,7.4997,6.736286428571429,0.0
