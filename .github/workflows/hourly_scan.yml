@@ -1,8 +1,6 @@
 name: Hourly signal scan
 
 on:
-  push:
-    branches: [main]
   schedule:
     # Every hour on the hour, Mon-Fri, UTC 14-21.
     # Covers US market hours in both EDT (14-20) and EST (15-21).
@@ -15,7 +13,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: pages
+  group: scan
   cancel-in-progress: false
 
 jobs:
@@ -24,6 +22,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -35,14 +36,12 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Run pipeline
-        if: github.event_name != 'push'
         env:
           UNUSUAL_WHALES_API_KEY: ${{ secrets.UNUSUAL_WHALES_API_KEY }}
           STOCKTWITS_API_KEY: ${{ secrets.STOCKTWITS_API_KEY }}
         run: python -m app.main
 
       - name: Commit data changes
-        if: github.event_name != 'push'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -71,7 +70,16 @@ jobs:
           done
           git diff --cached --quiet && echo "No data changes to commit" && exit 0
           git commit -m "auto: hourly scan $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          git push
+
+          # Retry push up to 3 times with pull --rebase on conflict
+          for attempt in 1 2 3; do
+            if git push; then
+              echo "Push succeeded on attempt $attempt"
+              break
+            fi
+            echo "Push failed (attempt $attempt), pulling and retrying..."
+            git pull --rebase origin main
+          done
 
       - name: Build static dashboard
         env:

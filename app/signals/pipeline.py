@@ -1362,7 +1362,22 @@ def run_flow_to_price_pipeline(
     prev_watchlist = load_watchlist()
     active_watchlist, expired_watchlist = prune_expired(prev_watchlist)
 
-    payload = fetch_flow_raw(limit=flow_limit)
+    try:
+        payload = fetch_flow_raw(limit=flow_limit)
+    except Exception as api_err:
+        print(f"\n  [FATAL] Flow API call failed: {api_err}")
+        print("  Skipping scan — will retry next scheduled run.")
+        print_api_summary()
+        return {
+            "results": [],
+            "ranked": {"bullish": pd.DataFrame(), "bearish": pd.DataFrame()},
+            "rejected": [],
+            "market_regime": market_regime,
+            "watchlist": active_watchlist,
+            "alert_stats": {"alert_tickers": 0, "new_tickers": 0},
+            "screener_stats": {"screener_tickers": 0, "screener_new": 0},
+        }
+
     normalized = normalize_flow_response(payload)
 
     if not normalized.empty:
