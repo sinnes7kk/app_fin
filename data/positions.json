@@ -8,7 +8,7 @@
     "initial_stop": 73.7,
     "risk_per_share": 5.3,
     "best_price": 59.36,
-    "days_held": 21,
+    "days_held": 22,
     "trail_atr": 70.8,
     "trail_ema": 66.96,
     "trail_hybrid": 68.4,
@@ -40,7 +40,7 @@
     "health_prev": 7.59,
     "health_delta": 0.0,
     "last_rotation_date": null,
-    "re_entry_score": 4.65,
+    "re_entry_score": 4.66,
     "conviction": 6.54,
     "unrealized_r": 1.64,
     "health_components": {

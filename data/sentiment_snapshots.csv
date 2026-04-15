@@ -1,0 +1,5 @@
+snapshot_date,ticker,st_messages,st_bullish,st_bearish,st_sentiment,rd_mentions,rd_posts,rd_comments,rd_top_sub,rd_sentiment
+2026-04-15,TTWO,0,0,0,0.5,0,0,0,—,neutral
+2026-04-15,GSAT,0,0,0,0.5,0,0,0,—,neutral
+2026-04-15,KMX,0,0,0,0.5,0,0,0,—,neutral
+2026-04-15,KNX,0,0,0,0.5,0,0,0,—,neutral
