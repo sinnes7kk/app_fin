@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import csv
+import glob as _glob
+import json
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
@@ -12,6 +14,10 @@ from app.config import DP_TRACKER_LOOKBACK_DAYS, DP_TRACKER_MIN_ACTIVE_DAYS
 
 DATA_DIR = Path(__file__).resolve().parents[2] / "data"
 DP_SNAPSHOTS_PATH = DATA_DIR / "dp_snapshots.csv"
+
+# Intra-day accumulation: stores all unique prints seen today, keyed by tracking_id.
+_DAILY_PREFIX = "dark_pool_daily_"
+_scan_counter_path = DATA_DIR / "dp_scan_count.txt"
 
 DP_SNAPSHOT_COLS = [
     "snapshot_date",
@@ -183,6 +189,218 @@ def aggregate_dark_pool_prints(
         "top_prints": top_prints,
         "by_ticker": by_notional,
         "by_mcap": by_mcap,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Intra-day accumulation (deduped across multiple scans)
+# ---------------------------------------------------------------------------
+
+
+def _daily_path(d: date | None = None) -> Path:
+    d = d or date.today()
+    return DATA_DIR / f"{_DAILY_PREFIX}{d.isoformat()}.json"
+
+
+def accumulate_daily_prints(new_prints: list[dict]) -> list[dict]:
+    """Merge *new_prints* into today's accumulated file, deduped by tracking_id.
+
+    Returns the full deduplicated list of prints for the day so far.
+    Also increments a simple scan counter so the dashboard can report how many
+    scans contributed to today's data.
+    """
+    if not new_prints:
+        return load_daily_accumulated()
+
+    today = date.today()
+    path = _daily_path(today)
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+    # Prune files from previous days (keep today only)
+    for old in DATA_DIR.glob(f"{_DAILY_PREFIX}*.json"):
+        if old != path:
+            try:
+                old.unlink()
+            except OSError:
+                pass
+
+    existing: dict[int | str, dict] = {}
+    if path.exists():
+        try:
+            for row in json.loads(path.read_text()):
+                tid = row.get("tracking_id")
+                if tid is not None:
+                    existing[tid] = row
+        except Exception:
+            existing = {}
+
+    before = len(existing)
+    for row in new_prints:
+        tid = row.get("tracking_id")
+        if tid is not None and tid not in existing:
+            existing[tid] = row
+
+    all_prints = list(existing.values())
+    path.write_text(json.dumps(all_prints, default=str))
+
+    added = len(existing) - before
+    print(f"  [dp-daily] {added} new prints merged → {len(all_prints)} total today")
+
+    # Bump scan counter
+    _increment_scan_counter(today)
+
+    return all_prints
+
+
+def load_daily_accumulated() -> list[dict]:
+    """Read today's accumulated dark pool prints (for dashboard use)."""
+    path = _daily_path()
+    if not path.exists():
+        return []
+    try:
+        data = json.loads(path.read_text())
+        return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
+def get_daily_scan_count() -> int:
+    """How many scans contributed to today's accumulated data."""
+    today_str = date.today().isoformat()
+    if not _scan_counter_path.exists():
+        return 0
+    try:
+        parts = _scan_counter_path.read_text().strip().split(":")
+        if parts[0] == today_str:
+            return int(parts[1])
+    except Exception:
+        pass
+    return 0
+
+
+def _increment_scan_counter(d: date) -> None:
+    today_str = d.isoformat()
+    current = 0
+    if _scan_counter_path.exists():
+        try:
+            parts = _scan_counter_path.read_text().strip().split(":")
+            if parts[0] == today_str:
+                current = int(parts[1])
+        except Exception:
+            pass
+    _scan_counter_path.write_text(f"{today_str}:{current + 1}")
+
+
+def aggregate_daily_accumulated(
+    prints: list[dict],
+    screener_meta: dict[str, dict] | None = None,
+) -> dict:
+    """Aggregate the full day's accumulated prints into per-ticker summaries.
+
+    Returns a dict with:
+        by_ticker   – list of per-ticker aggregates sorted by notional desc
+        total_prints – total print count
+        total_notional – sum of all notional
+        scan_count  – number of scans that contributed
+    """
+    screener_meta = screener_meta or {}
+
+    classified: list[dict] = []
+    for row in prints:
+        c = classify_print(row)
+        if c and c["ticker"]:
+            classified.append(c)
+
+    if not classified:
+        return {"by_ticker": [], "total_prints": 0, "total_notional": 0, "scan_count": get_daily_scan_count()}
+
+    ticker_agg: dict[str, dict] = {}
+    for p in classified:
+        t = p["ticker"]
+        if t not in ticker_agg:
+            ticker_agg[t] = {
+                "ticker": t,
+                "total_volume": 0.0,
+                "total_notional": 0.0,
+                "buy_volume": 0.0,
+                "sell_volume": 0.0,
+                "print_count": 0,
+                "large_print_count": 0,
+                "largest_print_notional": 0.0,
+                "first_seen": p["executed_at"],
+                "last_seen": p["executed_at"],
+                "scan_appearances": 0,
+            }
+        a = ticker_agg[t]
+        a["total_volume"] += p["size"]
+        a["total_notional"] += p["notional"]
+        a["print_count"] += 1
+        if p["notional"] >= 1_000_000:
+            a["large_print_count"] += 1
+        if p["notional"] > a["largest_print_notional"]:
+            a["largest_print_notional"] = p["notional"]
+        if p["side"] == "buy":
+            a["buy_volume"] += p["size"]
+        elif p["side"] == "sell":
+            a["sell_volume"] += p["size"]
+
+        ts = p["executed_at"]
+        if ts and ts < a["first_seen"]:
+            a["first_seen"] = ts
+        if ts and ts > a["last_seen"]:
+            a["last_seen"] = ts
+
+    results: list[dict] = []
+    grand_notional = 0.0
+    for a in ticker_agg.values():
+        tv = a["total_volume"]
+        bias = a["buy_volume"] / tv if tv > 0 else 0.5
+        a["bias"] = round(bias, 4)
+
+        if bias >= 0.60:
+            a["bias_label"] = "Buyers"
+        elif bias <= 0.40:
+            a["bias_label"] = "Sellers"
+        else:
+            a["bias_label"] = "Balanced"
+
+        a["total_notional"] = round(a["total_notional"], 2)
+        a["largest_print_notional"] = round(a["largest_print_notional"], 2)
+        a["total_volume"] = round(a["total_volume"])
+        grand_notional += a["total_notional"]
+
+        sm = screener_meta.get(a["ticker"], {})
+        mcap = 0.0
+        try:
+            mcap = float(sm.get("marketcap") or 0)
+        except (TypeError, ValueError):
+            pass
+        a["marketcap"] = mcap
+
+        if mcap > 0:
+            a["notional_mcap_bps"] = round(a["total_notional"] / mcap * 10_000, 2)
+        else:
+            a["notional_mcap_bps"] = 0.0
+
+        a["sector"] = sm.get("sector") or "—"
+
+        # Format timestamps for display
+        for k in ("first_seen", "last_seen"):
+            try:
+                ts = datetime.fromisoformat(a[k].replace("Z", "+00:00"))
+                a[k + "_str"] = ts.strftime("%H:%M:%S")
+            except Exception:
+                a[k + "_str"] = a[k] or ""
+
+        results.append(a)
+
+    by_notional = sorted(results, key=lambda x: x["total_notional"], reverse=True)
+
+    return {
+        "by_ticker": by_notional,
+        "total_prints": len(classified),
+        "total_notional": round(grand_notional, 2),
+        "scan_count": get_daily_scan_count(),
     }
 
 

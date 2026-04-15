@@ -47,5 +47,9 @@ data/positions.json
 !data/hottest_chains.json
 !data/insider_recent.json
 !data/earnings_cache.json
+
+# Ephemeral intra-day accumulation (rebuilt each day)
+data/dark_pool_daily_*.json
+data/dp_scan_count.txt
 !data/positions.json
 !data/watchlist.json

@@ -25,8 +25,10 @@ from app.config import (
     REGIME_THRESHOLD_BOOST,
 )
 from app.features.dark_pool_tracker import (
+    aggregate_daily_accumulated,
     aggregate_dark_pool_prints,
     compute_multi_day_dp,
+    load_daily_accumulated,
 )
 from app.features.flow_tracker import compute_multi_day_flow
 from app.features.hottest_chains import aggregate_chains_by_ticker
@@ -1753,6 +1755,32 @@ def _build_dark_pool_screener(flow: pd.DataFrame) -> dict:
     return aggregate_dark_pool_prints(raw, screener_meta=smeta)
 
 
+def _build_daily_accumulated_dp(flow: pd.DataFrame) -> dict:
+    """Build the daily accumulated dark pool view from today's deduped prints."""
+    prints = load_daily_accumulated()
+    if not prints:
+        return {"by_ticker": [], "total_prints": 0, "total_notional": 0, "scan_count": 0}
+
+    smeta: dict[str, dict] = {}
+    if not flow.empty and "ticker" in flow.columns:
+        mcap_col = "marketcap" if "marketcap" in flow.columns else None
+        sector_col = "sector" if "sector" in flow.columns else None
+        for _, r in flow.iterrows():
+            t = str(r.get("ticker", ""))
+            entry: dict = {}
+            if mcap_col:
+                try:
+                    entry["marketcap"] = float(r[mcap_col])
+                except (TypeError, ValueError):
+                    pass
+            if sector_col:
+                entry["sector"] = r[sector_col]
+            if t and entry:
+                smeta[t] = entry
+
+    return aggregate_daily_accumulated(prints, screener_meta=smeta)
+
+
 @app.route("/")
 def index():
     signals, signals_src = load_final_signals()
@@ -2053,6 +2081,8 @@ def index():
         "flow_tracker_lookback": FLOW_TRACKER_LOOKBACK_DAYS,
         # Market-wide dark pool screener (single-day)
         "dark_pool_screener": _build_dark_pool_screener(flow),
+        # Daily accumulated dark pool (deduped across all intra-day scans)
+        "dp_daily": _build_daily_accumulated_dp(flow),
         # Multi-day dark pool tracker (enriched with chains + insider)
         "dp_tracker": _enrich_flow_tracker_insider(
             _enrich_flow_tracker_chains(

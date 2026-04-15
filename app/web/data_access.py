@@ -146,6 +146,15 @@ def load_dark_pool_recent() -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
+# Daily accumulated dark pool prints
+# ---------------------------------------------------------------------------
+
+def load_daily_accumulated_dp() -> list[dict]:
+    from app.features.dark_pool_tracker import load_daily_accumulated
+    return load_daily_accumulated()
+
+
+# ---------------------------------------------------------------------------
 # Hottest chains
 # ---------------------------------------------------------------------------
 

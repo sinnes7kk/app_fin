@@ -791,6 +791,7 @@
         <button class="btn btn-sm dp-view-btn active" data-view="by-ticker">By Notional</button>
         <button class="btn btn-sm dp-view-btn" data-view="by-mcap">By Mcap Bps</button>
         <button class="btn btn-sm dp-view-btn" data-view="top-prints">Top Prints ($1M+)</button>
+        <button class="btn btn-sm dp-view-btn" data-view="daily-accumulated">Daily Accumulated</button>
         <button class="btn btn-sm dp-view-btn" data-view="multiday">Multi-Day</button>
       </div>
 
@@ -925,6 +926,85 @@
         </div>
         {% else %}
         <p class="empty">No prints above $1M notional in today's dark pool data.</p>
+        {% endif %}
+      </div>
+
+      <!-- Daily Accumulated (deduped across all intra-day scans) -->
+      <div id="dp-view-daily-accumulated" class="dp-view" style="display:none">
+        {% if dp_daily and dp_daily.by_ticker %}
+
+        <div class="perf-grid" style="margin-bottom:1.2rem">
+          <div class="perf-card">
+            <span class="perf-label">Tickers seen</span>
+            <span class="perf-value">{{ dp_daily.by_ticker | length }}</span>
+          </div>
+          <div class="perf-card">
+            <span class="perf-label">Total prints</span>
+            <span class="perf-value">{{ "{:,}".format(dp_daily.total_prints) }}</span>
+          </div>
+          <div class="perf-card">
+            <span class="perf-label">Total notional</span>
+            <span class="perf-value" style="font-size:1rem">${{ "{:,.0f}".format(dp_daily.total_notional) }}</span>
+          </div>
+          <div class="perf-card">
+            <span class="perf-label">Scans today</span>
+            <span class="perf-value">{{ dp_daily.scan_count }}</span>
+          </div>
+        </div>
+
+        <div class="data-card-list">
+          {% for dp in dp_daily.by_ticker[:50] %}
+          <article class="data-card">
+            <header class="data-card-header">
+              <strong class="data-card-ticker">{{ dp.ticker }}</strong>
+              <span class="data-card-badges">
+                <span class="badge" style="opacity:0.7;font-size:0.7rem">{{ dp.sector }}</span>
+                {% if dp.bias >= 0.60 %}
+                  <span class="badge badge-long">BUYERS</span>
+                {% elif dp.bias <= 0.40 %}
+                  <span class="badge badge-short">SELLERS</span>
+                {% else %}
+                  <span class="badge" style="background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.5)">BALANCED</span>
+                {% endif %}
+                {% if dp.notional_mcap_bps > 5 %}
+                  <span style="color:#ff9800;font-weight:600;font-size:0.75rem">Outsized</span>
+                {% elif dp.notional_mcap_bps > 1 %}
+                  <span style="color:#4fc3f7;font-weight:600;font-size:0.75rem">Notable</span>
+                {% endif %}
+              </span>
+            </header>
+            <dl class="card-metrics">
+              <dt>Total notional</dt><dd>${{ "{:,.0f}".format(dp.total_notional) }}</dd>
+              <dt>Buy/sell bias</dt>
+              <dd>
+                <span class="dp-bias-bar" style="display:inline-flex;align-items:center;gap:0.4rem">
+                  <span class="gauge-track" style="width:60px;height:6px;display:inline-block"><span class="gauge-fill {% if dp.bias >= 0.60 %}gauge-bull{% elif dp.bias <= 0.40 %}gauge-bear{% else %}gauge-neutral{% endif %}" style="width:{{ (dp.bias * 100)|round }}%"></span></span>
+                  <span>{{ "%.0f"|format(dp.bias * 100) }}%</span>
+                </span>
+              </dd>
+              <dt>Prints</dt><dd>{{ dp.print_count }}{% if dp.large_print_count %} <span style="opacity:0.5">({{ dp.large_print_count }} large)</span>{% endif %}</dd>
+              <dt>Volume</dt><dd>{{ "{:,.0f}".format(dp.total_volume) }}</dd>
+              {% if dp.notional_mcap_bps > 0 %}
+              <dt>Notional/Mcap</dt>
+              <dd>
+                {{ "%.2f"|format(dp.notional_mcap_bps) }} bps
+                {% if dp.notional_mcap_bps > 5 %}
+                  <span style="color:#ff9800;font-weight:600;margin-left:0.3rem">Outsized</span>
+                {% elif dp.notional_mcap_bps > 1 %}
+                  <span style="color:#4fc3f7;font-weight:600;margin-left:0.3rem">Notable</span>
+                {% endif %}
+              </dd>
+              {% endif %}
+              <dt>Largest print</dt><dd>${{ "{:,.0f}".format(dp.largest_print_notional) }}</dd>
+              <dt>Activity window</dt>
+              <dd style="font-variant-numeric:tabular-nums">{{ dp.first_seen_str }} — {{ dp.last_seen_str }} UTC</dd>
+            </dl>
+          </article>
+          {% endfor %}
+        </div>
+
+        {% else %}
+        <p class="empty">No accumulated dark pool data yet. Data populates after at least one scan runs. Prints are deduplicated across scans so the full day's activity is captured.</p>
         {% endif %}
       </div>
 

@@ -1429,11 +1429,16 @@ def run_flow_to_price_pipeline(
             dp_path.write_text(json.dumps(dp_raw, default=str))
             print(f"  [dark-pool] saved {len(dp_raw)} market-wide prints")
 
-            # Persist daily dark pool snapshot for multi-day tracker
             from app.features.dark_pool_tracker import (
+                accumulate_daily_prints,
                 aggregate_dark_pool_prints,
                 save_dp_snapshot,
             )
+
+            # Accumulate prints across all intra-day scans (deduped by tracking_id)
+            accumulate_daily_prints(dp_raw)
+
+            # Persist daily dark pool snapshot for multi-day tracker
             dp_agg = aggregate_dark_pool_prints(dp_raw, screener_meta=screener_meta)
             save_dp_snapshot(dp_agg.get("by_ticker", []), screener_meta=screener_meta)
     except Exception as e:
