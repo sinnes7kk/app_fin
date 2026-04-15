@@ -61,7 +61,12 @@ jobs:
             data/equity_curve_agent.csv \
             data/agent_shadow/ \
             data/screener_snapshots.csv \
-            data/sentiment_snapshots.csv; do
+            data/sentiment_snapshots.csv \
+            data/dark_pool_recent.json \
+            data/dp_snapshots.csv \
+            data/hottest_chains.json \
+            data/insider_recent.json \
+            data/earnings_cache.json; do
             [ -e "$f" ] && git add "$f"
           done
           git diff --cached --quiet && echo "No data changes to commit" && exit 0

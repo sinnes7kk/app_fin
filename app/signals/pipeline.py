@@ -33,8 +33,12 @@ from app.signals.trade_plan import (
 )
 from app.vendors.unusual_whales import (
     fetch_dark_pool,
+    fetch_dark_pool_recent,
+    fetch_earnings,
     fetch_flow_for_tickers,
     fetch_flow_raw,
+    fetch_hottest_chains,
+    fetch_insider_transactions,
     fetch_net_prem_ticks,
     fetch_stock_screener,
     fetch_uw_alerts,
@@ -785,6 +789,85 @@ def _enrich_dark_pool(results: list[dict]) -> list[dict]:
     return results
 
 
+EARNINGS_WEIGHT = 0.5  # matches EARNINGS_HOLD_PENALTY from config
+
+
+def _enrich_earnings(results: list[dict]) -> list[dict]:
+    """Enrich final signals with earnings proximity data.
+
+    Attaches next earnings date and applies a score penalty when earnings
+    fall within the hold window (binary event risk).
+    """
+    from app.config import MAX_HOLD_DAYS
+
+    for r in results:
+        er = fetch_earnings(r["ticker"])
+        if er is None:
+            r["earnings_date"] = None
+            r["days_until_earnings"] = None
+            continue
+
+        r["earnings_date"] = er["next_earnings_date"]
+        r["days_until_earnings"] = er["days_until_earnings"]
+        r["last_eps_surprise"] = er["last_eps_surprise"]
+
+        if er["days_until_earnings"] is not None and er["days_until_earnings"] <= MAX_HOLD_DAYS:
+            r["final_score"] = round(r["final_score"] - EARNINGS_WEIGHT, 4)
+            r["earnings_imminent"] = True
+        else:
+            r["earnings_imminent"] = False
+
+    return results
+
+
+def _enrich_insider(results: list[dict]) -> list[dict]:
+    """Enrich final signals with insider transaction alignment.
+
+    Applies a small score bonus when insider buying aligns with trade direction.
+    """
+    from app.config import INSIDER_BUY_BONUS
+    from app.features.insider_tracker import classify_insider_activity
+
+    insider_path = DATA_ROOT / "insider_recent.json"
+    if not insider_path.is_file():
+        for r in results:
+            r["insider_direction"] = None
+        return results
+
+    import json
+    try:
+        raw = json.loads(insider_path.read_text())
+    except Exception:
+        for r in results:
+            r["insider_direction"] = None
+        return results
+
+    insider_by_ticker = classify_insider_activity(raw)
+
+    for r in results:
+        ins = insider_by_ticker.get(r["ticker"])
+        if ins is None:
+            r["insider_direction"] = None
+            continue
+
+        r["insider_direction"] = ins["net_direction"]
+        r["insider_buy_count"] = ins["buy_count"]
+        r["insider_sell_count"] = ins["sell_count"]
+        r["insider_buy_notional"] = ins["buy_notional"]
+
+        aligned = (
+            (r["direction"] == "LONG" and ins["net_direction"] == "buying")
+            or (r["direction"] == "SHORT" and ins["net_direction"] == "selling")
+        )
+        if aligned and ins["buy_notional"] >= 50_000:
+            r["final_score"] = round(r["final_score"] + INSIDER_BUY_BONUS, 4)
+            r["insider_aligned"] = True
+        else:
+            r["insider_aligned"] = False
+
+    return results
+
+
 def _run_options_agent_shadow(results: list[dict]) -> None:
     """Run the Options Context Agent in shadow mode for each final result.
 
@@ -1323,6 +1406,72 @@ def run_flow_to_price_pipeline(
     except Exception as e:
         print(f"  [screener] failed: {e}")
 
+    # Market-wide dark pool prints — single API call, saved for dashboard tab
+    try:
+        dp_raw = fetch_dark_pool_recent(min_premium=100_000, limit=200)
+        if dp_raw:
+            dp_path = DATA_ROOT / "dark_pool_recent.json"
+            dp_path.write_text(json.dumps(dp_raw, default=str))
+            print(f"  [dark-pool] saved {len(dp_raw)} market-wide prints")
+
+            # Persist daily dark pool snapshot for multi-day tracker
+            from app.features.dark_pool_tracker import (
+                aggregate_dark_pool_prints,
+                save_dp_snapshot,
+            )
+            dp_agg = aggregate_dark_pool_prints(dp_raw, screener_meta=screener_meta)
+            save_dp_snapshot(dp_agg.get("by_ticker", []), screener_meta=screener_meta)
+    except Exception as e:
+        print(f"  [dark-pool] skipped: {e}")
+
+    # Market-wide hottest option chains — single API call
+    try:
+        hc_raw = fetch_hottest_chains(min_premium=250_000, limit=100, max_dte=90)
+        if hc_raw:
+            hc_path = DATA_ROOT / "hottest_chains.json"
+            hc_path.write_text(json.dumps(hc_raw, default=str))
+            print(f"  [hottest-chains] saved {len(hc_raw)} contracts")
+
+            # Extract unique tickers from hottest chains for batch earnings fetch
+            hc_tickers = {
+                (row.get("ticker_symbol") or row.get("ticker") or "").upper().strip()
+                for row in hc_raw
+            }
+            hc_tickers.discard("")
+    except Exception as e:
+        hc_tickers = set()
+        print(f"  [hottest-chains] skipped: {e}")
+
+    # Market-wide insider transactions — single API call
+    try:
+        insider_raw = fetch_insider_transactions(limit=200)
+        if insider_raw:
+            insider_path = DATA_ROOT / "insider_recent.json"
+            insider_path.write_text(json.dumps(insider_raw, default=str))
+            print(f"  [insider] saved {len(insider_raw)} transactions")
+    except Exception as e:
+        print(f"  [insider] skipped: {e}")
+
+    # Batch earnings fetch — covers screener tickers + hottest chains tickers
+    earnings_tickers: set[str] = set(existing_tickers)
+    try:
+        earnings_tickers |= hc_tickers
+    except NameError:
+        pass
+
+    try:
+        earnings_cache: dict[str, dict | None] = {}
+        for ticker in sorted(earnings_tickers)[:80]:
+            er = fetch_earnings(ticker)
+            if er and er.get("next_earnings_date"):
+                earnings_cache[ticker] = er
+        if earnings_cache:
+            er_path = DATA_ROOT / "earnings_cache.json"
+            er_path.write_text(json.dumps(earnings_cache, default=str))
+            print(f"  [earnings] cached {len(earnings_cache)} tickers with upcoming earnings")
+    except Exception as e:
+        print(f"  [earnings] batch fetch skipped: {e}")
+
     # UW alert discovery
     alert_stats = {"alert_tickers": 0, "new_tickers": 0}
     if use_uw_alerts:
@@ -1405,6 +1554,8 @@ def run_flow_to_price_pipeline(
     final_results = _enrich_agg_options(final_results)
     final_results = _enrich_net_prem_ticks(final_results)
     final_results = _enrich_dark_pool(final_results)
+    final_results = _enrich_earnings(final_results)
+    final_results = _enrich_insider(final_results)
 
     # V3 agent shadow: all 5 agents + orchestrator (logged, does NOT modify scores)
     _run_options_agent_shadow(final_results)

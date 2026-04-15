@@ -86,6 +86,17 @@ SIZING_TIERS = [
 FLOW_TRACKER_LOOKBACK_DAYS = 5
 FLOW_TRACKER_MIN_ACTIVE_DAYS = 2
 
+# Multi-day dark pool tracker
+DP_TRACKER_LOOKBACK_DAYS = 5
+DP_TRACKER_MIN_ACTIVE_DAYS = 2
+
+# Earnings proximity
+EARNINGS_HOLD_PENALTY = 0.5   # score penalty when ER falls within hold window
+EARNINGS_WARN_DAYS = 10       # badge threshold: "Earnings in X days"
+
+# Insider transactions
+INSIDER_BUY_BONUS = 0.3       # score bonus when insider buys align with direction
+
 # Sentiment APIs (optional — gracefully skipped if missing)
 STOCKTWITS_API_KEY = os.environ.get("STOCKTWITS_API_KEY", "")
 REDDIT_USER_AGENT = "flow_tracker/1.0 by app_fin"

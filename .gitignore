@@ -43,5 +43,9 @@ data/positions.json
 !data/agent_shadow/*.csv
 !data/screener_snapshots.csv
 !data/sentiment_snapshots.csv
+!data/dp_snapshots.csv
+!data/hottest_chains.json
+!data/insider_recent.json
+!data/earnings_cache.json
 !data/positions.json
 !data/watchlist.json

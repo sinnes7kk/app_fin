@@ -17,18 +17,29 @@ import pandas as pd
 from flask import Flask, jsonify, render_template, request
 
 from app.config import (
+    DP_TRACKER_LOOKBACK_DAYS,
+    DP_TRACKER_MIN_ACTIVE_DAYS,
     FLOW_TRACKER_LOOKBACK_DAYS,
     FLOW_TRACKER_MIN_ACTIVE_DAYS,
     MIN_FINAL_SCORE,
     REGIME_THRESHOLD_BOOST,
 )
+from app.features.dark_pool_tracker import (
+    aggregate_dark_pool_prints,
+    compute_multi_day_dp,
+)
 from app.features.flow_tracker import compute_multi_day_flow
+from app.features.hottest_chains import aggregate_chains_by_ticker
+from app.features.insider_tracker import classify_insider_activity
 from app.features.sentiment_tracker import compute_sentiment_trend
 from app.web.data_access import (
+    load_dark_pool_recent,
     load_equity_curve,
     load_equity_curve_agent,
     load_final_signals,
     load_flow_features,
+    load_hottest_chains,
+    load_insider_recent,
     load_positions,
     load_positions_agent,
     load_rejected,
@@ -291,6 +302,118 @@ def _enrich_flow_tracker_sentiment(flow_tracker: list[dict]) -> list[dict]:
             "rd_mention_trend": "stable",
             "daily_mentions": [],
         }
+    return flow_tracker
+
+
+def _enrich_flow_tracker_dp(
+    flow_tracker: list[dict],
+    dp_tracker: list[dict],
+) -> list[dict]:
+    """Attach multi-day dark pool data to Flow Tracker entries for convergence."""
+    if not flow_tracker or not dp_tracker:
+        return flow_tracker
+
+    dp_by_ticker = {d["ticker"]: d for d in dp_tracker}
+
+    for ft in flow_tracker:
+        dp = dp_by_ticker.get(ft["ticker"])
+        if not dp:
+            ft["dp"] = None
+            ft["dp_aligned"] = False
+            ft["dp_divergent"] = False
+            continue
+
+        ft["dp"] = {
+            "bias": dp["bias"],
+            "bias_label": dp["bias_label"],
+            "bias_consistency_label": dp["bias_consistency_label"],
+            "cumulative_notional": dp["cumulative_notional"],
+            "notional_mcap_bps": dp["notional_mcap_bps"],
+            "trend": dp["trend"],
+            "active_days": dp["active_days"],
+            "total_days": dp["total_days"],
+            "daily_snapshots": dp["daily_snapshots"],
+        }
+
+        flow_dir = ft.get("direction", "")
+        dp_bias = dp["bias"]
+        if flow_dir == "BULLISH" and dp_bias >= 0.55:
+            ft["dp_aligned"] = True
+            ft["dp_divergent"] = False
+        elif flow_dir == "BEARISH" and dp_bias <= 0.45:
+            ft["dp_aligned"] = True
+            ft["dp_divergent"] = False
+        elif flow_dir == "BULLISH" and dp_bias <= 0.45:
+            ft["dp_aligned"] = False
+            ft["dp_divergent"] = True
+        elif flow_dir == "BEARISH" and dp_bias >= 0.55:
+            ft["dp_aligned"] = False
+            ft["dp_divergent"] = True
+        else:
+            ft["dp_aligned"] = False
+            ft["dp_divergent"] = False
+
+    return flow_tracker
+
+
+def _enrich_flow_tracker_chains(
+    flow_tracker: list[dict],
+    chains_by_ticker: dict[str, dict],
+) -> list[dict]:
+    """Attach hottest chain data to Flow Tracker entries."""
+    if not flow_tracker or not chains_by_ticker:
+        return flow_tracker
+    for ft in flow_tracker:
+        hc = chains_by_ticker.get(ft["ticker"])
+        if hc:
+            ft["hot_chain"] = {
+                "top_chain_label": hc.get("top_chain_label"),
+                "top_chain_vol_oi": hc.get("top_chain_vol_oi", 0),
+                "top_chain_ask_pct": hc.get("top_chain_ask_pct", 0),
+                "top_chain_premium": hc.get("top_chain_premium", 0),
+                "contract_count": hc.get("contract_count", 0),
+                "total_premium": hc.get("total_premium", 0),
+                "dominant_side": hc.get("dominant_side", "—"),
+            }
+        else:
+            ft["hot_chain"] = None
+    return flow_tracker
+
+
+def _enrich_flow_tracker_insider(
+    flow_tracker: list[dict],
+    insider_by_ticker: dict[str, dict],
+) -> list[dict]:
+    """Attach insider transaction data to Flow Tracker entries."""
+    if not flow_tracker or not insider_by_ticker:
+        return flow_tracker
+    for ft in flow_tracker:
+        ins = insider_by_ticker.get(ft["ticker"])
+        if ins and (ins["buy_count"] > 0 or ins["sell_count"] > 0):
+            ft["insider"] = ins
+        else:
+            ft["insider"] = None
+    return flow_tracker
+
+
+def _enrich_flow_tracker_earnings(flow_tracker: list[dict]) -> list[dict]:
+    """Attach earnings date data to Flow Tracker entries from cached pipeline data."""
+    if not flow_tracker:
+        return flow_tracker
+
+    import json
+    er_path = Path(__file__).resolve().parents[2] / "data" / "earnings_cache.json"
+    try:
+        earnings_cache = json.loads(er_path.read_text()) if er_path.is_file() else {}
+    except Exception:
+        earnings_cache = {}
+
+    for ft in flow_tracker:
+        er = earnings_cache.get(ft["ticker"])
+        if er and er.get("next_earnings_date"):
+            ft["earnings"] = er
+        else:
+            ft["earnings"] = None
     return flow_tracker
 
 
@@ -735,7 +858,21 @@ def _candidates_card_fragments(df: pd.DataFrame, *, clickable: bool = True) -> l
         direc = _dir_badge_html(row.get("direction"))
         gamma = _gamma_badge_html(row.get("gamma_regime"))
         ct_badge = '<span class="badge badge-counter-trend">Counter-trend</span>' if _row_scalar(row, "counter_trend") else ""
-        head = f'<span class="data-card-badges">{direc}{gamma}{ct_badge}</span>'
+
+        er_badge = ""
+        days_er = _row_scalar(row, "days_until_earnings")
+        if days_er is not None and str(days_er) not in ("nan", "None", ""):
+            try:
+                days_er_int = int(float(days_er))
+                er_date = _row_scalar(row, "earnings_date") or ""
+                if days_er_int <= 5:
+                    er_badge = f'<span class="badge badge-earnings-imminent" title="Earnings on {html_escape(str(er_date))}">ER in {days_er_int}d</span>'
+                elif days_er_int <= 10:
+                    er_badge = f'<span class="badge badge-earnings-soon" title="Earnings on {html_escape(str(er_date))}">ER: {html_escape(str(er_date)[:10])}</span>'
+            except (TypeError, ValueError):
+                pass
+
+        head = f'<span class="data-card-badges">{direc}{gamma}{ct_badge}{er_badge}</span>'
         pairs: list[tuple[str, str]] = [
             ("Flow", _conviction_span(_row_scalar(row, "flow_score_scaled"))),
             ("Price", _conviction_span(_row_scalar(row, "price_score"))),
@@ -1590,6 +1727,32 @@ def _rejected_insights(rejected: pd.DataFrame, watchlist: list[dict]) -> str:
     return '<div class="tab-insights">' + "".join(lines) + "</div>"
 
 
+def _build_dark_pool_screener(flow: pd.DataFrame) -> dict:
+    """Load persisted dark pool prints and aggregate for the dashboard."""
+    raw = load_dark_pool_recent()
+    if not raw:
+        return {"top_prints": [], "by_ticker": [], "by_mcap": []}
+
+    smeta: dict[str, dict] = {}
+    if not flow.empty and "ticker" in flow.columns:
+        mcap_col = "marketcap" if "marketcap" in flow.columns else None
+        sector_col = "sector" if "sector" in flow.columns else None
+        for _, r in flow.iterrows():
+            t = str(r.get("ticker", ""))
+            entry: dict = {}
+            if mcap_col:
+                try:
+                    entry["marketcap"] = float(r[mcap_col])
+                except (TypeError, ValueError):
+                    pass
+            if sector_col:
+                entry["sector"] = r[sector_col]
+            if t and entry:
+                smeta[t] = entry
+
+    return aggregate_dark_pool_prints(raw, screener_meta=smeta)
+
+
 @app.route("/")
 def index():
     signals, signals_src = load_final_signals()
@@ -1772,6 +1935,16 @@ def index():
 
     rejected_sorted = _sort_df(rejected_top, sort_rej) if sort_rej else rejected_top
 
+    # Hottest chains and insider transactions (pre-compute for flow tracker enrichment)
+    _hc_raw = load_hottest_chains()
+    _hottest_chains_data = aggregate_chains_by_ticker(_hc_raw) if _hc_raw else {"by_ticker": [], "contracts": 0}
+    _hottest_chains_by_ticker = {
+        t["ticker"]: t for t in _hottest_chains_data.get("by_ticker", [])
+    }
+
+    _insider_raw = load_insider_recent()
+    _insider_by_ticker = classify_insider_activity(_insider_raw) if _insider_raw else {}
+
     ctx = {
         "rejected_html": _paginate_card_fragments(
             _rejected_card_fragments(rejected_sorted),
@@ -1862,11 +2035,37 @@ def index():
             empty_msg="No agent portfolio positions. Agent portfolio populates once the OpenAI API key is configured and agents run.",
         ),
         "perf_agent": perf_agent,
-        # Multi-day flow tracker enriched with sentiment
-        "flow_tracker": _enrich_flow_tracker_sentiment(
-            compute_multi_day_flow(FLOW_TRACKER_LOOKBACK_DAYS, FLOW_TRACKER_MIN_ACTIVE_DAYS)
+        # Multi-day flow tracker enriched with sentiment + dark pool + chains + insider + earnings
+        "flow_tracker": _enrich_flow_tracker_earnings(
+            _enrich_flow_tracker_insider(
+                _enrich_flow_tracker_chains(
+                    _enrich_flow_tracker_dp(
+                        _enrich_flow_tracker_sentiment(
+                            compute_multi_day_flow(FLOW_TRACKER_LOOKBACK_DAYS, FLOW_TRACKER_MIN_ACTIVE_DAYS)
+                        ),
+                        compute_multi_day_dp(DP_TRACKER_LOOKBACK_DAYS, DP_TRACKER_MIN_ACTIVE_DAYS),
+                    ),
+                    _hottest_chains_by_ticker,
+                ),
+                _insider_by_ticker,
+            )
         ),
         "flow_tracker_lookback": FLOW_TRACKER_LOOKBACK_DAYS,
+        # Market-wide dark pool screener (single-day)
+        "dark_pool_screener": _build_dark_pool_screener(flow),
+        # Multi-day dark pool tracker (enriched with chains + insider)
+        "dp_tracker": _enrich_flow_tracker_insider(
+            _enrich_flow_tracker_chains(
+                compute_multi_day_dp(DP_TRACKER_LOOKBACK_DAYS, DP_TRACKER_MIN_ACTIVE_DAYS),
+                _hottest_chains_by_ticker,
+            ),
+            _insider_by_ticker,
+        ),
+        "dp_tracker_lookback": DP_TRACKER_LOOKBACK_DAYS,
+        # Hottest chains screener
+        "hottest_chains": _hottest_chains_data,
+        # Insider data for candidate enrichment
+        "insider_by_ticker": _insider_by_ticker,
     }
     return render_template("index.html", **ctx)
 

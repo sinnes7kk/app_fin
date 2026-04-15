@@ -131,6 +131,66 @@ def load_equity_curve_agent() -> pd.DataFrame:
 
 
 # ---------------------------------------------------------------------------
+# Dark pool market-wide prints
+# ---------------------------------------------------------------------------
+
+def load_dark_pool_recent() -> list[dict]:
+    p = DATA_ROOT / "dark_pool_recent.json"
+    if not p.is_file():
+        return []
+    try:
+        data = json.loads(p.read_text())
+        return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
+# ---------------------------------------------------------------------------
+# Hottest chains
+# ---------------------------------------------------------------------------
+
+def load_hottest_chains() -> list[dict]:
+    p = DATA_ROOT / "hottest_chains.json"
+    if not p.is_file():
+        return []
+    try:
+        data = json.loads(p.read_text())
+        return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
+# ---------------------------------------------------------------------------
+# Earnings cache
+# ---------------------------------------------------------------------------
+
+def load_earnings_cache() -> dict:
+    p = DATA_ROOT / "earnings_cache.json"
+    if not p.is_file():
+        return {}
+    try:
+        data = json.loads(p.read_text())
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+# ---------------------------------------------------------------------------
+# Insider transactions
+# ---------------------------------------------------------------------------
+
+def load_insider_recent() -> list[dict]:
+    p = DATA_ROOT / "insider_recent.json"
+    if not p.is_file():
+        return []
+    try:
+        data = json.loads(p.read_text())
+        return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
+# ---------------------------------------------------------------------------
 # Screener snapshots (flow tracker)
 # ---------------------------------------------------------------------------
 

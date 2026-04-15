@@ -64,7 +64,7 @@ def _endpoint_key(url: str) -> str:
     path = urlparse(url).path
     # Collapse ticker-specific paths: /api/stock/AAPL/foo -> /stock/{ticker}/foo
     path = re.sub(r"/stock/[A-Z0-9.]+/", "/stock/{ticker}/", path)
-    path = re.sub(r"/darkpool/[A-Z0-9.]+", "/darkpool/{ticker}", path)
+    path = re.sub(r"/darkpool/[A-Z][A-Z0-9.]+", "/darkpool/{ticker}", path)
     # Strip the /api prefix for brevity
     path = re.sub(r"^/api", "", path)
     return path or url
@@ -384,6 +384,27 @@ def fetch_dark_pool(ticker: str) -> dict | None:
     }
 
 
+def fetch_dark_pool_recent(
+    *,
+    min_premium: int = 100_000,
+    limit: int = 200,
+) -> list[dict]:
+    """Fetch market-wide recent dark pool prints.
+
+    Returns the raw list of prints (up to *limit*) with at least
+    *min_premium* notional.  Each dict includes ticker, price, size,
+    premium, nbbo_bid, nbbo_ask, executed_at, and volume.
+    """
+    url = f"{BASE_URL}/darkpool/recent"
+    params = {"min_premium": str(min_premium), "limit": str(limit)}
+    try:
+        resp = _uw_request(url, params=params)
+        resp.raise_for_status()
+        return resp.json().get("data", [])
+    except Exception:
+        return []
+
+
 def fetch_flow_recent(ticker: str, limit: int = 50) -> dict | None:
     """Fetch the most recent options flow for a ticker.
 
@@ -561,6 +582,109 @@ def fetch_recent_alert_flow(limit: int = 150, hours_back: int = 24) -> pd.DataFr
         return normalize_flow_response(resp.json())
     except Exception:
         return pd.DataFrame()
+
+
+def fetch_earnings(ticker: str) -> dict | None:
+    """Fetch earnings history for a ticker.
+
+    Returns next earnings date (if available), days until earnings,
+    and last reported EPS surprise.
+    """
+    url = f"{BASE_URL}/stock/{ticker}/earnings"
+    try:
+        resp = _uw_request(url)
+        resp.raise_for_status()
+        data = resp.json().get("data", [])
+    except Exception:
+        return None
+
+    if not data:
+        return None
+
+    from datetime import date as _date
+
+    today = _date.today()
+    next_date = None
+    days_until = None
+    last_reported = None
+    last_eps_surprise = None
+
+    for row in data:
+        report_date_str = row.get("date") or row.get("report_date") or ""
+        if not report_date_str:
+            continue
+        try:
+            rd = _date.fromisoformat(str(report_date_str)[:10])
+        except (ValueError, TypeError):
+            continue
+
+        if rd >= today:
+            if next_date is None or rd < next_date:
+                next_date = rd
+        else:
+            if last_reported is None or rd > last_reported:
+                last_reported = rd
+                try:
+                    actual = float(row.get("actual_eps") or row.get("eps") or 0)
+                    estimate = float(row.get("estimated_eps") or row.get("eps_estimate") or 0)
+                    last_eps_surprise = round(actual - estimate, 4) if estimate else None
+                except (TypeError, ValueError):
+                    last_eps_surprise = None
+
+    if next_date:
+        days_until = (next_date - today).days
+
+    return {
+        "next_earnings_date": str(next_date) if next_date else None,
+        "days_until_earnings": days_until,
+        "last_reported_date": str(last_reported) if last_reported else None,
+        "last_eps_surprise": last_eps_surprise,
+    }
+
+
+def fetch_hottest_chains(
+    min_premium: int = 250_000,
+    limit: int = 100,
+    max_dte: int = 90,
+) -> list[dict]:
+    """Fetch top unusual option contracts from the contract screener.
+
+    Returns a list of dicts with per-contract metrics: ticker, strike, expiry,
+    type (Call/Put), premium, volume, OI, vol/OI ratio, ask-side percentage.
+    Single API call covers the entire market.
+    """
+    url = f"{BASE_URL}/screener/option-contracts"
+    params: dict = {
+        "limit": limit,
+        "min_premium": min_premium,
+        "max_dte": max_dte,
+        "issue_types[]": "Common Stock",
+        "min_volume_oi_ratio": "1.0",
+        "max_multileg_volume_ratio": "0.3",
+    }
+    try:
+        resp = _uw_request(url, params=params)
+        resp.raise_for_status()
+        return resp.json().get("data", [])
+    except Exception:
+        return []
+
+
+def fetch_insider_transactions(limit: int = 200) -> list[dict]:
+    """Fetch recent market-wide insider transactions.
+
+    Returns a list of dicts with: ticker, insider name, title, transaction type
+    (Buy/Sell/Grant), shares, value, filing date.
+    Single API call covers the entire market.
+    """
+    url = f"{BASE_URL}/insider/transactions"
+    params: dict = {"limit": limit}
+    try:
+        resp = _uw_request(url, params=params)
+        resp.raise_for_status()
+        return resp.json().get("data", [])
+    except Exception:
+        return []
 
 
 def fetch_flow_for_tickers(
