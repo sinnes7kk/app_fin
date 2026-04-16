@@ -41,8 +41,8 @@
     "health": 6.77,
     "health_state": "NEUTRAL",
     "health_at_entry": 6.11,
-    "health_prev": 6.62,
-    "health_delta": 0.15,
+    "health_prev": 6.77,
+    "health_delta": 0.0,
     "last_rotation_date": null,
     "re_entry_score": 6.18,
     "thesis_intact_score": 6.83,
@@ -53,7 +53,7 @@
       "structure": 2.0,
       "momentum": 1.0,
       "target_distance": 0.163,
-      "options": 1.374,
+      "options": 1.381,
       "decay_penalty": 0.0,
       "stop_penalty": 0.0
     }
