@@ -1513,6 +1513,15 @@ def run_flow_to_price_pipeline(
         normalized.to_csv(raw_flow_dir / f"raw_flow_{_run_stamp()}.csv", index=False)
 
     feature_table = build_flow_feature_table(normalized, min_premium=min_premium)
+
+    # Merge flow-feature tickers into screener snapshots so the Flow Tracker
+    # sees all tickers with unusual flow, not just those from the UW screener.
+    try:
+        from app.features.flow_tracker import save_flow_feature_snapshot
+        save_flow_feature_snapshot(feature_table)
+    except Exception as e:
+        print(f"  [flow-tracker] flow-feature merge failed: {e}")
+
     ranked = rank_flow_candidates(feature_table, top_n=top_n)
 
     if not ranked["bullish"].empty:

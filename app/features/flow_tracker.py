@@ -87,6 +87,89 @@ def save_screener_snapshot(screener_data: list[dict]) -> None:
           f"({len(existing)} historical rows retained)")
 
 
+def save_flow_feature_snapshot(feature_table: pd.DataFrame) -> None:
+    """Merge flow-feature tickers into screener_snapshots.csv.
+
+    The UW stock screener only returns ~30 tickers per day, missing many
+    tickers that have clear unusual flow in the pipeline.  This function
+    fills the gaps by appending flow-feature tickers that are **not already
+    present** for today's date, using the metrics available from flow scoring.
+    Screener data is richer, so it always takes priority.
+    """
+    if feature_table is None or feature_table.empty:
+        return
+
+    today_str = str(date.today())
+
+    # Read existing today rows to find which tickers are already covered
+    existing_today: set[str] = set()
+    if SNAPSHOTS_PATH.exists():
+        try:
+            with open(SNAPSHOTS_PATH, "r", newline="") as f:
+                reader = csv.DictReader(f)
+                for r in reader:
+                    if r.get("snapshot_date") == today_str:
+                        existing_today.add((r.get("ticker") or "").upper().strip())
+        except Exception:
+            pass
+
+    new_rows: list[dict] = []
+    for _, row in feature_table.iterrows():
+        ticker = str(row.get("ticker", "")).upper().strip()
+        if not ticker or ticker in existing_today:
+            continue
+
+        bull_prem = float(row.get("bullish_premium", 0) or 0)
+        bear_prem = float(row.get("bearish_premium", 0) or 0)
+        mcap = float(row.get("marketcap", 0) or 0)
+
+        new_rows.append({
+            "snapshot_date": today_str,
+            "ticker": ticker,
+            "sector": None,
+            "close": None,
+            "marketcap": mcap if mcap > 0 else None,
+            "bullish_premium": round(bull_prem, 2),
+            "bearish_premium": round(bear_prem, 2),
+            "net_premium": round(bull_prem - bear_prem, 2),
+            "call_volume": None,
+            "put_volume": None,
+            "volume": row.get("total_count"),
+            "call_open_interest": None,
+            "put_open_interest": None,
+            "total_oi_change_perc": None,
+            "call_oi_change_perc": None,
+            "put_oi_change_perc": None,
+            "put_call_ratio": None,
+            "iv_rank": None,
+            "iv30d": None,
+            "perc_3_day_total": None,
+            "perc_30_day_total": None,
+        })
+
+    if not new_rows:
+        return
+
+    # Append to the existing file (screener snapshot already wrote today's rows)
+    all_rows: list[dict] = []
+    if SNAPSHOTS_PATH.exists():
+        try:
+            with open(SNAPSHOTS_PATH, "r", newline="") as f:
+                all_rows = list(csv.DictReader(f))
+        except Exception:
+            all_rows = []
+
+    all_rows.extend(new_rows)
+    SNAPSHOTS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with open(SNAPSHOTS_PATH, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=SNAPSHOT_COLS, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(all_rows)
+
+    print(f"  [flow-tracker] merged {len(new_rows)} flow-feature tickers "
+          f"(skipped {len(existing_today)} already from screener)")
+
+
 def compute_multi_day_flow(
     lookback_days: int = FLOW_TRACKER_LOOKBACK_DAYS,
     min_active_days: int = FLOW_TRACKER_MIN_ACTIVE_DAYS,
