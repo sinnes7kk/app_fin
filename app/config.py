@@ -85,6 +85,25 @@ SIZING_TIERS = [
 # Multi-day flow tracker
 FLOW_TRACKER_LOOKBACK_DAYS = 5
 FLOW_TRACKER_MIN_ACTIVE_DAYS = 2
+FLOW_TRACKER_MIN_PREMIUM = 250_000
+FLOW_TRACKER_MIN_MCAP = 500_000_000
+
+FLOW_TRACKER_ETF_EXCLUDE = {
+    "SPY", "QQQ", "IWM", "DIA", "RSP",
+    "GDX", "GDXJ", "GLD", "SLV", "AGQ",
+    "XLE", "XLF", "XLK", "XLV", "XLI", "XLU", "XLP", "XLY", "XLC", "XLB",
+    "XBI", "XOP", "XHB", "XME",
+    "KRE", "KBE",
+    "TQQQ", "SQQQ", "SOXL", "SOXS", "UPRO", "SPXU", "SPXS", "TNA", "TZA",
+    "UCO", "SCO",
+    "TLT", "TBT", "TMF", "TMV", "SHY", "IEF", "BND",
+    "HYG", "JNK", "LQD",
+    "EEM", "EWJ", "EWZ", "FXI", "KWEB", "INDA", "EWW", "EPI",
+    "ARKK", "ARKW", "ARKF", "ARKG",
+    "SMH", "SOXX", "VGT", "IGV",
+    "VTI", "VOO", "VEA", "VWO", "VNQ", "VNQI",
+    "USO", "UNG", "WEAT", "CORN",
+}
 
 # Multi-day dark pool tracker
 DP_TRACKER_LOOKBACK_DAYS = 5

@@ -474,7 +474,7 @@
     <!-- ═══════ FLOW TRACKER ═══════ -->
     <section id="panel-flow-tracker" class="panel" role="tabpanel">
       <h1 class="panel-title">Flow Tracker</h1>
-      <p class="tab-intro">Tickers with <strong>repeat unusual options activity</strong> over the last {{ flow_tracker_lookback }} trading days. Only tickers flagged by the UW screener on 2+ distinct days appear here. Ranked by persistence-weighted premium / market cap.</p>
+      <p class="tab-intro">Tickers with <strong>repeat unusual options activity</strong> over the last {{ flow_tracker_lookback }} trading days. Filtered for equities only (no ETFs), minimum $250K cumulative premium and $500M+ market cap. Ranked by composite <strong>conviction score</strong> blending persistence, intensity, consistency, acceleration, and premium mass.</p>
 
       {% if flow_tracker %}
       <div class="perf-grid" style="margin-bottom:1.2rem">
@@ -483,12 +483,12 @@
           <span class="perf-value">{{ flow_tracker | length }}</span>
         </div>
         <div class="perf-card">
-          <span class="perf-label">3+ active days</span>
-          <span class="perf-value">{{ flow_tracker | selectattr('active_days', 'ge', 3) | list | length }}</span>
+          <span class="perf-label">Grade A</span>
+          <span class="perf-value">{{ flow_tracker | selectattr('conviction_grade', 'eq', 'A') | list | length }}</span>
         </div>
         <div class="perf-card">
-          <span class="perf-label">Top accumulator</span>
-          <span class="perf-value" style="font-size:1rem">{{ flow_tracker[0].ticker }}</span>
+          <span class="perf-label">Top conviction</span>
+          <span class="perf-value" style="font-size:1rem">{{ flow_tracker[0].ticker }} ({{ flow_tracker[0].conviction_score }})</span>
         </div>
         <div class="perf-card">
           <span class="perf-label">Window</span>
@@ -502,6 +502,13 @@
           <header class="data-card-header data-card-head">
             <strong class="data-card-ticker">{{ ft.ticker }}</strong>
             <span class="data-card-badges">
+              {% if ft.conviction_grade == 'A' %}
+                <span class="badge" style="background:rgba(63,185,80,0.2);color:#3fb950;font-weight:700;letter-spacing:0.03em">{{ ft.conviction_score }}/10 A</span>
+              {% elif ft.conviction_grade == 'B' %}
+                <span class="badge" style="background:rgba(255,152,0,0.18);color:#ff9800;font-weight:700;letter-spacing:0.03em">{{ ft.conviction_score }}/10 B</span>
+              {% else %}
+                <span class="badge" style="background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.5);font-weight:700;letter-spacing:0.03em">{{ ft.conviction_score }}/10 C</span>
+              {% endif %}
               <span class="badge" style="opacity:0.7;font-size:0.7rem">{{ ft.sector }}</span>
               {% if ft.direction == "BULLISH" %}
                 <span class="badge badge-long">NET BULLISH</span>
@@ -2285,7 +2292,9 @@
       function ftSummaryHtml(d) {
         var trendCls = d.trend === "accelerating" ? "positive" : d.trend === "fading" ? "negative" : "";
         var dirCls = d.direction === "BULLISH" ? "badge-long" : "badge-short";
+        var gradeColor = d.conviction_grade === "A" ? "#3fb950" : d.conviction_grade === "B" ? "#ff9800" : "rgba(255,255,255,0.5)";
         var html = '<dl class="card-metrics" style="column-count:2;column-gap:2rem">';
+        html += '<dt>Conviction</dt><dd style="font-weight:700;color:' + gradeColor + '">' + d.conviction_score + '/10 ' + d.conviction_grade + '</dd>';
         html += '<dt>Direction</dt><dd><span class="badge ' + dirCls + '">NET ' + d.direction + '</span></dd>';
         html += '<dt>Cumulative premium</dt><dd>' + fmtDollar(d.cumulative_premium) + ' <span style="opacity:0.5;font-size:0.8rem">(' + d.bull_pct + '% bull)</span></dd>';
         html += '<dt>Prem/Mcap</dt><dd>' + d.prem_mcap_bps.toFixed(2) + ' bps</dd>';

@@ -9,7 +9,13 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from app.config import FLOW_TRACKER_LOOKBACK_DAYS, FLOW_TRACKER_MIN_ACTIVE_DAYS
+from app.config import (
+    FLOW_TRACKER_ETF_EXCLUDE,
+    FLOW_TRACKER_LOOKBACK_DAYS,
+    FLOW_TRACKER_MIN_ACTIVE_DAYS,
+    FLOW_TRACKER_MIN_MCAP,
+    FLOW_TRACKER_MIN_PREMIUM,
+)
 
 DATA_DIR = Path(__file__).resolve().parents[2] / "data"
 SNAPSHOTS_PATH = DATA_DIR / "screener_snapshots.csv"
@@ -170,15 +176,27 @@ def save_flow_feature_snapshot(feature_table: pd.DataFrame) -> None:
           f"(skipped {len(existing_today)} already from screener)")
 
 
+def _conviction_grade(score: float) -> str:
+    if score >= 7.5:
+        return "A"
+    if score >= 5.0:
+        return "B"
+    return "C"
+
+
 def compute_multi_day_flow(
     lookback_days: int = FLOW_TRACKER_LOOKBACK_DAYS,
     min_active_days: int = FLOW_TRACKER_MIN_ACTIVE_DAYS,
+    min_premium: float = FLOW_TRACKER_MIN_PREMIUM,
+    min_mcap: float = FLOW_TRACKER_MIN_MCAP,
 ) -> list[dict]:
     """Aggregate screener snapshots over the lookback window.
 
-    Returns a list of dicts (one per qualifying ticker) sorted by
-    persistence-weighted prem/mcap score.  Only tickers with flow on
-    >= min_active_days distinct days are included.
+    Returns a list of dicts (one per qualifying ticker) sorted by a
+    composite conviction score.  Three-layer filter:
+      1. ETF/ETP exclusion
+      2. Minimum cumulative premium + market-cap floor
+      3. min_active_days persistence gate
     """
     if not SNAPSHOTS_PATH.exists():
         return []
@@ -190,6 +208,10 @@ def compute_multi_day_flow(
 
     if df.empty or "snapshot_date" not in df.columns:
         return []
+
+    # Layer 1: ETF exclusion
+    if "ticker" in df.columns:
+        df = df[~df["ticker"].isin(FLOW_TRACKER_ETF_EXCLUDE)]
 
     cutoff = str(date.today() - timedelta(days=lookback_days))
     df = df[df["snapshot_date"] >= cutoff].copy()
@@ -210,7 +232,7 @@ def compute_multi_day_flow(
     if total_days == 0:
         return []
 
-    results: list[dict] = []
+    raw_results: list[dict] = []
 
     for ticker, grp in df.groupby("ticker"):
         active_dates = sorted(grp["snapshot_date"].unique())
@@ -227,6 +249,12 @@ def compute_multi_day_flow(
         latest = grp.sort_values("snapshot_date").iloc[-1]
         mcap = float(latest.get("marketcap") or 0)
 
+        # Layer 2: premium + mcap floors
+        if cum_total < min_premium:
+            continue
+        if mcap < min_mcap:
+            continue
+
         if cum_total > 0 and mcap > 0:
             dominant_prem = max(cum_bull, cum_bear)
             prem_mcap_bps = round(dominant_prem / mcap * 10_000, 2)
@@ -234,17 +262,18 @@ def compute_multi_day_flow(
             prem_mcap_bps = 0.0
 
         persistence_ratio = round(active_days / total_days, 2)
-        persistence_weighted = round(prem_mcap_bps * persistence_ratio, 4)
 
         # Flow trend: compare second half vs first half of the window
         mid = len(active_dates) // 2
+        p2_total = 0.0
+        p1_total = 0.0
         if mid > 0:
             first_half = grp[grp["snapshot_date"].isin(active_dates[:mid])]
             second_half = grp[grp["snapshot_date"].isin(active_dates[mid:])]
-            p1 = first_half["bullish_premium"].sum() + first_half["bearish_premium"].sum()
-            p2 = second_half["bullish_premium"].sum() + second_half["bearish_premium"].sum()
-            if p1 > 0:
-                ratio = p2 / p1
+            p1_total = first_half["bullish_premium"].sum() + first_half["bearish_premium"].sum()
+            p2_total = second_half["bullish_premium"].sum() + second_half["bearish_premium"].sum()
+            if p1_total > 0:
+                ratio = p2_total / p1_total
                 if ratio > 1.3:
                     trend = "accelerating"
                 elif ratio < 0.7:
@@ -252,9 +281,31 @@ def compute_multi_day_flow(
                 else:
                     trend = "steady"
             else:
-                trend = "accelerating" if p2 > 0 else "steady"
+                trend = "accelerating" if p2_total > 0 else "steady"
         else:
             trend = "steady"
+
+        # Per-day bias consistency: fraction of active days with clear directional lean
+        consistent_days = 0
+        for d in active_dates:
+            day_rows = grp[grp["snapshot_date"] == d]
+            db = day_rows["bullish_premium"].sum()
+            dbe = day_rows["bearish_premium"].sum()
+            dt = db + dbe
+            if dt > 0:
+                day_bull_pct = db / dt
+                if day_bull_pct > 0.55 or day_bull_pct < 0.45:
+                    consistent_days += 1
+        consistency_raw = consistent_days / active_days if active_days > 0 else 0.0
+
+        # Acceleration raw (0–1 clamped sigmoid-like mapping)
+        if p1_total > 0:
+            accel_ratio = p2_total / p1_total
+        elif p2_total > 0:
+            accel_ratio = 2.0
+        else:
+            accel_ratio = 1.0
+        accel_raw = min(max((accel_ratio - 0.5) / 1.5, 0.0), 1.0)
 
         # Daily snapshots for sparkline
         daily_snaps: list[dict] = []
@@ -274,7 +325,7 @@ def compute_multi_day_flow(
         if pd.isna(avg_vol_30d):
             avg_vol_30d = 0.0
 
-        results.append({
+        raw_results.append({
             "ticker": ticker,
             "sector": latest.get("sector") or "—",
             "direction": direction,
@@ -287,7 +338,6 @@ def compute_multi_day_flow(
             "active_days": active_days,
             "total_days": total_days,
             "persistence_ratio": persistence_ratio,
-            "persistence_weighted": persistence_weighted,
             "trend": trend,
             "avg_vol_ratio_30d": round(float(avg_vol_30d), 2),
             "latest_oi_change": round(float(latest.get("total_oi_change_perc") or 0), 2),
@@ -296,7 +346,45 @@ def compute_multi_day_flow(
             "latest_put_call_ratio": round(float(latest.get("put_call_ratio") or 0), 2),
             "marketcap": mcap,
             "daily_snapshots": daily_snaps,
+            "_consistency_raw": consistency_raw,
+            "_accel_raw": accel_raw,
+            "_cum_total": cum_total,
         })
 
-    results.sort(key=lambda x: x["persistence_weighted"], reverse=True)
-    return results
+    if not raw_results:
+        return []
+
+    # --- Layer 3: Composite conviction score (0–10 scale) ---
+    # Normalise intensity and premium-mass across the cohort
+    bps_vals = np.array([r["prem_mcap_bps"] for r in raw_results])
+    bps_max = bps_vals.max() if bps_vals.max() > 0 else 1.0
+
+    prem_vals = np.array([r["_cum_total"] for r in raw_results])
+    log_prem = np.log1p(prem_vals)
+    log_max = log_prem.max() if log_prem.max() > 0 else 1.0
+
+    for i, r in enumerate(raw_results):
+        persistence_norm = r["persistence_ratio"]
+        intensity_norm = r["prem_mcap_bps"] / bps_max
+        consistency_norm = r["_consistency_raw"]
+        accel_norm = r["_accel_raw"]
+        mass_norm = log_prem[i] / log_max
+
+        score = (
+            0.30 * persistence_norm
+            + 0.30 * intensity_norm
+            + 0.20 * consistency_norm
+            + 0.10 * accel_norm
+            + 0.10 * mass_norm
+        ) * 10.0
+
+        r["conviction_score"] = round(score, 1)
+        r["conviction_grade"] = _conviction_grade(score)
+
+        # Clean up internal keys
+        del r["_consistency_raw"]
+        del r["_accel_raw"]
+        del r["_cum_total"]
+
+    raw_results.sort(key=lambda x: x["conviction_score"], reverse=True)
+    return raw_results
