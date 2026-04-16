@@ -127,8 +127,8 @@ def save_flow_feature_snapshot(feature_table: pd.DataFrame) -> None:
         if not ticker or ticker in existing_today:
             continue
 
-        bull_prem = float(row.get("bullish_premium", 0) or 0)
-        bear_prem = float(row.get("bearish_premium", 0) or 0)
+        bull_prem = float(row.get("bullish_premium_raw", 0) or 0)
+        bear_prem = float(row.get("bearish_premium_raw", 0) or 0)
         mcap = float(row.get("marketcap", 0) or 0)
 
         new_rows.append({
