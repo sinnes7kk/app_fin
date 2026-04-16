@@ -12,8 +12,10 @@ import pandas as pd
 from app.config import (
     FLOW_TRACKER_ETF_EXCLUDE,
     FLOW_TRACKER_LOOKBACK_DAYS,
+    FLOW_TRACKER_MAX_RESULTS,
     FLOW_TRACKER_MIN_ACTIVE_DAYS,
     FLOW_TRACKER_MIN_MCAP,
+    FLOW_TRACKER_MIN_PREM_MCAP_BPS,
     FLOW_TRACKER_MIN_PREMIUM,
 )
 
@@ -189,14 +191,18 @@ def compute_multi_day_flow(
     min_active_days: int = FLOW_TRACKER_MIN_ACTIVE_DAYS,
     min_premium: float = FLOW_TRACKER_MIN_PREMIUM,
     min_mcap: float = FLOW_TRACKER_MIN_MCAP,
+    min_prem_mcap_bps: float = FLOW_TRACKER_MIN_PREM_MCAP_BPS,
+    max_results: int = FLOW_TRACKER_MAX_RESULTS,
 ) -> list[dict]:
     """Aggregate screener snapshots over the lookback window.
 
     Returns a list of dicts (one per qualifying ticker) sorted by a
-    composite conviction score.  Three-layer filter:
+    composite conviction score.  Four-layer filter:
       1. ETF/ETP exclusion
       2. Minimum cumulative premium + market-cap floor
-      3. min_active_days persistence gate
+      3. Minimum prem/mcap bps floor
+      4. min_active_days persistence gate
+    Capped to max_results by conviction score.
     """
     if not SNAPSHOTS_PATH.exists():
         return []
@@ -260,6 +266,10 @@ def compute_multi_day_flow(
             prem_mcap_bps = round(dominant_prem / mcap * 10_000, 2)
         else:
             prem_mcap_bps = 0.0
+
+        # Layer 3: prem/mcap bps floor
+        if prem_mcap_bps < min_prem_mcap_bps:
+            continue
 
         persistence_ratio = round(active_days / total_days, 2)
 
@@ -387,4 +397,12 @@ def compute_multi_day_flow(
         del r["_cum_total"]
 
     raw_results.sort(key=lambda x: x["conviction_score"], reverse=True)
+
+    total_qualified = len(raw_results)
+    if max_results and len(raw_results) > max_results:
+        raw_results = raw_results[:max_results]
+
+    for r in raw_results:
+        r["total_qualified"] = total_qualified
+
     return raw_results

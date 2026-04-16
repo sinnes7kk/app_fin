@@ -479,8 +479,14 @@
       {% if flow_tracker %}
       <div class="perf-grid" style="margin-bottom:1.2rem">
         <div class="perf-card">
-          <span class="perf-label">Qualified tickers</span>
-          <span class="perf-value">{{ flow_tracker | length }}</span>
+          <span class="perf-label">Showing</span>
+          <span class="perf-value">
+            {% if flow_tracker[0].total_qualified is defined and flow_tracker[0].total_qualified > (flow_tracker | length) %}
+              {{ flow_tracker | length }} of {{ flow_tracker[0].total_qualified }}
+            {% else %}
+              {{ flow_tracker | length }}
+            {% endif %}
+          </span>
         </div>
         <div class="perf-card">
           <span class="perf-label">Grade A</span>
@@ -557,11 +563,6 @@
             </span>
           </header>
           <dl class="card-metrics">
-            <dt>Cumulative premium</dt>
-            <dd>
-              ${{ "{:,.0f}".format(ft.cumulative_premium) }}
-              <span style="opacity:0.5;font-size:0.75rem;margin-left:0.3rem">({{ ft.bull_pct }}% bull)</span>
-            </dd>
             <dt>Prem/Mcap</dt>
             <dd>
               {{ "%.2f"|format(ft.prem_mcap_bps) }} bps
@@ -569,11 +570,14 @@
                 <span style="color:#ff9800;font-weight:600;margin-left:0.3rem">Outsized</span>
               {% elif ft.prem_mcap_bps > 1 %}
                 <span style="color:#4fc3f7;font-weight:600;margin-left:0.3rem">Notable</span>
-              {% elif ft.prem_mcap_bps > 0.1 %}
-                <span style="opacity:0.6;margin-left:0.3rem">Normal</span>
               {% else %}
-                <span style="opacity:0.4;margin-left:0.3rem">Minor</span>
+                <span style="opacity:0.6;margin-left:0.3rem">Normal</span>
               {% endif %}
+            </dd>
+            <dt>Cumulative premium</dt>
+            <dd>
+              ${{ "{:,.0f}".format(ft.cumulative_premium) }}
+              <span style="opacity:0.5;font-size:0.75rem;margin-left:0.3rem">({{ ft.bull_pct }}% bull)</span>
             </dd>
             <dt>Active days</dt>
             <dd>
