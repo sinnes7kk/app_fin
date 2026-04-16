@@ -2,6 +2,33 @@
 
 from __future__ import annotations
 
+import re
+
+_OCC_RE = re.compile(
+    r"^[A-Z]{1,6}"       # ticker (already extracted separately)
+    r"(\d{6})"            # YYMMDD expiry
+    r"([CP])"             # Call or Put
+    r"(\d{8})$"           # strike * 1000, zero-padded
+)
+
+
+def _parse_occ_symbol(symbol: str) -> tuple[float, str, str] | None:
+    """Parse an OCC option symbol into (strike, expiry_str, option_type).
+
+    Returns None if the symbol doesn't match the expected format.
+    Example: 'NVDA260415C00200000' -> (200.0, '2026-04-15', 'CALL')
+    """
+    if not symbol:
+        return None
+    m = _OCC_RE.search(symbol.upper().strip())
+    if not m:
+        return None
+    date_raw, cp, strike_raw = m.group(1), m.group(2), m.group(3)
+    strike = int(strike_raw) / 1000.0
+    expiry = f"20{date_raw[:2]}-{date_raw[2:4]}-{date_raw[4:6]}"
+    opt_type = "CALL" if cp == "C" else "PUT"
+    return strike, expiry, opt_type
+
 
 def aggregate_chains_by_ticker(raw_chains: list[dict]) -> dict:
     """Group hottest chain contracts by underlying ticker.
@@ -40,6 +67,19 @@ def aggregate_chains_by_ticker(raw_chains: list[dict]) -> dict:
         agg["total_premium"] += prem
 
         opt_type = (row.get("type") or row.get("option_type") or "").upper().strip()
+        strike = row.get("strike")
+        expiry = row.get("expiry") or row.get("expiration_date")
+
+        if not opt_type or strike is None or not expiry:
+            parsed = _parse_occ_symbol(row.get("option_symbol") or "")
+            if parsed:
+                if strike is None:
+                    strike = parsed[0]
+                if not expiry:
+                    expiry = parsed[1]
+                if not opt_type:
+                    opt_type = parsed[2]
+
         if "CALL" in opt_type:
             agg["call_premium"] += prem
         elif "PUT" in opt_type:
@@ -60,8 +100,8 @@ def aggregate_chains_by_ticker(raw_chains: list[dict]) -> dict:
             ask_pct = 0.0
 
         contract = {
-            "strike": row.get("strike"),
-            "expiry": row.get("expiry") or row.get("expiration_date"),
+            "strike": strike,
+            "expiry": expiry,
             "type": "Call" if "CALL" in opt_type else "Put" if "PUT" in opt_type else opt_type,
             "premium": round(prem, 2),
             "vol_oi": vol_oi,
