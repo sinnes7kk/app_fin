@@ -235,7 +235,7 @@ def quick_reject_check(
     else:
         trend_opposite = trend_dir == "LONG"
 
-    _, ext_sc = _extension_score(df, MAX_DISTANCE_FROM_EMA20_ATR)
+    _, ext_sc = _extension_score(df, BREAKOUT_MAX_DISTANCE_ATR)
     not_extended_ok = ext_sc > 0
 
     if not_extended_ok:
