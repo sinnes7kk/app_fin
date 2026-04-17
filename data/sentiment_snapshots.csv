@@ -45,6 +45,7 @@ snapshot_date,ticker,st_messages,st_bullish,st_bearish,st_sentiment,rd_mentions,
 2026-04-17,RKLB,0,0,0,0.5,0,0,0,—,neutral
 2026-04-17,SNDK,0,0,0,0.5,0,0,0,—,neutral
 2026-04-17,IONQ,0,0,0,0.5,0,0,0,—,neutral
+2026-04-17,DOW,0,0,0,0.5,0,0,0,—,neutral
 2026-04-17,GSAT,0,0,0,0.5,0,0,0,—,neutral
 2026-04-17,RVMD,0,0,0,0.5,0,0,0,—,neutral
 2026-04-17,XP,0,0,0,0.5,0,0,0,—,neutral
@@ -59,4 +60,3 @@ snapshot_date,ticker,st_messages,st_bullish,st_bearish,st_sentiment,rd_mentions,
 2026-04-17,QBTS,0,0,0,0.5,0,0,0,—,neutral
 2026-04-17,RDDT,0,0,0,0.5,0,0,0,—,neutral
 2026-04-17,VFC,0,0,0,0.5,0,0,0,—,neutral
-2026-04-17,CORZ,0,0,0,0.5,0,0,0,—,neutral
