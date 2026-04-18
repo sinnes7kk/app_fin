@@ -792,6 +792,75 @@ def fetch_ticker_options_snapshot(ticker: str) -> dict | None:
     return row
 
 
+def fetch_ticker_options_history(ticker: str, *, days: int = 30) -> pd.DataFrame | None:
+    """Fetch up to ``days`` trading days of daily options totals for ``ticker``.
+
+    Single UW call: ``/stock/{ticker}/options-volume?limit=N``. Returns a
+    DataFrame with one row per trading day, newest-first, with columns:
+    ``date`` (ISO ``YYYY-MM-DD``), ``bullish_premium``, ``bearish_premium``,
+    ``call_volume``, ``put_volume``, ``call_open_interest``,
+    ``put_open_interest``. Values are coerced to floats; rows missing a
+    parseable ``date`` are dropped.
+
+    Returns ``None`` on any API failure or when the response is empty — never
+    raises. Callers fall back to Tier 4 absolute scoring for the affected
+    ticker.
+    """
+    ticker = (ticker or "").upper().strip()
+    if not ticker:
+        return None
+
+    try:
+        resp = _uw_request(
+            f"{BASE_URL}/stock/{ticker}/options-volume",
+            params={"limit": int(days)},
+        )
+        resp.raise_for_status()
+        rows = resp.json().get("data", []) or []
+    except Exception:
+        return None
+    if not rows:
+        return None
+
+    def _f(v):
+        try:
+            if v is None:
+                return None
+            x = float(v)
+            if x != x:
+                return None
+            return x
+        except (TypeError, ValueError):
+            return None
+
+    out: list[dict] = []
+    for r in rows:
+        d = r.get("date") or r.get("day") or r.get("trading_day")
+        if not d:
+            continue
+        d = str(d)[:10]
+        out.append(
+            {
+                "date": d,
+                "bullish_premium": _f(r.get("bullish_premium")),
+                "bearish_premium": _f(r.get("bearish_premium")),
+                "call_volume": _f(r.get("call_volume")),
+                "put_volume": _f(r.get("put_volume")),
+                "call_open_interest": _f(r.get("call_open_interest")),
+                "put_open_interest": _f(r.get("put_open_interest")),
+            }
+        )
+
+    if not out:
+        return None
+
+    df = pd.DataFrame(out)
+    df = df.drop_duplicates(subset=["date"], keep="first").sort_values(
+        "date", ascending=False
+    ).reset_index(drop=True)
+    return df
+
+
 def fetch_uw_alerts(limit: int = 500, hours_back: int = 48) -> list[str]:
     """Discover tickers with unusual options activity.
 

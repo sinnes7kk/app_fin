@@ -12,6 +12,7 @@ import pandas as pd
 from app.config import (
     FLOW_TRACKER_DTE_BUCKETS,
     FLOW_TRACKER_ETF_EXCLUDE,
+    FLOW_TRACKER_HARD_MODE_FILTER,
     FLOW_TRACKER_LOOKBACK_DAYS,
     FLOW_TRACKER_MAX_RESULTS,
     FLOW_TRACKER_MIN_3D_PERCENTILE,
@@ -21,8 +22,6 @@ from app.config import (
     FLOW_TRACKER_MIN_PREMIUM,
     FLOW_TRACKER_MODES,
     FLOW_TRACKER_RETENTION_DAYS,
-    FLOW_TRACKER_RETURN_BONUS,
-    FLOW_TRACKER_RETURN_DRAG,
     FLOW_TRACKER_WEIGHTS_ACCUM,
 )
 
@@ -172,8 +171,37 @@ SNAPSHOT_COLS = [
     "sector",
     "close",
     "marketcap",
+    # Premium taxonomy (Flow Tracker - Premium Taxonomy plan):
+    #   bullish_premium / bearish_premium       — legacy alias, == total_*_premium
+    #   total_*_premium                          — UW aggregate directional (all
+    #                                              trades / all DTE) from the
+    #                                              screener or options-volume
+    #                                              endpoint.  Authoritative for
+    #                                              Flow Tracker's multi-day
+    #                                              regression.
+    #   unusual_*_premium                        — flow-alert-derived, premium
+    #                                              >= $500K, no DTE filter.
+    #   lottery_*_premium / swing_*_premium /
+    #   leap_*_premium                           — unusual flow sliced into
+    #                                              DTE buckets (config
+    #                                              FLOW_TRACKER_PREMIUM_BUCKETS).
+    #                                              Powers the Trader Card
+    #                                              Premium Mix panel.
+    #   premium_source                           — "screener" | "per_ticker_api"
+    #                                              for data-lineage debugging.
     "bullish_premium",
     "bearish_premium",
+    "total_bullish_premium",
+    "total_bearish_premium",
+    "unusual_bullish_premium",
+    "unusual_bearish_premium",
+    "lottery_bullish_premium",
+    "lottery_bearish_premium",
+    "swing_bullish_premium",
+    "swing_bearish_premium",
+    "leap_bullish_premium",
+    "leap_bearish_premium",
+    "premium_source",
     "net_premium",
     "call_volume",
     "put_volume",
@@ -206,9 +234,116 @@ SNAPSHOT_COLS = [
 ]
 
 
+# Zero-valued skeleton for the premium-taxonomy columns.  Used by the
+# shared ``_build_snapshot_row`` helper when a row has no bucket breakdown
+# available (e.g. a screener row for a ticker without any qualifying flow
+# alerts today).
+_EMPTY_BUCKET_ROW = {
+    "lottery_bullish_premium": 0.0,
+    "lottery_bearish_premium": 0.0,
+    "swing_bullish_premium":   0.0,
+    "swing_bearish_premium":   0.0,
+    "leap_bullish_premium":    0.0,
+    "leap_bearish_premium":    0.0,
+    "unusual_bullish_premium": 0.0,
+    "unusual_bearish_premium": 0.0,
+}
+
+
+def _build_snapshot_row(
+    *,
+    snapshot_date: str,
+    ticker: str,
+    source: str,
+    total_bullish_premium: float,
+    total_bearish_premium: float,
+    buckets: dict | None = None,
+    base: dict | None = None,
+    enrichment: dict | None = None,
+) -> dict:
+    """Assemble one screener-snapshot row with the full premium taxonomy.
+
+    ``base`` is the raw screener / enrichment payload (fields copied as-is
+    for columns that aren't part of the premium taxonomy).  ``buckets`` is
+    the per-ticker DTE-bucket breakdown (keys: ``lottery_bullish_premium``,
+    ``swing_bullish_premium``, etc.) from
+    :func:`app.features.flow_features.aggregate_premium_by_dte_bucket`.
+    ``enrichment`` is optional flow-alert structural enrichment (dominant
+    DTE bucket, sweep share, multileg share, accel ratios).
+
+    The row is guaranteed to have every column in ``SNAPSHOT_COLS`` present
+    so the CSV writer never emits ragged rows.
+    """
+    base = base or {}
+    enrichment = enrichment or {}
+    buckets = {**_EMPTY_BUCKET_ROW, **(buckets or {})}
+
+    total_bull = _num(total_bullish_premium)
+    total_bear = _num(total_bearish_premium)
+
+    swing_bull = _num(buckets.get("swing_bullish_premium"))
+    swing_bear = _num(buckets.get("swing_bearish_premium"))
+
+    unusual_bull = _num(buckets.get("unusual_bullish_premium")) or swing_bull
+    unusual_bear = _num(buckets.get("unusual_bearish_premium")) or swing_bear
+
+    row: dict = {col: None for col in SNAPSHOT_COLS}
+    row.update({
+        "snapshot_date": snapshot_date,
+        "ticker": ticker,
+        "sector": base.get("sector"),
+        "close": base.get("close"),
+        "marketcap": base.get("marketcap"),
+        "bullish_premium": round(total_bull, 2),
+        "bearish_premium": round(total_bear, 2),
+        "total_bullish_premium": round(total_bull, 2),
+        "total_bearish_premium": round(total_bear, 2),
+        "unusual_bullish_premium": round(unusual_bull, 2),
+        "unusual_bearish_premium": round(unusual_bear, 2),
+        "lottery_bullish_premium": round(_num(buckets.get("lottery_bullish_premium")), 2),
+        "lottery_bearish_premium": round(_num(buckets.get("lottery_bearish_premium")), 2),
+        "swing_bullish_premium":   round(swing_bull, 2),
+        "swing_bearish_premium":   round(swing_bear, 2),
+        "leap_bullish_premium":    round(_num(buckets.get("leap_bullish_premium")), 2),
+        "leap_bearish_premium":    round(_num(buckets.get("leap_bearish_premium")), 2),
+        "premium_source": source,
+        "net_premium": base.get("net_premium"),
+        "call_volume": base.get("call_volume"),
+        "put_volume": base.get("put_volume"),
+        "volume": base.get("volume"),
+        "call_open_interest": base.get("call_open_interest"),
+        "put_open_interest": base.get("put_open_interest"),
+        "total_oi_change_perc": base.get("total_oi_change_perc"),
+        "call_oi_change_perc": base.get("call_oi_change_perc"),
+        "put_oi_change_perc": base.get("put_oi_change_perc"),
+        "put_call_ratio": base.get("put_call_ratio"),
+        "iv_rank": base.get("iv_rank"),
+        "iv30d": base.get("iv30d"),
+        "perc_3_day_total": base.get("perc_3_day_total"),
+        "perc_30_day_total": base.get("perc_30_day_total"),
+        "call_premium": base.get("call_premium"),
+        "put_premium": base.get("put_premium"),
+    })
+
+    for key in (
+        "dominant_dte_bucket",
+        "sweep_share",
+        "multileg_share",
+        "bullish_accel_ratio",
+        "bearish_accel_ratio",
+    ):
+        if enrichment.get(key) not in (None, ""):
+            row[key] = enrichment.get(key)
+        elif base.get(key) not in (None, ""):
+            row[key] = base.get(key)
+
+    return row
+
+
 def save_screener_snapshot(
     screener_data: list[dict],
     flow_enrichment: dict[str, dict] | None = None,
+    premium_buckets: dict[str, dict] | None = None,
 ) -> None:
     """Persist today's screener response to the rolling snapshots CSV.
 
@@ -224,6 +359,10 @@ def save_screener_snapshot(
         the screener doesn't provide (dominant DTE bucket, sweep share,
         multileg share).  Only keys already in :data:`SNAPSHOT_COLS` are
         copied; missing tickers are left as ``None``.
+    premium_buckets
+        Optional ``{ticker: {lottery_bullish_premium: ..., ...}}`` mapping
+        from :func:`app.features.flow_features.aggregate_premium_by_dte_bucket`.
+        When absent, bucket columns are written as zeros.
     """
     if not screener_data:
         return
@@ -234,20 +373,27 @@ def save_screener_snapshot(
     # can reach the ≥10-observation threshold.
     cutoff = str(date.today() - timedelta(days=FLOW_TRACKER_RETENTION_DAYS))
     flow_enrichment = flow_enrichment or {}
+    premium_buckets = premium_buckets or {}
 
     new_rows: list[dict] = []
     for sr in screener_data:
         ticker = (sr.get("ticker") or "").upper().strip()
         if not ticker:
             continue
-        row: dict = {"snapshot_date": today_str, "ticker": ticker}
-        for col in SNAPSHOT_COLS[2:]:
-            row[col] = sr.get(col)
-
-        extras = flow_enrichment.get(ticker) or {}
-        for k, v in extras.items():
-            if k in SNAPSHOT_COLS and row.get(k) in (None, "", 0):
-                row[k] = v
+        # UW screener's `bullish_premium` / `bearish_premium` are the
+        # authoritative aggregate-directional total for the day.  We keep
+        # both `bullish_premium` (legacy column) and `total_bullish_premium`
+        # populated so downstream consumers can migrate without breakage.
+        row = _build_snapshot_row(
+            snapshot_date=today_str,
+            ticker=ticker,
+            source="screener",
+            total_bullish_premium=sr.get("bullish_premium") or 0.0,
+            total_bearish_premium=sr.get("bearish_premium") or 0.0,
+            buckets=premium_buckets.get(ticker),
+            base=sr,
+            enrichment=flow_enrichment.get(ticker),
+        )
         new_rows.append(row)
 
     if not new_rows:
@@ -281,14 +427,28 @@ def save_screener_snapshot(
           f"({len(existing)} historical rows retained)")
 
 
-def save_flow_feature_snapshot(feature_table: pd.DataFrame) -> None:
+def save_flow_feature_snapshot(
+    feature_table: pd.DataFrame,
+    premium_buckets: dict[str, dict] | None = None,
+) -> None:
     """Merge flow-feature tickers into screener_snapshots.csv.
 
-    The UW stock screener only returns ~30 tickers per day, missing many
+    The UW stock screener only returns ~340 tickers per day, missing many
     tickers that have clear unusual flow in the pipeline.  This function
     fills the gaps by appending flow-feature tickers that are **not already
     present** for today's date, using the metrics available from flow scoring.
     Screener data is richer, so it always takes priority.
+
+    Premium-taxonomy policy: every gap-filler row carries the full UW
+    aggregate (total_*_premium) from ``/stock/{ticker}/options-volume`` so
+    its premium semantics match screener rows exactly.  When the per-ticker
+    fetch fails, the ticker is **skipped for this scan** rather than
+    silently falling back to the narrow flow-alert premium — keeps the
+    multi-day regression consistent across days.
+
+    ``premium_buckets`` is an optional
+    ``{ticker: {lottery_bullish_premium: ..., ...}}`` mapping produced by
+    :func:`app.features.flow_features.aggregate_premium_by_dte_bucket`.
     """
     if feature_table is None or feature_table.empty:
         return
@@ -310,6 +470,7 @@ def save_flow_feature_snapshot(feature_table: pd.DataFrame) -> None:
     # Build a list of tickers we'll enrich with per-ticker UW calls.  We do
     # this up-front (and in parallel) so the slow network calls overlap
     # rather than blocking one-by-one.
+    premium_buckets = premium_buckets or {}
     gap_tickers: list[str] = []
     gap_feature_rows: dict[str, dict] = {}
     for _, row in feature_table.iterrows():
@@ -318,8 +479,6 @@ def save_flow_feature_snapshot(feature_table: pd.DataFrame) -> None:
             continue
         gap_tickers.append(ticker)
         gap_feature_rows[ticker] = {
-            "bull_prem": float(row.get("bullish_premium_raw", 0) or 0),
-            "bear_prem": float(row.get("bearish_premium_raw", 0) or 0),
             "mcap": float(row.get("marketcap", 0) or 0),
             "dominant_dte_bucket": row.get("dominant_dte_bucket"),
             "sweep_share": row.get("sweep_share"),
@@ -337,8 +496,14 @@ def save_flow_feature_snapshot(feature_table: pd.DataFrame) -> None:
     # flow-features routinely surfaces 100+ tickers below that cut-off.
     # Without this, those rows land with close=None / OI=None / IV=None
     # and every Trader Card for them renders zeros.  We fan-out to
-    # /stock/{ticker}/options-volume + /iv-rank + /info concurrently
-    # and fall back to the thin row when a call fails.
+    # /stock/{ticker}/options-volume + /iv-rank + /info concurrently.
+    #
+    # Premium-taxonomy plan: when the per-ticker fetch fails for a
+    # ticker, we **skip** that ticker rather than silently persisting a
+    # row with narrow flow-alert premium.  This keeps the daily series
+    # apples-to-apples for ``compute_multi_day_flow``'s log-linear
+    # regression — mixing UW-aggregate rows with flow-alert-narrow rows
+    # distorts acceleration / persistence / bps calculations.
     enrichment_map: dict[str, dict] = {}
     try:
         from concurrent.futures import ThreadPoolExecutor
@@ -352,66 +517,64 @@ def save_flow_feature_snapshot(feature_table: pd.DataFrame) -> None:
                 if snap:
                     enrichment_map[ticker] = snap
     except Exception as e:
-        print(f"  [flow-tracker] per-ticker enrichment failed (continuing with thin rows): {e}")
+        print(f"  [flow-tracker] per-ticker enrichment failed: {e}")
 
     new_rows: list[dict] = []
+    skipped_tickers: list[str] = []
     for ticker in gap_tickers:
         ft = gap_feature_rows[ticker]
-        bull_prem = ft["bull_prem"]
-        bear_prem = ft["bear_prem"]
-        mcap = ft["mcap"]
-        enriched = enrichment_map.get(ticker) or {}
+        enriched = enrichment_map.get(ticker)
+        if not enriched:
+            skipped_tickers.append(ticker)
+            continue
 
-        new_rows.append({
-            "snapshot_date": today_str,
-            "ticker": ticker,
-            "sector": enriched.get("sector"),
-            "close": enriched.get("close"),
-            # Prefer flow-feature marketcap (already sanitised), fall back
-            # to /stock/{ticker}/info if flow-features didn't have one.
-            "marketcap": (mcap if mcap > 0 else enriched.get("marketcap")),
-            # Screener premiums always win when we have them — they come
-            # straight from UW's own aggregation; otherwise keep the
-            # flow-feature totals.
-            "bullish_premium": round(enriched.get("bullish_premium") or bull_prem, 2),
-            "bearish_premium": round(enriched.get("bearish_premium") or bear_prem, 2),
-            "net_premium": round(
-                enriched.get("net_premium")
-                if enriched.get("net_premium") is not None
-                else (bull_prem - bear_prem),
-                2,
-            ),
-            "call_volume": enriched.get("call_volume"),
-            "put_volume": enriched.get("put_volume"),
-            # Use derived total options volume when available, else the
-            # flow-feature trade count as a last resort.
-            "volume": enriched.get("volume") if enriched.get("volume") is not None else ft.get("total_count"),
-            "call_open_interest": enriched.get("call_open_interest"),
-            "put_open_interest": enriched.get("put_open_interest"),
-            "total_oi_change_perc": enriched.get("total_oi_change_perc"),
-            "call_oi_change_perc": enriched.get("call_oi_change_perc"),
-            "put_oi_change_perc": enriched.get("put_oi_change_perc"),
-            "put_call_ratio": enriched.get("put_call_ratio"),
-            "iv_rank": enriched.get("iv_rank"),
-            "iv30d": enriched.get("iv30d"),
-            "perc_3_day_total": enriched.get("perc_3_day_total"),
-            "perc_30_day_total": enriched.get("perc_30_day_total"),
-            "call_premium": enriched.get("call_premium"),
-            "put_premium": enriched.get("put_premium"),
-            "dominant_dte_bucket": ft.get("dominant_dte_bucket"),
-            "sweep_share": ft.get("sweep_share"),
-            "multileg_share": ft.get("multileg_share"),
-            # Wave 2 — per-side acceleration ratio (today only).
-            "bullish_accel_ratio": ft.get("bullish_accel_ratio"),
-            "bearish_accel_ratio": ft.get("bearish_accel_ratio"),
-        })
+        mcap = ft["mcap"]
+        # Merge the flow-feature marketcap back onto the enriched base
+        # dict so _build_snapshot_row's base fields work uniformly.
+        base = dict(enriched)
+        if mcap > 0 and not base.get("marketcap"):
+            base["marketcap"] = mcap
+        if base.get("volume") in (None, 0):
+            base["volume"] = ft.get("total_count")
+        if base.get("net_premium") is None:
+            total_b = _num(base.get("bullish_premium"))
+            total_s = _num(base.get("bearish_premium"))
+            base["net_premium"] = round(total_b - total_s, 2)
+
+        new_rows.append(
+            _build_snapshot_row(
+                snapshot_date=today_str,
+                ticker=ticker,
+                source="per_ticker_api",
+                total_bullish_premium=base.get("bullish_premium") or 0.0,
+                total_bearish_premium=base.get("bearish_premium") or 0.0,
+                buckets=premium_buckets.get(ticker),
+                base=base,
+                enrichment=ft,
+            )
+        )
 
     if not new_rows:
+        if skipped_tickers:
+            print(
+                f"  [flow-tracker] WARN all {len(skipped_tickers)} flow-feature gap-filler "
+                f"tickers skipped (per-ticker fetch failed). No gap-filler rows persisted "
+                f"this scan."
+            )
         return
 
-    enriched_count = sum(1 for t in gap_tickers if t in enrichment_map)
-    print(f"  [flow-tracker] per-ticker enrichment: {enriched_count}/{len(gap_tickers)} "
-          f"gap-filler rows back-filled with close/OI/IV from UW")
+    enriched_count = len(new_rows)
+    print(
+        f"  [flow-tracker] per-ticker enrichment: {enriched_count}/{len(gap_tickers)} "
+        f"gap-filler rows back-filled with close/OI/IV from UW"
+    )
+    if skipped_tickers:
+        print(
+            f"  [flow-tracker] WARN skipped {len(skipped_tickers)} gap-filler tickers "
+            f"(per-ticker fetch failed — would have used narrow premium, policy is to drop): "
+            f"{', '.join(skipped_tickers[:8])}"
+            f"{'...' if len(skipped_tickers) > 8 else ''}"
+        )
 
     # Append to the existing file (screener snapshot already wrote today's rows)
     all_rows: list[dict] = []
@@ -456,6 +619,7 @@ def compute_multi_day_flow(
     min_mcap: float = FLOW_TRACKER_MIN_MCAP,
     min_prem_mcap_bps: float = FLOW_TRACKER_MIN_PREM_MCAP_BPS,
     max_results: int = FLOW_TRACKER_MAX_RESULTS,
+    mode: str | None = None,
 ) -> list[dict]:
     """Aggregate screener snapshots over the lookback window.
 
@@ -466,6 +630,12 @@ def compute_multi_day_flow(
       3. Minimum prem/mcap bps floor
       4. min_active_days persistence gate
     Capped to max_results by conviction score.
+
+    ``mode`` — when supplied and ``FLOW_TRACKER_HARD_MODE_FILTER`` is
+    ``True``, rows failing the mode's gate are dropped **before** the
+    conviction sort + cap, so the swing-candidate radar stays tight.
+    Legacy callers that pass ``mode=None`` get the original behaviour
+    (every row tagged with ``passes_*`` flags).
     """
     if not SNAPSHOTS_PATH.exists():
         return []
@@ -488,6 +658,11 @@ def compute_multi_day_flow(
         return []
 
     for col in ("bullish_premium", "bearish_premium", "net_premium",
+                 "total_bullish_premium", "total_bearish_premium",
+                 "unusual_bullish_premium", "unusual_bearish_premium",
+                 "lottery_bullish_premium", "lottery_bearish_premium",
+                 "swing_bullish_premium", "swing_bearish_premium",
+                 "leap_bullish_premium", "leap_bearish_premium",
                  "marketcap", "close", "iv_rank", "iv30d",
                  "total_oi_change_perc", "call_oi_change_perc", "put_oi_change_perc",
                  "put_call_ratio", "perc_3_day_total", "perc_30_day_total",
@@ -500,6 +675,24 @@ def compute_multi_day_flow(
                  "bullish_accel_ratio", "bearish_accel_ratio"):
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    # Premium-taxonomy plan: regress on the UW aggregate-directional
+    # premium (``total_*_premium``).  Legacy rows (pre-taxonomy scans)
+    # only have ``bullish_premium`` / ``bearish_premium`` which were
+    # *already* the UW aggregate for screener rows — so fillna from the
+    # legacy columns is safe.  Gap-filler rows written with the old
+    # narrow definition will show up here too; the purge script in
+    # scripts/purge_snapshot_history.py drops those before first run.
+    if "total_bullish_premium" not in df.columns:
+        df["total_bullish_premium"] = df.get("bullish_premium")
+    else:
+        df["total_bullish_premium"] = df["total_bullish_premium"].fillna(df.get("bullish_premium"))
+    if "total_bearish_premium" not in df.columns:
+        df["total_bearish_premium"] = df.get("bearish_premium")
+    else:
+        df["total_bearish_premium"] = df["total_bearish_premium"].fillna(df.get("bearish_premium"))
+    df["total_bullish_premium"] = df["total_bullish_premium"].fillna(0.0)
+    df["total_bearish_premium"] = df["total_bearish_premium"].fillna(0.0)
 
     all_dates = sorted(df["snapshot_date"].unique())
     total_days = len(all_dates)
@@ -521,9 +714,9 @@ def compute_multi_day_flow(
         if raw_active_days < min_active_days:
             continue
 
-        cum_bull = grp["bullish_premium"].sum()
-        cum_bear = grp["bearish_premium"].sum()
-        cum_net = grp["net_premium"].sum()
+        cum_bull = float(grp["total_bullish_premium"].sum())
+        cum_bear = float(grp["total_bearish_premium"].sum())
+        cum_net = float(grp["net_premium"].sum()) if "net_premium" in grp.columns else (cum_bull - cum_bear)
         cum_total = cum_bull + cum_bear
 
         latest = grp.sort_values("snapshot_date").iloc[-1]
@@ -551,8 +744,8 @@ def compute_multi_day_flow(
         raw_daily: list[tuple[int, float, float, float, str]] = []  # (day_idx, bull, bear, total, date)
         for idx, d in enumerate(raw_active_dates):
             day_rows = grp[grp["snapshot_date"] == d]
-            db = float(day_rows["bullish_premium"].sum())
-            dbe = float(day_rows["bearish_premium"].sum())
+            db = float(day_rows["total_bullish_premium"].sum())
+            dbe = float(day_rows["total_bearish_premium"].sum())
             raw_daily.append((idx, db, dbe, db + dbe, d))
 
         # Wave 0.5 B2 — premium-weighted active day count.
@@ -619,7 +812,7 @@ def compute_multi_day_flow(
                 daily_snaps.append({"date": d, "premium": 0, "active": False})
             else:
                 dr = day_row.iloc[0]
-                dp = float(dr.get("bullish_premium") or 0) + float(dr.get("bearish_premium") or 0)
+                dp = float(dr.get("total_bullish_premium") or 0) + float(dr.get("total_bearish_premium") or 0)
                 daily_snaps.append({"date": d, "premium": dp, "active": True})
 
         direction = "BULLISH" if cum_bull >= cum_bear else "BEARISH"
@@ -720,6 +913,60 @@ def compute_multi_day_flow(
         oi_change_window_avg = float(oi_change_series.mean()) if not oi_change_series.empty else 0.0
         oi_change_norm = float(np.clip(abs(oi_change_window_avg) / 50.0, 0.0, 1.0))
 
+        # Premium-taxonomy plan — per-ticker window totals by DTE bucket.
+        # Reported as today's latest snapshot values (screener / UW
+        # options-volume endpoint both report rolling-24h numbers that
+        # don't sum meaningfully across the window) PLUS window sums for
+        # the unusual-flow-derived lottery/swing/leap buckets (those DO
+        # sum cleanly because each day's aggregation is independent).
+        def _latest_col(col: str) -> float:
+            if col not in grp.columns:
+                return 0.0
+            series = grp[col].dropna()
+            return float(series.iloc[-1]) if not series.empty else 0.0
+
+        def _sum_col(col: str) -> float:
+            if col not in grp.columns:
+                return 0.0
+            return float(pd.to_numeric(grp[col], errors="coerce").fillna(0.0).sum())
+
+        lottery_bull_sum = _sum_col("lottery_bullish_premium")
+        lottery_bear_sum = _sum_col("lottery_bearish_premium")
+        swing_bull_sum   = _sum_col("swing_bullish_premium")
+        swing_bear_sum   = _sum_col("swing_bearish_premium")
+        leap_bull_sum    = _sum_col("leap_bullish_premium")
+        leap_bear_sum    = _sum_col("leap_bearish_premium")
+        unusual_bull_sum = _sum_col("unusual_bullish_premium") or swing_bull_sum
+        unusual_bear_sum = _sum_col("unusual_bearish_premium") or swing_bear_sum
+
+        # "Other DTE" = unusual flow outside lottery/swing/leap (DTE 15-29,
+        # 121-179).  Derived as max(0, unusual - lottery - swing - leap).
+        other_bull = max(0.0, unusual_bull_sum - lottery_bull_sum - swing_bull_sum - leap_bull_sum)
+        other_bear = max(0.0, unusual_bear_sum - lottery_bear_sum - swing_bear_sum - leap_bear_sum)
+
+        # Premium source tag — latest row's source (tracks what feeds today).
+        source_tag = None
+        if "premium_source" in grp.columns:
+            src_series = grp["premium_source"].dropna()
+            if not src_series.empty:
+                source_tag = str(src_series.iloc[-1])
+
+        premium_mix = {
+            "total_bullish":   round(cum_bull, 2),
+            "total_bearish":   round(cum_bear, 2),
+            "lottery_bullish": round(lottery_bull_sum, 2),
+            "lottery_bearish": round(lottery_bear_sum, 2),
+            "swing_bullish":   round(swing_bull_sum, 2),
+            "swing_bearish":   round(swing_bear_sum, 2),
+            "leap_bullish":    round(leap_bull_sum, 2),
+            "leap_bearish":    round(leap_bear_sum, 2),
+            "unusual_bullish": round(unusual_bull_sum, 2),
+            "unusual_bearish": round(unusual_bear_sum, 2),
+            "other_bullish":   round(other_bull, 2),
+            "other_bearish":   round(other_bear, 2),
+            "source":          source_tag,
+        }
+
         raw_results.append({
             "ticker": ticker,
             "sector": latest.get("sector") or "—",
@@ -761,6 +1008,8 @@ def compute_multi_day_flow(
             "perc_3_day_total_latest": round(perc_3d_latest, 3),
             "perc_3_day_total_max": round(perc_3d_window_max, 3),
             "oi_change_window_avg": round(oi_change_window_avg, 2),
+            "premium_mix": premium_mix,
+            "premium_source": source_tag,
             "_consistency_raw": consistency_raw,
             "_accel_raw": accel_raw,
             "_accel_t_stat": accel_t_stat,
@@ -864,25 +1113,10 @@ def compute_multi_day_flow(
         if hedging_risk:
             score *= 0.85
 
-        # --- Wave 0.5 A4 — window-return bonus/drag ---
-        # Flow aligned with realised price action (bullish flow + up week,
-        # bearish flow + down week) earns a small bonus; flow fighting the
-        # tape takes a small drag.  Clamped so this never dominates the
-        # component-driven score — it's context, not the primary signal.
-        ret = float(r.get("window_return_pct", 0.0))
-        return_adjustment = 0.0
-        if abs(ret) >= 0.5:
-            aligned = (
-                (r["direction"] == "BULLISH" and ret > 0)
-                or (r["direction"] == "BEARISH" and ret < 0)
-            )
-            if aligned:
-                return_adjustment = min(abs(ret) / 10.0, 1.0) * FLOW_TRACKER_RETURN_BONUS
-            else:
-                return_adjustment = -min(abs(ret) / 10.0, 1.0) * FLOW_TRACKER_RETURN_DRAG
-        score += return_adjustment
-        r["_return_adjustment"] = round(return_adjustment, 3)
-
+        # Decouple-Score plan — window_return_pct no longer adjusts
+        # conviction_score.  Price confirmation lives in the stack's
+        # _score_price component (up to 12 pts); conviction_score is
+        # a pure flow-quality metric.
         r["conviction_score"] = round(max(score, 0.0), 1)
         r["conviction_grade"] = _conviction_grade(r["conviction_score"])
         r["accel_t_stat"] = round(r["_accel_t_stat"], 2)
@@ -920,7 +1154,7 @@ def compute_multi_day_flow(
             "_consistency_raw", "_accel_raw", "_accel_t_stat", "_cum_total",
             "_intensity_norm", "_consistency_norm", "_accel_norm", "_mass_norm",
             "_oi_change_norm", "_oi_change_norm_kept",
-            "_dte_multiplier", "_return_adjustment",
+            "_dte_multiplier",
         ):
             r.pop(_k, None)
 
@@ -928,9 +1162,26 @@ def compute_multi_day_flow(
 
     total_qualified = len(raw_results)
     # Funnel counts exposed to the UI for the [Strong][Accum][All] toggle.
+    # These count the full population **before** mode hard-filtering so
+    # the UI can still show "3 accumulation, 1 strong" even when the
+    # caller requests a narrow mode.
     count_strong = sum(1 for r in raw_results if r["passes_strong"])
     count_accum = sum(1 for r in raw_results if r["passes_accumulation"])
     count_all = sum(1 for r in raw_results if r["passes_all"])
+
+    # Flow-Tracker-Swing-Radar: mode hard-filter before the cap.  Legacy
+    # callers (mode=None) keep the old "return all, tag per mode" shape.
+    if mode and FLOW_TRACKER_HARD_MODE_FILTER:
+        mode_key = str(mode).lower()
+        mode_flag_map = {
+            "all": "passes_all",
+            "accumulation": "passes_accumulation",
+            "strong_accumulation": "passes_strong",
+            "strong": "passes_strong",
+        }
+        flag = mode_flag_map.get(mode_key)
+        if flag is not None:
+            raw_results = [r for r in raw_results if r.get(flag)]
 
     if max_results and len(raw_results) > max_results:
         raw_results = raw_results[:max_results]

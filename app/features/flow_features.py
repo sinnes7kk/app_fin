@@ -74,6 +74,84 @@ def filter_qualifying_flow(
     return out
 
 
+def aggregate_premium_by_dte_bucket(
+    df: pd.DataFrame,
+    buckets: list[tuple[str, float, float, str]] | None = None,
+) -> pd.DataFrame:
+    """Aggregate unusual-flow premium into DTE buckets per ticker.
+
+    Each bucket in ``buckets`` is ``(label, dte_min, dte_max, tooltip)``.
+    Returns a per-ticker DataFrame with columns ``ticker`` and for every
+    bucket label ``L``: ``L_bullish_premium`` and ``L_bearish_premium``.
+
+    Input is expected to be filtered / normalized flow (same shape as
+    ``aggregate_flow_by_ticker`` input): needs ``ticker``, ``premium``,
+    ``dte``, ``direction`` columns.  Unlike the main aggregator, this
+    function is purely a sum and does NOT apply ``direction_confidence``
+    weighting — the taxonomy panel reports raw directional premium by
+    bucket for readability.
+
+    When ``buckets`` is None the config default
+    ``FLOW_TRACKER_PREMIUM_BUCKETS`` is used.
+    """
+    from app.config import FLOW_TRACKER_PREMIUM_BUCKETS
+
+    if buckets is None:
+        buckets = FLOW_TRACKER_PREMIUM_BUCKETS
+
+    labels = [b[0] for b in buckets]
+
+    if df is None or df.empty or "ticker" not in df.columns:
+        cols = ["ticker"] + [f"{lbl}_bullish_premium" for lbl in labels] + [
+            f"{lbl}_bearish_premium" for lbl in labels
+        ]
+        return pd.DataFrame(columns=cols)
+
+    out = df.copy()
+    required = ["ticker", "premium", "dte", "direction"]
+    missing = [c for c in required if c not in out.columns]
+    if missing:
+        raise ValueError(
+            f"Missing required columns for bucket aggregation: {missing}"
+        )
+
+    out["premium"] = pd.to_numeric(out["premium"], errors="coerce").fillna(0.0)
+    out["dte"] = pd.to_numeric(out["dte"], errors="coerce")
+
+    tickers = sorted(out["ticker"].dropna().unique().tolist())
+    frame = pd.DataFrame({"ticker": tickers})
+
+    for label, lo, hi, _tip in buckets:
+        in_bucket = (out["dte"] >= lo) & (out["dte"] <= hi)
+        bull_mask = in_bucket & (out["direction"] == "LONG")
+        bear_mask = in_bucket & (out["direction"] == "SHORT")
+
+        bull = (
+            out[bull_mask]
+            .groupby("ticker")["premium"]
+            .sum()
+            .rename(f"{label}_bullish_premium")
+        )
+        bear = (
+            out[bear_mask]
+            .groupby("ticker")["premium"]
+            .sum()
+            .rename(f"{label}_bearish_premium")
+        )
+        frame = frame.merge(bull, on="ticker", how="left")
+        frame = frame.merge(bear, on="ticker", how="left")
+
+    for label in labels:
+        for side in ("bullish", "bearish"):
+            col = f"{label}_{side}_premium"
+            if col in frame.columns:
+                frame[col] = frame[col].fillna(0.0)
+            else:
+                frame[col] = 0.0
+
+    return frame
+
+
 def add_volume_oi_ratio(df: pd.DataFrame) -> pd.DataFrame:
     """
     Add volume/open_interest ratio.
@@ -663,12 +741,24 @@ def _build_z_frame(
     z_stats: "ZStatsBundle",
     *,
     side: str,
+    components: list[str] | None = None,
 ) -> pd.DataFrame | None:
     """Run ``flow_stats.compute_z_with_tier`` on the directional columns for
-    the requested side and return a DataFrame aligned to ``agg.index``."""
+    the requested side and return a DataFrame aligned to ``agg.index``.
+
+    When ``components`` is provided, only those component keys (e.g.
+    ``["flow_intensity"]``) are z-scored. Omitted components will fall through
+    to the absolute-threshold path in ``_component_unit`` because their
+    ``{col}_z`` columns won't exist in the returned frame.
+    """
     from app.features.flow_stats import COMPONENT_COLUMNS, compute_z_with_tier
 
-    cols = [cfg[side] for cfg in COMPONENT_COLUMNS.values()]
+    comp_items = COMPONENT_COLUMNS.items()
+    if components is not None:
+        wanted = set(components)
+        comp_items = [(k, v) for k, v in comp_items if k in wanted]
+
+    cols = [cfg[side] for _name, cfg in comp_items]
     # De-dupe (dte_score is shared across sides)
     cols = list(dict.fromkeys(cols))
 
@@ -693,17 +783,37 @@ def build_z_stats_bundle(
     today_agg: pd.DataFrame,
     *,
     sector_col: str | None = None,
+    components: list[str] | None = None,
 ) -> ZStatsBundle:
     """Convenience helper: build a full ZStatsBundle from loaded history and
     today's aggregated flow. Intended to be called once per pipeline run.
+
+    When ``components`` is provided, only those ``COMPONENT_COLUMNS`` keys are
+    stat-computed. Saves work and avoids manufacturing stats for columns the
+    caller knows aren't hydrated (e.g. UW-backed history only carries
+    ``flow_intensity``).
     """
     from app.features.flow_stats import (
+        COMPONENT_COLUMNS,
         all_scored_columns,
         cross_sectional_stats,
         per_ticker_stats,
     )
 
-    cols = all_scored_columns()
+    if components is None:
+        cols = all_scored_columns()
+    else:
+        seen: set[str] = set()
+        cols = []
+        for name in components:
+            cfg = COMPONENT_COLUMNS.get(name)
+            if cfg is None:
+                continue
+            for side_col in cfg.values():
+                if side_col not in seen:
+                    seen.add(side_col)
+                    cols.append(side_col)
+
     per_t = per_ticker_stats(history, cols)
     cs = cross_sectional_stats(today_agg, cols, sector_col=sector_col)
     return ZStatsBundle(per_ticker=per_t, cross=cs, sector_col=sector_col)
@@ -714,6 +824,7 @@ def rescore_with_z(
     history: pd.DataFrame,
     *,
     sector_col: str | None = None,
+    components: list[str] | None = None,
 ) -> pd.DataFrame:
     """Rescore an existing aggregated flow table using z-score baselines.
 
@@ -726,11 +837,19 @@ def rescore_with_z(
     The legacy ``bullish_score`` / ``bearish_score`` values from the
     absolute-threshold path are preserved as
     ``bullish_score_abs`` / ``bearish_score_abs`` for shadow comparison.
+
+    When ``components`` is provided, only those ``COMPONENT_COLUMNS`` keys are
+    z-scored; the remaining components keep their absolute-threshold scoring
+    inside ``_weighted_flow_score_mixed``. This lets callers hydrate only the
+    components their history source supports (e.g. UW options-volume only
+    covers ``flow_intensity``).
     """
     if agg is None or agg.empty:
         return agg
 
-    bundle = build_z_stats_bundle(history, agg, sector_col=sector_col)
+    bundle = build_z_stats_bundle(
+        history, agg, sector_col=sector_col, components=components
+    )
 
     # Preserve legacy scores for shadow comparison
     if "bullish_score" in agg.columns:
@@ -738,8 +857,8 @@ def rescore_with_z(
     if "bearish_score" in agg.columns:
         agg["bearish_score_abs"] = agg["bearish_score"].copy()
 
-    bull_z = _build_z_frame(agg, bundle, side="bullish")
-    bear_z = _build_z_frame(agg, bundle, side="bearish")
+    bull_z = _build_z_frame(agg, bundle, side="bullish", components=components)
+    bear_z = _build_z_frame(agg, bundle, side="bearish", components=components)
 
     bull_score, bull_tiers = _weighted_flow_score_mixed(
         agg,

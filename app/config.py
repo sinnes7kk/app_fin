@@ -66,17 +66,27 @@ FLOW_PERSISTENCE_DAYS = 3    # look back this many calendar days
 FLOW_PERSISTENCE_BONUS = 0.5 # max score bonus for persistent flow (conservative)
 
 # Rolling z-score baselines for flow components (see app/features/flow_stats.py).
-# When USE_ZSCORE_FLOW is True, each directional flow component is scored as
-# (value - median_30d) / MAD_30d instead of against the absolute thresholds
-# in flow_features._FLOW_THRESHOLDS. Four-tier fallback ladder handles tickers
-# with insufficient history.
-USE_ZSCORE_FLOW = False           # master switch; False keeps current absolute-threshold scoring
+# When USE_ZSCORE_FLOW is True, each listed component in ZSCORE_COMPONENTS is
+# scored as (value - median_30d) / MAD_30d instead of against the absolute
+# thresholds in flow_features._FLOW_THRESHOLDS. Four-tier fallback ladder
+# handles tickers with insufficient history.
+#
+# History for the z-baseline is sourced from UW's
+# /stock/{ticker}/options-volume?limit=30 endpoint (see
+# app/features/uw_history.py), cached on disk 24h per ticker. Only components
+# in ZSCORE_COMPONENTS that UW can hydrate are z-scored; the rest stay on
+# absolute-threshold scoring until hydrated separately.
+USE_ZSCORE_FLOW = True            # master switch (UW-backed baseline, intensity only)
 ZSCORE_LOOKBACK_DAYS = 30         # trailing window for per-ticker stats
 ZSCORE_MIN_N_FULL = 20            # Tier 1 minimum valid observations
 ZSCORE_MIN_N_SHRUNK = 5           # Tier 2 minimum (below → Tier 3 cross-sectional)
 ZSCORE_SHRINKAGE_K = 10           # Bayesian shrinkage strength for Tier 2 MAD
 ZSCORE_CLIP = 3.5                 # clamp |z| to this before logistic
 ZSCORE_MIN_COHORT_SIZE = 10       # Tier 3/cross-section needs at least this many tickers
+ZSCORE_COMPONENTS = ["flow_intensity"]  # components whose z-baseline is UW-backed;
+                                        # others stay on absolute thresholds until
+                                        # hydrated separately
+UW_HISTORY_CACHE_TTL_HOURS = 24   # per-ticker UW options-volume history cache TTL
 
 # Delta-weighted directional premium (see app/features/flow_features.py::add_delta_weights).
 # When USE_DELTA_WEIGHTED_FLOW is True, the `flow_intensity` component in the
@@ -113,7 +123,7 @@ FLOW_TRACKER_MIN_ACTIVE_DAYS = 2
 FLOW_TRACKER_MIN_PREMIUM = 250_000
 FLOW_TRACKER_MIN_MCAP = 500_000_000
 FLOW_TRACKER_MIN_PREM_MCAP_BPS = 0.10
-FLOW_TRACKER_MAX_RESULTS = 30
+FLOW_TRACKER_MAX_RESULTS = 15
 
 # Wave 0.5 C1 — snapshot retention + horizon toggle.
 #
@@ -154,14 +164,36 @@ FLOW_TRACKER_HORIZON_DEFAULT = "5d"
 # signature) at the expense of raw intensity.  Ladder grades stay on the
 # same 0-10 scale so `grade_stats.json` remains compatible.
 FLOW_TRACKER_MODE_DEFAULT = "accumulation"          # UI default on first load
-FLOW_TRACKER_AUTO_WIDEN_MIN = 5                     # auto-widen notice threshold
+FLOW_TRACKER_AUTO_WIDEN_MIN = 3                     # auto-widen notice threshold
+# Flow-Tracker-Swing-Radar: when True, ``compute_multi_day_flow`` hard-
+# filters out rows that fail the requested mode (legacy behaviour
+# returned all rows tagged with per-mode flags).  Also filters out
+# ILLIQUID liquidity tiers in ``_build_flow_tracker``.
+FLOW_TRACKER_HARD_MODE_FILTER = True
+FLOW_TRACKER_HARD_ILLIQUID_FILTER = True
+
+# Premium-Taxonomy plan — after scripts/purge_snapshot_history.py wipes
+# the old screener_snapshots.csv we need at least ~3 trading days of
+# fresh rows before the multi-day regression has anything useful to
+# say.  While ramping, the Action Bar renders a "Rebuilding history
+# (day X of N)" banner sourced from these constants.  Tune N if you
+# need a longer warm-up; 3 matches the ``min_active_days=2`` default
+# with a one-day buffer.
+FLOW_TRACKER_WARMUP_DAYS = 3
+FLOW_TRACKER_WARMUP_BANNER_ENABLED = True
 
 FLOW_TRACKER_MODES = {
+    # Flow-Tracker-Swing-Radar + Premium-Taxonomy: thresholds now run
+    # against ``total_bullish_premium + total_bearish_premium`` which
+    # is UW's full-day aggregate.  Means the $/day floors are real
+    # dollar commitments across the window, not a post-narrow-filter
+    # residual.  Mode gates are hard filters: rows failing the gate are
+    # dropped before the 15-row cap so the radar stays tight.
     "all": {
         "label": "All",
         "min_active_days": 2,
-        "min_cum_premium": 250_000,
-        "min_prem_mcap_bps": 0.10,
+        "min_cum_premium": 2_000_000,
+        "min_prem_mcap_bps": 0.50,
         "min_consistency": 0.0,
         "min_accel_t": -99.0,
         "exclude_hedging": False,
@@ -171,8 +203,8 @@ FLOW_TRACKER_MODES = {
     "accumulation": {
         "label": "Accumulation",
         "min_active_days": 4,
-        "min_cum_premium": 1_000_000,
-        "min_prem_mcap_bps": 2.0,
+        "min_cum_premium": 10_000_000,
+        "min_prem_mcap_bps": 3.0,
         "min_consistency": 0.55,
         "min_accel_t": -0.5,
         "exclude_hedging": True,
@@ -182,8 +214,8 @@ FLOW_TRACKER_MODES = {
     "strong_accumulation": {
         "label": "Strong",
         "min_active_days": 5,
-        "min_cum_premium": 2_000_000,
-        "min_prem_mcap_bps": 3.0,
+        "min_cum_premium": 25_000_000,
+        "min_prem_mcap_bps": 5.0,
         "min_consistency": 0.65,
         "min_accel_t": 0.5,
         "exclude_hedging": True,
@@ -229,6 +261,27 @@ FLOW_TRACKER_DTE_BUCKETS = [
     ("91+",   91,  9999, 1.05),
 ]
 
+# Premium-taxonomy DTE buckets.  These are screening-friendly bucket
+# definitions that feed the Trader Card Premium-Mix panel and the
+# per-bucket `lottery_*_premium` / `swing_*_premium` / `leap_*_premium`
+# columns persisted to screener_snapshots.csv.  Kept separate from
+# FLOW_TRACKER_DTE_BUCKETS above so the dominant-bucket grade-explainer
+# logic is unaffected.
+#
+# Buckets:
+#   lottery (0-14d)   — event speculation / earnings bets / squeezes
+#   swing   (30-120d) — institutional swing window (signal pipeline home)
+#   leap    (180d+)   — deep positional commitment
+#
+# DTEs that fall in the gaps (15-29d, 121-179d) land in the "other"
+# bucket and are tracked implicitly as total - sum(buckets).
+FLOW_TRACKER_PREMIUM_BUCKETS = [
+    # (label, dte_min, dte_max, tooltip)
+    ("lottery", 0,   14,   "0-14d - event speculation, earnings bets, squeezes"),
+    ("swing",   30,  120,  "30-120d - institutional swing window"),
+    ("leap",    180, 9999, "180d+ - deep positional commitment"),
+]
+
 # Wave 0.5 A6: require perc_3_day_total above this percentile for the
 # accumulation/strong-accumulation gates.  `perc_3_day_total` is UW's
 # normalized unusualness score (0..1) across the universe — values above
@@ -240,11 +293,6 @@ FLOW_TRACKER_MIN_3D_PERCENTILE = 0.70
 # position (trade size > current OI).  Default OFF so behaviour is unchanged
 # until you explicitly cut over.
 FLOW_OPENING_ONLY = False
-
-# Wave 0.5 A4: window return pill thresholds.  Return is computed over the
-# tracker lookback window using snapshot closes.
-FLOW_TRACKER_RETURN_BONUS = 0.25   # score bonus when return aligns with direction
-FLOW_TRACKER_RETURN_DRAG = 0.25    # score drag when return is fighting direction
 
 # Wave 0.5 A8: dark-pool alignment bonus.  When DP flow direction agrees
 # with options flow direction AND DP notional is material (>3 bps of

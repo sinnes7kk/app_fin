@@ -1709,6 +1709,19 @@ dl.detail-grid dd {
 .ab-bear { color: var(--bad); }
 .ab-neutral { color: var(--warn); }
 
+/* Premium-Taxonomy plan — Flow Tracker warm-up banner in the Action
+   Bar.  Lit only while the multi-day regression is rebuilding after
+   scripts/purge_snapshot_history.py reset the CSV.  Warm amber so it
+   reads as "heads up, not an alert" next to the other chips. */
+.ab-warmup .ab-warmup-value {
+  color: #ff9800;
+  font-weight: 700;
+}
+.ab-warmup {
+  border-left: 2px solid rgba(255,152,0,0.55);
+  padding-left: 0.55rem;
+}
+
 /* ── Overview tweaks ── */
 .regime-compact .regime-components { display: none; }
 .section-h {
@@ -2684,37 +2697,7 @@ a.ft-hero-card:hover {
 }
 .ft-auto-widen-notice .ft-lock-btn:hover { background: rgba(255,200,120,0.12); }
 
-/* Accumulation score chip (0-100) rendered next to the grade badge. */
-.tc-accum-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.2rem;
-  font-size: 0.68rem;
-  font-weight: 700;
-  letter-spacing: 0.05em;
-  padding: 0.2rem 0.45rem;
-  border-radius: 3px;
-  border: 1px solid transparent;
-  margin-left: 0.2rem;
-  font-variant-numeric: tabular-nums;
-}
-.tc-accum-chip.tc-accum-high {
-  background: rgba(63,185,80,0.18);
-  color: #5fd872;
-  border-color: rgba(63,185,80,0.35);
-}
-.tc-accum-chip.tc-accum-mid {
-  background: rgba(255,152,0,0.14);
-  color: #ffb453;
-  border-color: rgba(255,152,0,0.30);
-}
-.tc-accum-chip.tc-accum-low {
-  background: rgba(255,255,255,0.05);
-  color: rgba(230,237,243,0.55);
-  border-color: rgba(255,255,255,0.08);
-}
-
-/* Wave 0.5 A1 — DTE bucket chip (shares shape with ACC chip). */
+/* Wave 0.5 A1 — DTE bucket chip. */
 .tc-dte-chip {
   display: inline-flex;
   align-items: center;
@@ -2822,6 +2805,33 @@ a.ft-hero-card:hover {
   background: rgba(120,200,170,0.10);
   color: #7bd3b3;
   border: 1px solid rgba(120,200,170,0.22);
+}
+
+/* Swing-radar cross-reference chip.  "Also in signals" means the
+   tracker ticker also cleared today's ranked bullish/bearish pipeline
+   (strong confirmation).  "Radar only" means the multi-day regression
+   surfaced the name but the pipeline didn't (early read).  Kept muted
+   on purpose so it complements — not competes with — the NET
+   BULLISH/BEARISH badge next to it. */
+.tc-xref {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.64rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 0.16rem 0.4rem;
+  border-radius: 3px;
+  margin-left: 0.2rem;
+}
+.tc-xref-in-signals {
+  background: rgba(79,195,247,0.14);
+  color: #4fc3f7;
+  border: 1px solid rgba(79,195,247,0.28);
+}
+.tc-xref-radar-only {
+  background: rgba(255,255,255,0.06);
+  color: rgba(255,255,255,0.62);
+  border: 1px solid rgba(255,255,255,0.14);
 }
 
 /* ══════════════════════════════════════════════════════════════════
@@ -3136,4 +3146,401 @@ a.ft-hero-card:hover {
   background: rgba(176,0,176,0.18);
   color: #ffbdff;
   border-color: rgba(176,0,176,0.55);
+}
+
+/* ─────────────────────────────────────────────────────────────────────
+   Premium-Taxonomy plan — "Premium Mix" modal panel.
+   Renders total-directional / unusual / per-bucket (swing / lottery /
+   LEAP / other) premium stacks with a tiny bull/bear side-share bar.
+   ───────────────────────────────────────────────────────────────────── */
+.tc-mix-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  padding-top: 0.25rem;
+}
+.tc-mix-source {
+  font-size: 0.78rem;
+  color: var(--muted, #7a7a85);
+  margin-bottom: 0.15rem;
+}
+.tc-mix-source code {
+  background: rgba(255,255,255,0.05);
+  padding: 0.05rem 0.35rem;
+  border-radius: 3px;
+  font-size: 0.78rem;
+}
+.tc-mix-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid rgba(255,255,255,0.07);
+  border-radius: 6px;
+  background: rgba(255,255,255,0.025);
+  cursor: help;
+}
+.tc-mix-kicker-row {
+  background: rgba(110,140,255,0.06);
+  border-color: rgba(110,140,255,0.25);
+}
+.tc-mix-dominant {
+  border-color: rgba(63,185,80,0.45);
+  background: rgba(63,185,80,0.08);
+}
+.tc-mix-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+.tc-mix-label {
+  flex: 1 1 auto;
+  font-weight: 600;
+  font-size: 0.88rem;
+}
+.tc-mix-total {
+  font-variant-numeric: tabular-nums;
+  font-size: 0.92rem;
+}
+.tc-mix-pct {
+  font-size: 0.78rem;
+  opacity: 0.7;
+  font-variant-numeric: tabular-nums;
+}
+.tc-mix-side-bar {
+  display: flex;
+  height: 5px;
+  border-radius: 3px;
+  overflow: hidden;
+  background: rgba(255,255,255,0.08);
+}
+.tc-mix-side-bull {
+  background: #3fb950;
+  transition: width 0.2s ease;
+}
+.tc-mix-side-bear {
+  background: #f85149;
+  transition: width 0.2s ease;
+}
+.tc-mix-side-legend {
+  font-size: 0.75rem;
+  opacity: 0.85;
+  font-variant-numeric: tabular-nums;
+}
+.tc-mix-bull { color: #3fb950; }
+.tc-mix-bear { color: #f85149; }
+.tc-mix-signal {
+  font-size: 0.75rem;
+  opacity: 0.65;
+  font-style: italic;
+  margin-top: 0.1rem;
+}
+.tc-mix-empty {
+  padding: 1rem;
+  text-align: center;
+  color: var(--muted, #7a7a85);
+  font-size: 0.88rem;
+}
+
+/* -------------------------------------------------------------------
+ * Reference modal (Scoring Reference plan)
+ *
+ * A single page-level modal that renders the full scoring/glossary
+ * partial (``_reference.html``).  Triggered by ``data-ref-open``
+ * buttons: the tiny ``?`` chip triggers next to the scoring badges
+ * (deep-linked to a specific section) and the global ``?`` button
+ * pinned next to the action bar (opens at the top).
+ *
+ * Visibility is controlled by ``aria-hidden``; JS toggles the
+ * attribute plus a ``ref-modal-open`` class on <body> to lock scroll
+ * on the main page while the modal is up.
+ * ----------------------------------------------------------------- */
+
+.action-bar-row {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+.action-bar-row .action-bar {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.ref-global-trigger {
+  flex: 0 0 auto;
+  align-self: flex-start;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 1px solid var(--border, #2e3240);
+  background: var(--panel-bg, #1a1c24);
+  color: var(--muted, #9aa0b1);
+  font-size: 0.95rem;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 0.25rem;
+  transition: color 0.12s ease, border-color 0.12s ease, background 0.12s ease;
+}
+.ref-global-trigger:hover,
+.ref-global-trigger:focus-visible {
+  color: var(--accent, #7db3ff);
+  border-color: var(--accent, #7db3ff);
+  background: rgba(125, 179, 255, 0.08);
+  outline: none;
+}
+
+.ref-chip-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  padding: 0;
+  margin-left: 0.15rem;
+  margin-right: 0.25rem;
+  border: 1px solid transparent;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted, #7a828f);
+  font-size: 0.7rem;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  vertical-align: middle;
+  opacity: 0.55;
+  transition: opacity 0.12s ease, color 0.12s ease, background 0.12s ease, border-color 0.12s ease;
+}
+.ref-chip-trigger:hover,
+.ref-chip-trigger:focus-visible {
+  opacity: 1;
+  color: var(--accent, #7db3ff);
+  background: rgba(125, 179, 255, 0.1);
+  border-color: rgba(125, 179, 255, 0.4);
+  outline: none;
+}
+
+body.ref-modal-open {
+  overflow: hidden;
+}
+
+.ref-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: none;
+}
+.ref-modal[aria-hidden="false"] {
+  display: block;
+}
+
+.ref-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(5, 7, 12, 0.66);
+  backdrop-filter: blur(3px);
+  cursor: pointer;
+}
+
+.ref-modal-panel {
+  position: relative;
+  width: min(960px, calc(100vw - 3rem));
+  height: min(82vh, 820px);
+  margin: 8vh auto 0 auto;
+  background: var(--panel-bg, #15171f);
+  border: 1px solid var(--border, #2e3240);
+  border-radius: 12px;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.ref-modal-header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.85rem 1.25rem;
+  border-bottom: 1px solid var(--border, #2e3240);
+  background: rgba(255, 255, 255, 0.02);
+}
+.ref-modal-header h2 {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.ref-modal-close {
+  background: transparent;
+  border: none;
+  color: var(--muted, #9aa0b1);
+  font-size: 1.5rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0.15rem 0.55rem;
+  border-radius: 6px;
+  transition: color 0.12s ease, background 0.12s ease;
+}
+.ref-modal-close:hover,
+.ref-modal-close:focus-visible {
+  color: var(--fg, #f1f3f8);
+  background: rgba(255, 255, 255, 0.06);
+  outline: none;
+}
+
+.ref-modal-body {
+  flex: 1 1 auto;
+  overflow: auto;
+  scroll-behavior: auto; /* keep "instant" scroll-to-anchor snappy */
+  padding: 0;
+  position: relative;
+}
+
+/* --- inner doc layout: sticky TOC on the left, content on the right */
+
+.ref-doc {
+  display: grid;
+  grid-template-columns: 200px 1fr;
+  gap: 0;
+  min-height: 100%;
+}
+
+.ref-toc {
+  position: sticky;
+  top: 0;
+  align-self: flex-start;
+  padding: 1rem 0.75rem 1rem 1rem;
+  border-right: 1px solid var(--border, #2e3240);
+  background: rgba(255, 255, 255, 0.015);
+  font-size: 0.83rem;
+  max-height: 100%;
+  overflow-y: auto;
+}
+.ref-toc-title {
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.7rem;
+  color: var(--muted, #7a828f);
+  margin-bottom: 0.5rem;
+}
+.ref-toc ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.ref-toc ul ul {
+  margin-left: 0.75rem;
+  margin-top: 0.15rem;
+  margin-bottom: 0.25rem;
+  border-left: 1px solid var(--border, #2e3240);
+  padding-left: 0.5rem;
+}
+.ref-toc li {
+  margin: 0.2rem 0;
+}
+.ref-toc a {
+  color: var(--fg, #d6dae4);
+  text-decoration: none;
+  display: block;
+  padding: 0.2rem 0.35rem;
+  border-radius: 4px;
+  transition: color 0.1s ease, background 0.1s ease;
+}
+.ref-toc a:hover,
+.ref-toc a:focus-visible {
+  color: var(--accent, #7db3ff);
+  background: rgba(125, 179, 255, 0.08);
+  outline: none;
+}
+
+.ref-body {
+  padding: 1.25rem 1.5rem 3rem 1.5rem;
+  min-width: 0;
+  color: var(--fg, #d6dae4);
+  font-size: 0.9rem;
+  line-height: 1.55;
+}
+.ref-body h3 {
+  font-size: 1.05rem;
+  margin: 0 0 0.6rem 0;
+  padding-bottom: 0.35rem;
+  border-bottom: 1px solid var(--border, #2e3240);
+}
+.ref-body h4 {
+  font-size: 0.95rem;
+  margin: 1.1rem 0 0.45rem 0;
+  color: var(--accent, #7db3ff);
+  letter-spacing: 0.01em;
+}
+.ref-body p {
+  margin: 0.5rem 0;
+}
+.ref-body code {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 3px;
+  padding: 0.05rem 0.3rem;
+  font-size: 0.85em;
+}
+.ref-body .ref-section {
+  margin-bottom: 1.6rem;
+  /* Buffer so the anchor-jump lands cleanly below the sticky header. */
+  scroll-margin-top: 1rem;
+}
+.ref-body .ref-list {
+  margin: 0.35rem 0 0.6rem 1rem;
+  padding-left: 0.75rem;
+}
+.ref-body .ref-list li {
+  margin-bottom: 0.2rem;
+}
+.ref-body .ref-tip {
+  margin-top: 0.6rem;
+  padding: 0.55rem 0.75rem;
+  background: rgba(125, 179, 255, 0.07);
+  border-left: 2px solid var(--accent, #7db3ff);
+  border-radius: 4px;
+  color: var(--fg, #d6dae4);
+  font-size: 0.88rem;
+}
+.ref-body .ref-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+  margin: 0.5rem 0 0.75rem 0;
+}
+.ref-body .ref-table th,
+.ref-body .ref-table td {
+  text-align: left;
+  padding: 0.35rem 0.55rem;
+  border-bottom: 1px solid var(--border, #2a2d38);
+  vertical-align: top;
+}
+.ref-body .ref-table th {
+  color: var(--muted, #9aa0b1);
+  font-weight: 500;
+  text-transform: uppercase;
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+}
+
+/* On narrow viewports, collapse the TOC on top of the content. */
+@media (max-width: 720px) {
+  .ref-doc {
+    grid-template-columns: 1fr;
+  }
+  .ref-toc {
+    position: relative;
+    border-right: none;
+    border-bottom: 1px solid var(--border, #2e3240);
+    max-height: none;
+  }
+  .ref-modal-panel {
+    margin: 4vh auto 0 auto;
+    height: min(90vh, 900px);
+  }
 }

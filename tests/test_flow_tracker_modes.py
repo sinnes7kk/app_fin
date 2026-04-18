@@ -19,6 +19,8 @@ import tempfile
 from datetime import date, timedelta
 from pathlib import Path
 
+import pandas as pd
+
 try:
     import pytest  # noqa: F401
 except ImportError:  # pragma: no cover
@@ -353,43 +355,41 @@ def test_a1_dte_multiplier_softens_weekly_flow():
     assert wk["dominant_dte_bucket"] == "0-7"
 
 
-def test_a4_window_return_aligned_bonus():
-    """Bullish flow with rising price should earn a return bonus."""
+def test_a4_window_return_does_not_adjust_conviction_score():
+    """Decouple-Score invariance regression.
+
+    After the Decouple-Score plan, ``window_return_pct`` no longer feeds
+    into ``conviction_score`` — it only lives in
+    ``conviction_stack._score_price``.  So three otherwise-identical
+    flows (rising price / flat price / falling price) must produce the
+    **exact same** ``conviction_score``.  This locks in the new
+    contract and guards against a future regression silently
+    reintroducing a price-based bonus/drag on the 0-10 number.
+    """
     days = _days_back(5)
-    rows = []
-    for i, d in enumerate(days):
-        rows.append(_strong_row_with_extras(
-            "TREND", d, bull=3_000_000, close=100.0 + i * 2.0, perc_3d=0.9,
-        ))
-    out = _run_with_synthetic(rows)
-    row = out[0]
-    assert row["window_return_pct"] > 0
-    # Score should reflect the bonus — hard to assert exact value, but with a
-    # ~8% window return the bonus should be ≥ 0.15 points.  Run the same
-    # scenario with flat price and verify delta.
-    flat = [_strong_row_with_extras("TREND", d, bull=3_000_000, close=100.0,
+    rising = [_strong_row_with_extras("UP", d, bull=3_000_000,
+                                      close=100.0 + i * 2.0, perc_3d=0.9)
+              for i, d in enumerate(days)]
+    flat = [_strong_row_with_extras("FLAT", d, bull=3_000_000, close=100.0,
                                     perc_3d=0.9) for d in days]
-    out_flat = _run_with_synthetic(flat)
-    row_flat = out_flat[0]
-    assert row["conviction_score"] > row_flat["conviction_score"], (
-        "rising-price bullish flow should beat flat-price bullish flow"
-    )
-
-
-def test_a4_window_return_fighting_flow_drags_score():
-    """Bullish flow while price drops should take a drag."""
-    days = _days_back(5)
-    rising = [_strong_row_with_extras("UP", d, bull=3_000_000, close=100.0, perc_3d=0.9)
-              for d in days]
     falling = [_strong_row_with_extras("DN", d, bull=3_000_000,
                                        close=100.0 - i * 2.0, perc_3d=0.9)
                for i, d in enumerate(days)]
-    out = _run_with_synthetic(rising + falling)
+    out = _run_with_synthetic(rising + flat + falling)
     up = next(r for r in out if r["ticker"] == "UP")
+    fl = next(r for r in out if r["ticker"] == "FLAT")
     dn = next(r for r in out if r["ticker"] == "DN")
+
+    # Sanity: the window return pill itself still tracks the underlying.
+    assert up["window_return_pct"] > 0
+    assert abs(fl["window_return_pct"]) < 1e-6
     assert dn["window_return_pct"] < 0
-    assert dn["conviction_score"] <= up["conviction_score"], (
-        "bullish flow fighting the tape shouldn't beat flat-tape bullish flow"
+
+    # Invariance: the 0-10 score is window-return-agnostic now.  Scores
+    # are rounded to one decimal so the equality is on the rounded value.
+    assert up["conviction_score"] == fl["conviction_score"] == dn["conviction_score"], (
+        "conviction_score must be invariant to window_return_pct: "
+        f"up={up['conviction_score']} flat={fl['conviction_score']} dn={dn['conviction_score']}"
     )
 
 
@@ -670,6 +670,133 @@ def test_hero_setup_rejects_fighting_price_and_missing_dp():
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Flow-Tracker-Swing-Radar regressions.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _run_with_mode(rows: list[dict], mode: str, lookback_days: int = 5, min_active_days: int = 2):
+    """Variant of ``_run_with_synthetic`` that threads a mode through to
+    ``compute_multi_day_flow`` so we can exercise the hard-gate."""
+    from app.features import flow_tracker as ft_mod
+
+    tmp = Path(tempfile.mkdtemp(prefix="ft_swingradar_"))
+    try:
+        _write_snapshots(tmp, rows)
+        original = ft_mod.SNAPSHOTS_PATH
+        ft_mod.SNAPSHOTS_PATH = tmp / "screener_snapshots.csv"
+        try:
+            return ft_mod.compute_multi_day_flow(
+                lookback_days=lookback_days,
+                min_active_days=min_active_days,
+                mode=mode,
+            )
+        finally:
+            ft_mod.SNAPSHOTS_PATH = original
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_swing_radar_mode_hard_gate_drops_nonqualifying_rows():
+    """With ``mode="accumulation"`` the tracker returns only rows that
+    actually pass the accumulation gate — not the legacy "return all,
+    tagged" payload.  A clear accumulation row should be present, a
+    sparse / weak row should be absent."""
+    from app.config import FLOW_TRACKER_HARD_MODE_FILTER
+    assert FLOW_TRACKER_HARD_MODE_FILTER, (
+        "FLOW_TRACKER_HARD_MODE_FILTER must be True for the swing radar"
+    )
+
+    days = _days_back(5)
+    rows: list[dict] = []
+    # Clean accumulation — 5/5 days, rising, large, one-sided.
+    for i, d in enumerate(days):
+        rows.append(_strong_row("CLEAN", d, bull=5_000_000 + i * 1_000_000))
+    # Weak — 2/5 days, small, fails intensity + persistence.
+    rows.append(_strong_row("WEAK", days[0], bull=400_000))
+    rows.append(_strong_row("WEAK", days[1], bull=400_000))
+
+    out = _run_with_mode(rows, mode="accumulation")
+    tickers = {r["ticker"] for r in out}
+    assert "CLEAN" in tickers, "clean accumulation row should survive the mode gate"
+    assert "WEAK" not in tickers, (
+        "weak row must be dropped by the accumulation hard-gate, not merely tagged"
+    )
+    # Every surviving row must actually pass the requested mode.
+    for r in out:
+        assert r["passes_accumulation"], (
+            f"{r['ticker']}: swing-radar should only surface rows clearing the gate"
+        )
+
+
+def test_swing_radar_accumulation_surfaces_at_least_three_names():
+    """Synthetic sanity: with three clear accumulation setups the radar
+    must surface all three.  Guards against an overly-tight
+    recalibration starving the panel."""
+    days = _days_back(5)
+    rows: list[dict] = []
+    base_levels = [
+        ("AAA", 4_000_000),
+        ("BBB", 6_000_000),
+        ("CCC", 8_000_000),
+    ]
+    for ticker, base_bull in base_levels:
+        for i, d in enumerate(days):
+            rows.append(_strong_row(ticker, d, bull=base_bull + i * 500_000))
+
+    out = _run_with_mode(rows, mode="accumulation")
+    tickers = {r["ticker"] for r in out}
+    for t, _ in base_levels:
+        assert t in tickers, f"{t} should clear the accumulation gate"
+    assert len(out) >= 3, f"accumulation mode should surface ≥ 3 names, got {len(out)}"
+
+
+def test_swing_radar_illiquid_gate_filters_thin_tickers():
+    """The hard-illiquid filter in ``_build_flow_tracker`` drops any row
+    whose ``liquidity.liquidity_tier`` == ``ILLIQUID``.  We stub the
+    upstream compute chain to exercise that final filter in isolation."""
+    from unittest.mock import patch
+    from app.web import server as srv
+    from app.config import FLOW_TRACKER_HARD_ILLIQUID_FILTER
+    assert FLOW_TRACKER_HARD_ILLIQUID_FILTER, (
+        "FLOW_TRACKER_HARD_ILLIQUID_FILTER must be True for the swing radar"
+    )
+
+    stub_rows = [
+        {"ticker": "LIQD", "direction": "BULLISH", "marketcap": 50_000_000_000},
+        {"ticker": "THIN", "direction": "BULLISH", "marketcap": 50_000_000},
+    ]
+
+    def _fake_liquidity(ticker, mcap=None):
+        if ticker == "THIN":
+            return {"adv_dollar": 500_000, "liquidity_tier": "ILLIQUID"}
+        return {"adv_dollar": 50_000_000, "liquidity_tier": "LIQUID"}
+
+    def _passthrough(rows, *args, **kwargs):
+        return rows
+
+    with patch.object(srv, "compute_multi_day_flow", return_value=stub_rows), \
+         patch.object(srv, "compute_multi_day_dp", return_value={}), \
+         patch.object(srv, "_enrich_flow_tracker_sentiment", _passthrough), \
+         patch.object(srv, "_enrich_flow_tracker_dp", _passthrough), \
+         patch.object(srv, "_enrich_flow_tracker_chains", _passthrough), \
+         patch.object(srv, "_enrich_flow_tracker_insider", _passthrough), \
+         patch.object(srv, "_enrich_flow_tracker_earnings", _passthrough), \
+         patch.object(srv, "_enrich_flow_tracker_delta", _passthrough), \
+         patch.object(srv, "_enrich_flow_tracker_ztier", _passthrough), \
+         patch.object(srv, "compute_liquidity", _fake_liquidity):
+        out = srv._build_flow_tracker(
+            lookback_days=5,
+            min_active_days=2,
+            flow=pd.DataFrame(),
+            hottest_chains_by_ticker={},
+            insider_by_ticker={},
+        )
+
+    tickers = {r["ticker"] for r in out}
+    assert "LIQD" in tickers, "liquid ticker must be kept"
+    assert "THIN" not in tickers, "illiquid ticker must be filtered by the swing-radar gate"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Standalone runner (no pytest required).
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -690,8 +817,7 @@ if __name__ == "__main__":
         test_b4_window_avg_pcr_populated,
         # Wave 0.5 Cluster A
         test_a1_dte_multiplier_softens_weekly_flow,
-        test_a4_window_return_aligned_bonus,
-        test_a4_window_return_fighting_flow_drags_score,
+        test_a4_window_return_does_not_adjust_conviction_score,
         test_a6_3d_percentile_gates_accumulation,
         test_a7_oi_change_contributes_to_score,
         test_nan_scalars_coerce_to_zero,
@@ -710,6 +836,11 @@ if __name__ == "__main__":
         test_hero_setup_passes_all_clean_filters,
         test_hero_setup_rejects_high_iv_and_er_soon_and_falls_back,
         test_hero_setup_rejects_fighting_price_and_missing_dp,
+        # Flow-Tracker-Swing-Radar — mode hard gate, accumulation count,
+        # illiquidity filter.
+        test_swing_radar_mode_hard_gate_drops_nonqualifying_rows,
+        test_swing_radar_accumulation_surfaces_at_least_three_names,
+        test_swing_radar_illiquid_gate_filters_thin_tickers,
     ]
     passed, failed = 0, 0
     for t in tests:

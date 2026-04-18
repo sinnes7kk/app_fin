@@ -83,6 +83,22 @@
     <span class="ab-value ab-mute">{{ ab.zscore_caveat_line }}</span>
   </div>
   {% endif %}
+
+  {# Premium-Taxonomy plan — warm-up banner.
+     After ``scripts/purge_snapshot_history.py`` nukes the old
+     screener_snapshots.csv, the multi-day Flow Tracker regression has
+     nothing to chew on until N fresh trading days of snapshots pile
+     up (``FLOW_TRACKER_WARMUP_DAYS``, default 3).  This chip tells the
+     trader "the radar is rebuilding, don't trust sparse results yet"
+     instead of silently showing empty mode buckets. #}
+  {% if ab.flow_tracker_warmup and ab.flow_tracker_warmup.active %}
+  <div class="ab-item ab-warmup"
+       title="Flow Tracker history was just reset.  Multi-day regression needs {{ ab.flow_tracker_warmup.target }} fresh trading days of snapshots before results are trustworthy.  Current: day {{ ab.flow_tracker_warmup.day }} of {{ ab.flow_tracker_warmup.target }}.">
+    <span class="ab-label">Flow Tracker</span>
+    <span class="ab-value ab-warmup-value">Rebuilding history</span>
+    <span class="ab-sub">day {{ ab.flow_tracker_warmup.day }} of {{ ab.flow_tracker_warmup.target }}</span>
+  </div>
+  {% endif %}
 </div>
 {% endif %}
 {% endmacro %}

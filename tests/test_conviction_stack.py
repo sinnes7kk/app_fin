@@ -187,6 +187,52 @@ def test_attach_handles_empty_list():
     assert attach_conviction_stack(None) is None  # type: ignore[arg-type]
 
 
+def test_price_component_rewards_window_return_aligned_with_direction():
+    """Decouple-Score contract: window_return_pct must still flow into
+    the Stack's ``price_confirm`` component (it's the *only* consumer
+    for scoring purposes, after the 0-10 conviction score was stripped
+    of its own return bonus/drag).
+
+    Three LONG rows identical except for ``window_return_pct`` in
+    {+5, 0, -5} — the price-component points should be strictly
+    monotone: aligned (+5%) > flat (0%) >= fighting (-5%).
+    """
+    def _row(ret: float) -> dict:
+        return {
+            "direction": "LONG",
+            "conviction_score": 7.0,
+            # Hold all other price-sub-signals constant so the delta
+            # can only be attributed to window_return_pct.
+            "session": None,
+            "rs": {"rs_5d_pct": None, "rs_20d_pct": None},
+            "window_return_pct": ret,
+        }
+
+    up = compute_conviction_stack(_row(5.0))
+    flat = compute_conviction_stack(_row(0.0))
+    dn = compute_conviction_stack(_row(-5.0))
+
+    def _pts(stack: dict) -> float:
+        return next(
+            c["points"] for c in stack["components"]
+            if c["component"] == "price_confirm"
+        )
+
+    up_pts = _pts(up)
+    flat_pts = _pts(flat)
+    dn_pts = _pts(dn)
+
+    assert up_pts > flat_pts, (
+        f"aligned window return (+5%) should outscore flat (0%): up={up_pts} flat={flat_pts}"
+    )
+    assert flat_pts >= dn_pts, (
+        f"flat (0%) should be >= fighting (-5%): flat={flat_pts} dn={dn_pts}"
+    )
+    assert up_pts > dn_pts, (
+        f"aligned should clearly beat fighting: up={up_pts} dn={dn_pts}"
+    )
+
+
 def test_malformed_row_does_not_crash():
     """Mixed NaN / None / string values should all degrade to zero, not
     raise."""
@@ -218,6 +264,7 @@ if __name__ == "__main__":
         test_tier_classification_thresholds,
         test_attach_conviction_stack_mutates_in_place,
         test_attach_handles_empty_list,
+        test_price_component_rewards_window_return_aligned_with_direction,
         test_malformed_row_does_not_crash,
     ]
     passed, failed = 0, 0

@@ -86,7 +86,14 @@
 
   <div class="main-wrap">
   <main>
-    {{ action_bar(ab) }}
+    <div class="action-bar-row">
+      {{ action_bar(ab) }}
+      <button type="button"
+              class="ref-global-trigger"
+              data-ref-open=""
+              title="Open the full scoring reference / glossary"
+              aria-label="Open reference guide">?</button>
+    </div>
     {% macro sort_select(param_name, current) %}
     <select class="sort-select" data-sort-param="{{ param_name }}" aria-label="Sort by">
       <option value="" {% if not current %}selected{% endif %}>Sort: default</option>
@@ -709,14 +716,18 @@
           <button type="button" class="ft-mode-btn" data-mode="accumulation" role="tab" title="Most days active, one-sided, non-fading, B+ or better">Accumulation</button>
           <button type="button" class="ft-mode-btn" data-mode="all" role="tab" title="Legacy loose gate — every qualifying ticker">All</button>
         </div>
-        {# Wave 0.5 C1 — horizon toggle.  Links preserve the server-side
-           mode query if we ever add one; clicking navigates with
-           ?horizon=5d|15d which drives compute_multi_day_flow's lookback. #}
+        {# Wave 0.5 C1 — horizon toggle.  Links navigate with
+           ?horizon=5d|15d which drives compute_multi_day_flow's lookback.
+           NOTE: the ``tab=flow-tracker`` param is mandatory here — without
+           it the page reloads on the default tab (Overview), because the
+           sidebar's tab-restore JS keys off ?tab=.  The horizon toggle is
+           only ever rendered inside the Flow Tracker panel, so the hard-
+           coded value is safe. #}
         <div class="ft-horizon-toggle" role="tablist" aria-label="Flow Tracker horizon"
              title="How many trading days back the tracker aggregates.  15d needs ≥4 active days and confirms persistence over a longer window; 5d is the default quick read.">
           {% for key, cfg in flow_tracker_horizons_config.items() %}
             <a class="ft-horizon-btn{% if key == flow_tracker_active_horizon %} ft-horizon-btn-active{% endif %}"
-               href="?horizon={{ key }}"
+               href="?horizon={{ key }}&tab=flow-tracker"
                role="tab"
                aria-selected="{{ 'true' if key == flow_tracker_active_horizon else 'false' }}">{{ cfg.label }}</a>
           {% endfor %}
@@ -792,18 +803,14 @@
               {% else %}
                 <span class="badge tc-grade tc-grade-c" style="font-weight:700;letter-spacing:0.03em" title="Conviction grade C (score < 4.0)">{{ ft.conviction_score }}/10 C</span>
               {% endif %}
-              {% if ft.accumulation_score is defined and ft.accumulation_score is not none %}
-                {% set _accum = ft.accumulation_score %}
-                {% if _accum >= 75 %}
-                  {% set _accum_cls = 'tc-accum-high' %}
-                {% elif _accum >= 50 %}
-                  {% set _accum_cls = 'tc-accum-mid' %}
-                {% else %}
-                  {% set _accum_cls = 'tc-accum-low' %}
-                {% endif %}
-                <span class="badge tc-accum-chip {{ _accum_cls }}"
-                      title="Accumulation score (0-100): 0.35 × days + 0.30 × one-sidedness + 0.25 × rising + 0.10 × per-bps. ≥75 = strong accumulation, 50-74 = moderate, &lt;50 = weak.">ACC {{ "%.0f"|format(_accum) }}</span>
-              {% endif %}
+              <button type="button" class="ref-chip-trigger"
+                      data-ref-open="ref-conviction-score"
+                      title="Explain this score"
+                      aria-label="Explain conviction score">?</button>
+              {# Decouple-Score plan — ACC badge intentionally dropped from the
+                 card header.  accumulation_score is still emitted in the row
+                 payload and still drives the Accumulation mode toggle /
+                 tooltips; we just don't render a third headline chip. #}
               {# Wave 4 — composite Conviction Stack chip (replaces F/D/C/I dots).
                  Flow (50) + DP (15) + Chain (10) + Insider (8) + Price (12) +
                  Dealer (5) = 100.  Surfaces "how many independent signals
@@ -820,6 +827,10 @@
                   <span class="tc-stack-score">{{ _st.score }}</span>
                   <span class="tc-stack-tier">{{ _st.tier_label | replace('Stack ', '') }}</span>
                 </span>
+                <button type="button" class="ref-chip-trigger"
+                        data-ref-open="ref-stack"
+                        title="Explain the Stack score"
+                        aria-label="Explain conviction stack">?</button>
               {% endif %}
               {# Wave 0.5 A1 — dominant DTE bucket chip.  0-7d softened, 31-90/91+ boosted. #}
               {% if ft.dominant_dte_bucket %}
@@ -837,6 +848,10 @@
                   {% set _dte_tip = 'Dominant flow DTE = 8-30d (standard swing).' %}
                 {% endif %}
                 <span class="badge tc-dte-chip {{ _dte_cls }}" title="{{ _dte_tip }}">{{ ft.dominant_dte_bucket }}d</span>
+                <button type="button" class="ref-chip-trigger"
+                        data-ref-open="ref-dte"
+                        title="Explain DTE buckets"
+                        aria-label="Explain DTE bucket">?</button>
               {% endif %}
               {# Wave 0.5 A4 — window-return pill. #}
               {% if ft.window_return_pct is defined and ft.window_return_pct is not none and ft.window_return_pct != 0 %}
@@ -870,6 +885,10 @@
                   {% set _zt_tip = 'Absolute threshold fallback — z-score cohort unavailable' %}
                 {% endif %}
                 <span class="badge {{ _zt_cls }}" title="{{ _zt_tip }}">{{ ft.z_tier_label or 'z?' }}</span>
+                <button type="button" class="ref-chip-trigger"
+                        data-ref-open="ref-ztier"
+                        title="Explain z-tier"
+                        aria-label="Explain z-tier">?</button>
               {% endif %}
               {# Wave 0.5 C3 — sector accumulation cluster. #}
               {% if ft.sector_accumulating_count is defined and ft.sector_accumulating_count and ft.sector_accumulating_count > 0 %}
@@ -883,6 +902,22 @@
                 <span class="badge badge-long">NET BULLISH</span>
               {% else %}
                 <span class="badge badge-short">NET BEARISH</span>
+              {% endif %}
+              {# Swing-radar cross-reference chip.  "Also in signals" means
+                 the ticker also appears on today's ranked bullish/bearish
+                 signal list — the multi-day radar confirms a fresh
+                 pipeline candidate.  "Radar only" means the signal
+                 pipeline didn't surface it but the multi-day regression
+                 still flags a qualifying accumulation; worth watching as
+                 an early tell. #}
+              {% if ft.cross_ref %}
+                {% if ft.cross_ref.in_signals %}
+                  <span class="badge tc-xref tc-xref-in-signals"
+                        title="Ticker appears on today's ranked {{ ft.direction | lower }} signal list — the multi-day radar confirms a live pipeline candidate.">✓ Also in signals</span>
+                {% else %}
+                  <span class="badge tc-xref tc-xref-radar-only"
+                        title="Flow Tracker surfaces this ticker from the multi-day regression but today's signal pipeline didn't clear it. Early read — watch for confirmation.">Radar only</span>
+                {% endif %}
               {% endif %}
               {% if ft.trend == "accelerating" %}
                 <span class="badge" style="background:rgba(63,185,80,0.15);color:#3fb950">Accelerating</span>
@@ -2583,8 +2618,8 @@
       // Wave 6 — "Why?" tab sits after Verdict so reading the modal top-to-
       // bottom gives you the bottom line, then the narrative, then the raw
       // component breakdown.
-      var ids = ["verdict", "why", "structure", "conviction", "price", "options", "plan", "position", "chart"];
-      var labels = { verdict: "Verdict", why: "Why?", structure: "Structure", conviction: "Conviction", price: "Price action", options: "Flow & Options", plan: "Plan", position: "Position", chart: "Chart" };
+      var ids = ["verdict", "why", "premium_mix", "structure", "conviction", "price", "options", "plan", "position", "chart"];
+      var labels = { verdict: "Verdict", why: "Why?", premium_mix: "Premium Mix", structure: "Structure", conviction: "Conviction", price: "Price action", options: "Flow & Options", plan: "Plan", position: "Position", chart: "Chart" };
       return '<div class="detail-subtabs" role="tablist">' + ids.map(function (id, i) { return '<button type="button" class="detail-subtab' + (i === 0 ? " active" : "") + '" role="tab" aria-selected="' + (i === 0 ? "true" : "false") + '" data-subtab="' + id + '">' + labels[id] + "</button>"; }).join("") + "</div>";
     }
 
@@ -2637,6 +2672,89 @@
       var cb = panel.querySelector(".tc-narrative-teach-toggle");
       if (!cb) return;
       cb.addEventListener("change", function () { setNarrativeTeaching(cb.checked); });
+    }
+
+    /* ── Premium-Taxonomy plan — Premium Mix renderer.
+       Renders ``row.premium_mix_ui`` as a stacked DL:
+         - Total directional (authoritative Flow Tracker metric)
+         - Unusual flow (subset of total, all institutional-sized)
+         - Per-bucket breakdown: swing (30-120d) / lottery (0-14d) /
+           LEAP (180d+) / other DTE, each with tooltip copy that
+           explains the bucket in plain English.
+       Bullish / bearish shown side-by-side when both material. */
+    function fmtPremiumMoney(v) {
+      var n = Number(v || 0);
+      if (!isFinite(n) || n === 0) return "$0";
+      var abs = Math.abs(n);
+      if (abs >= 1e9) return "$" + (n / 1e9).toFixed(2) + "B";
+      if (abs >= 1e6) return "$" + (n / 1e6).toFixed(2) + "M";
+      if (abs >= 1e3) return "$" + (n / 1e3).toFixed(1) + "K";
+      return "$" + n.toFixed(0);
+    }
+    function _mixRowHtml(entry, opts) {
+      opts = opts || {};
+      if (!entry) return "";
+      var label = entry.label || "";
+      var tip = entry.tip || "";
+      var bull = Number(entry.bullish || 0);
+      var bear = Number(entry.bearish || 0);
+      var gross = Number(entry.gross || (bull + bear));
+      var pct = (entry.pct_of_total !== undefined && entry.pct_of_total !== null)
+        ? Number(entry.pct_of_total) : null;
+      var pctCell = (pct !== null) ? '<span class="tc-mix-pct">(' + pct.toFixed(1) + '%)</span>' : "";
+      var dominantClass = opts.dominant ? " tc-mix-dominant" : "";
+      var kickerClass = opts.kicker ? " tc-mix-kicker-row" : "";
+      var tipAttr = tip ? ' title="' + escHtml(tip) + '"' : "";
+      var sideHtml = "";
+      if (bull > 0 || bear > 0) {
+        var bullShare = gross > 0 ? (bull / gross * 100) : 0;
+        var bearShare = gross > 0 ? (bear / gross * 100) : 0;
+        sideHtml =
+          '<div class="tc-mix-side-bar" aria-hidden="true">' +
+            '<span class="tc-mix-side-bull" style="width:' + bullShare.toFixed(1) + '%"></span>' +
+            '<span class="tc-mix-side-bear" style="width:' + bearShare.toFixed(1) + '%"></span>' +
+          '</div>' +
+          '<div class="tc-mix-side-legend">' +
+            '<span class="tc-mix-bull">Bull ' + fmtPremiumMoney(bull) + '</span>' +
+            ' · ' +
+            '<span class="tc-mix-bear">Bear ' + fmtPremiumMoney(bear) + '</span>' +
+          '</div>';
+      }
+      var signalHtml = entry.signal
+        ? '<div class="tc-mix-signal">' + escHtml(entry.signal) + '</div>'
+        : "";
+      return '<div class="tc-mix-row' + dominantClass + kickerClass + '"' + tipAttr + '>' +
+        '<div class="tc-mix-head">' +
+          '<span class="tc-mix-label">' + escHtml(label) + '</span>' +
+          '<span class="tc-mix-total">' + fmtPremiumMoney(gross) + '</span>' +
+          pctCell +
+        '</div>' +
+        sideHtml +
+        signalHtml +
+      '</div>';
+    }
+    function buildPremiumMixHtml(mix, opts) {
+      opts = opts || {};
+      var ctx = opts.context || "this ticker";
+      if (!mix || !mix.total || Number(mix.total.gross || 0) <= 0) {
+        return '<div class="tc-mix-empty"><p>No premium-taxonomy data for ' + escHtml(ctx) + ' yet.</p>' +
+               '<p style="opacity:0.6;font-size:0.82rem;margin-top:0.5rem">Buckets populate after Flow Tracker ingests at least one scan with the new columns.</p></div>';
+      }
+      var html = '<div class="tc-mix-wrap">';
+      if (mix.source) {
+        html += '<div class="tc-mix-source">Source: <code>' + escHtml(mix.source) + '</code></div>';
+      }
+      html += _mixRowHtml(mix.total, { kicker: true });
+      html += _mixRowHtml(mix.unusual, { kicker: true });
+      if (Array.isArray(mix.buckets)) {
+        for (var i = 0; i < mix.buckets.length; i++) {
+          var b = mix.buckets[i];
+          var isDom = (mix.dominant_bucket && b.key === mix.dominant_bucket);
+          html += _mixRowHtml(b, { dominant: isDom });
+        }
+      }
+      html += '</div>';
+      return html;
     }
 
     /* ── Wave 7 — Structure renderer (shared across modals).
@@ -2748,8 +2866,10 @@
     function detailPanelsHtml(m, ticker) {
       var narrativeHtml = buildNarrativeHtml(m && m.narrative, { context: ticker || "this ticker" });
       var structureHtml = buildStructureHtml(m && m.trade_structure, { context: ticker || "this ticker" });
+      var premiumMixHtml = buildPremiumMixHtml(m && m.premium_mix_ui, { context: ticker || "this ticker" });
       return '<div class="detail-subtab-panel active" data-panel="verdict">' + buildVerdictDl(m) + "</div>" +
         '<div class="detail-subtab-panel" data-panel="why">' + narrativeHtml + "</div>" +
+        '<div class="detail-subtab-panel" data-panel="premium_mix">' + premiumMixHtml + "</div>" +
         '<div class="detail-subtab-panel" data-panel="structure">' + structureHtml + "</div>" +
         '<div class="detail-subtab-panel" data-panel="conviction">' + buildConvictionDl(m) + "</div>" +
         '<div class="detail-subtab-panel" data-panel="price">' + buildPriceActionDl(m) + "</div>" +
@@ -3103,29 +3223,29 @@
         opts = opts || {};
         try { localStorage.setItem("ft-mode", mode); } catch (e) {}
 
-        var locked = false;
-        try { locked = localStorage.getItem("ft-mode-locked") === "1"; } catch (e) {}
-        if (opts.userPicked) locked = false; // fresh pick clears lock
-
+        // Flow-Tracker-Swing-Radar: auto-widen is OFF by default.  We
+        // now respect the user's mode choice even on short-list days —
+        // a tight radar is the feature, not a bug.  The notice still
+        // appears as an actionable hint ("show more →") so users can
+        // widen manually without the page doing it behind their back.
         var counts = countByMode();
-        var targetMode = mode;
-        if (!locked && counts[mode] < AUTO_WIDEN_MIN) {
-          // auto-widen to the first mode that has ≥ AUTO_WIDEN_MIN names.
-          for (var j = MODE_ORDER.indexOf(mode) + 1; j < MODE_ORDER.length; j++) {
-            if (counts[MODE_ORDER[j]] >= AUTO_WIDEN_MIN) { targetMode = MODE_ORDER[j]; break; }
-          }
-        }
-        applyMode(targetMode, opts);
+        applyMode(mode, opts);
 
         var notice = document.getElementById("ft-auto-widen-notice");
         var noticeText = document.getElementById("ft-auto-widen-text");
-        if (!locked && targetMode !== mode && notice && noticeText) {
+        var widerMode = null;
+        if (counts[mode] < AUTO_WIDEN_MIN) {
+          for (var j = MODE_ORDER.indexOf(mode) + 1; j < MODE_ORDER.length; j++) {
+            if (counts[MODE_ORDER[j]] > counts[mode]) { widerMode = MODE_ORDER[j]; break; }
+          }
+        }
+        if (widerMode && notice && noticeText) {
           noticeText.textContent =
             MODE_LABELS[mode] + " returned " + counts[mode] +
             " name" + (counts[mode] === 1 ? "" : "s") +
-            " — widened to " + MODE_LABELS[targetMode] + " (" + counts[targetMode] + ").";
+            " — " + MODE_LABELS[widerMode] + " has " + counts[widerMode] + ".";
           notice.hidden = false;
-          notice.setAttribute("data-locked-mode", mode);
+          notice.setAttribute("data-locked-mode", widerMode);
         } else if (notice) {
           notice.hidden = true;
         }
@@ -3141,12 +3261,13 @@
 
       var lockBtn = document.getElementById("ft-lock-mode-btn");
       if (lockBtn) {
+        // Post-swing-radar the lock button now just widens manually to
+        // whatever mode the notice points at.
         lockBtn.addEventListener("click", function () {
           var notice = document.getElementById("ft-auto-widen-notice");
-          var lockedMode = notice && notice.getAttribute("data-locked-mode");
-          if (!lockedMode) return;
-          try { localStorage.setItem("ft-mode-locked", "1"); } catch (e) {}
-          setMode(lockedMode);
+          var wider = notice && notice.getAttribute("data-locked-mode");
+          if (!wider) return;
+          setMode(wider, { userPicked: true });
         });
       }
 
@@ -3918,6 +4039,87 @@
         });
       });
     })();
+
+    // Reference modal — open/close + deep-link scroll.  Triggered by
+    // any element with ``data-ref-open`` (value is the anchor id to
+    // scroll to, or empty for "open at top") and closed by anything
+    // with ``data-ref-close`` or the Escape key.  stopPropagation on
+    // open/close is load-bearing: the Flow Tracker card has a
+    // ``cursor:pointer`` click handler and we don't want the chip
+    // ``?`` click to also drill into the card detail.
+    (function(){
+      var modal = document.getElementById('ref-modal');
+      if (!modal) return;
+      var body = modal.querySelector('.ref-modal-body');
+      function open(section){
+        modal.setAttribute('aria-hidden', 'false');
+        document.body.classList.add('ref-modal-open');
+        if (section) {
+          var target = document.getElementById(section);
+          if (target && body) {
+            // offsetTop is relative to the nearest positioned
+            // ancestor; since .ref-modal-body is scrollable we use
+            // target.offsetTop - body.offsetTop so nested sections
+            // (inside .ref-body) resolve correctly.
+            var anchorOffset = 0;
+            var n = target;
+            while (n && n !== body) {
+              anchorOffset += n.offsetTop;
+              n = n.offsetParent;
+            }
+            body.scrollTo({ top: Math.max(0, anchorOffset - 20), behavior: 'instant' });
+          }
+        } else if (body) {
+          body.scrollTo({ top: 0, behavior: 'instant' });
+        }
+      }
+      function close(){
+        modal.setAttribute('aria-hidden', 'true');
+        document.body.classList.remove('ref-modal-open');
+      }
+      document.addEventListener('click', function(e){
+        var openEl = e.target.closest('[data-ref-open]');
+        if (openEl) {
+          e.preventDefault();
+          e.stopPropagation();
+          open(openEl.getAttribute('data-ref-open') || null);
+          return;
+        }
+        if (e.target.closest('[data-ref-close]')) {
+          e.preventDefault();
+          e.stopPropagation();
+          close();
+          return;
+        }
+        // Clicks on TOC <a href="#ref-foo"> should scroll within the
+        // modal body instead of the browser viewport.
+        var tocLink = e.target.closest('[data-ref-anchor]');
+        if (tocLink && modal.getAttribute('aria-hidden') === 'false') {
+          e.preventDefault();
+          var anchor = tocLink.getAttribute('data-ref-anchor');
+          if (anchor) open(anchor);
+        }
+      });
+      document.addEventListener('keydown', function(e){
+        if (e.key === 'Escape' && modal.getAttribute('aria-hidden') === 'false') close();
+      });
+    })();
   </script>
+
+  {# Reference modal — singleton, rendered once at end of body.  Toggled
+     by any element with ``data-ref-open="<section-id>"`` (empty value
+     opens at top).  See _reference.html for the full doc content. #}
+  <div id="ref-modal" class="ref-modal" aria-hidden="true" role="dialog" aria-labelledby="ref-modal-title">
+    <div class="ref-modal-backdrop" data-ref-close></div>
+    <div class="ref-modal-panel" role="document">
+      <header class="ref-modal-header">
+        <h2 id="ref-modal-title">Vector Alpha — Reference</h2>
+        <button type="button" class="ref-modal-close" data-ref-close aria-label="Close reference">&times;</button>
+      </header>
+      <div class="ref-modal-body">
+        {% include '_reference.html' %}
+      </div>
+    </div>
+  </div>
 </body>
 </html>

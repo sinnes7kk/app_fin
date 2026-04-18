@@ -33,6 +33,7 @@ from app.config import (
     USE_ZSCORE_FLOW,
     WALL_PROXIMITY_REJECT_ATR,
     WALL_PROXIMITY_REJECT_PCT,
+    ZSCORE_COMPONENTS,
     ZSCORE_LOOKBACK_DAYS,
 )
 from app.signals.trade_plan import (
@@ -1624,10 +1625,40 @@ def run_flow_to_price_pipeline(
     # comparison but don't use it for ranking.
     try:
         if USE_ZSCORE_FLOW and not feature_table.empty:
-            history = load_flow_history(lookback_days=ZSCORE_LOOKBACK_DAYS)
-            feature_table = rescore_with_z(feature_table, history)
-            tier_counts = feature_table["bullish_zscore_tier"].value_counts().sort_index().to_dict()
-            print(f"  [flow-scoring] z-score active. bullish tier distribution: {tier_counts}")
+            # UW-backed z-score: hydrate flow_intensity's 30-day baseline from
+            # /stock/{ticker}/options-volume?limit=30 (cached 24h per ticker).
+            # Other components (ppt, vol_oi, repeat, sweep, breadth, dte) can't
+            # be reconstructed from that endpoint, so we scope the z-ladder to
+            # flow_intensity only; everything else keeps absolute-threshold
+            # scoring via ``_weighted_flow_score_mixed``.
+            from app.features.uw_history import load_uw_intensity_history
+
+            tickers = feature_table["ticker"].astype(str).str.upper().tolist()
+            mcap_map: dict[str, float] = {}
+            if "marketcap" in feature_table.columns:
+                for t, m in zip(
+                    feature_table["ticker"].astype(str).str.upper(),
+                    feature_table["marketcap"],
+                ):
+                    if pd.notna(m):
+                        mcap_map[t] = float(m)
+            history = load_uw_intensity_history(
+                tickers, mcap_map, lookback_days=ZSCORE_LOOKBACK_DAYS
+            )
+            feature_table = rescore_with_z(
+                feature_table, history, components=list(ZSCORE_COMPONENTS)
+            )
+            tier_counts = (
+                feature_table["bullish_flow_intensity_tier"]
+                .value_counts()
+                .sort_index()
+                .to_dict()
+            )
+            print(
+                f"  [flow-scoring] UW-backed z-score active "
+                f"(components={list(ZSCORE_COMPONENTS)}). "
+                f"bullish flow_intensity tier distribution: {tier_counts}"
+            )
         elif not feature_table.empty:
             # Shadow log: compute z-scored scores into a side channel for diff review
             history = load_flow_history(lookback_days=ZSCORE_LOOKBACK_DAYS)
@@ -1647,7 +1678,36 @@ def run_flow_to_price_pipeline(
     # sees all tickers with unusual flow, not just those from the UW screener.
     try:
         from app.features.flow_tracker import save_flow_feature_snapshot, save_screener_snapshot
-        save_flow_feature_snapshot(feature_table)
+        from app.features.flow_features import aggregate_premium_by_dte_bucket, filter_qualifying_flow
+
+        # Premium-taxonomy plan: compute per-ticker DTE-bucket breakdown
+        # (lottery / swing / leap) once and pass it to both save_* calls.
+        # Bucket aggregation uses the same $500K per-trade "unusual" floor
+        # as flow_features but spans all DTEs (0+).
+        premium_buckets: dict[str, dict] = {}
+        try:
+            if not normalized.empty:
+                bucket_base = filter_qualifying_flow(
+                    normalized,
+                    min_premium=min_premium,
+                    min_dte=0,
+                    max_dte=9999,
+                )
+                bucket_df = aggregate_premium_by_dte_bucket(bucket_base)
+                if not bucket_df.empty:
+                    for _, brow in bucket_df.iterrows():
+                        sym = str(brow.get("ticker", "")).upper().strip()
+                        if not sym:
+                            continue
+                        premium_buckets[sym] = {
+                            k: float(brow[k])
+                            for k in brow.index
+                            if k != "ticker" and k.endswith("_premium")
+                        }
+        except Exception as _be:
+            print(f"  [flow-tracker] premium-bucket aggregation failed (continuing without): {_be}")
+
+        save_flow_feature_snapshot(feature_table, premium_buckets=premium_buckets)
 
         # Wave 0.5 A1/A2 — back-fill today's screener rows with the
         # structural enrichment (dominant DTE bucket, sweep share,
@@ -1671,7 +1731,11 @@ def run_flow_to_price_pipeline(
                     "bullish_accel_ratio": float(fr.get("bullish_accel_ratio", 0) or 0),
                     "bearish_accel_ratio": float(fr.get("bearish_accel_ratio", 0) or 0),
                 }
-            save_screener_snapshot(screener_rows, flow_enrichment=enrichment)
+            save_screener_snapshot(
+                screener_rows,
+                flow_enrichment=enrichment,
+                premium_buckets=premium_buckets,
+            )
     except Exception as e:
         print(f"  [flow-tracker] flow-feature merge failed: {e}")
 

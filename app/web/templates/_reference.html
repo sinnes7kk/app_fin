@@ -1,0 +1,403 @@
+{#
+  Reference / glossary partial.
+
+  Rendered inside the modal body in index.html.  Plain HTML, no Jinja
+  logic — static documentation with anchor IDs matched by the per-chip
+  ``?`` triggers (``data-ref-open="ref-<section>"``) and the TOC links.
+
+  Voice: short paragraphs, trader-first, no marketing.  Every numerical
+  claim (weights, thresholds, tier boundaries) should map 1:1 to what
+  the code actually does — if you change the formula, update this file
+  in the same PR.
+#}
+<div class="ref-doc">
+
+  <aside class="ref-toc" id="ref-toc">
+    <div class="ref-toc-title">Jump to</div>
+    <ul>
+      <li><a href="#ref-overview" data-ref-anchor="ref-overview">How to read a card</a></li>
+      <li>
+        <a href="#ref-scoring" data-ref-anchor="ref-scoring">Scoring rules</a>
+        <ul>
+          <li><a href="#ref-conviction-score" data-ref-anchor="ref-conviction-score">Conviction (0-10)</a></li>
+          <li><a href="#ref-stack" data-ref-anchor="ref-stack">Stack (0-100)</a></li>
+          <li><a href="#ref-accumulation" data-ref-anchor="ref-accumulation">Accumulation</a></li>
+          <li><a href="#ref-window-return" data-ref-anchor="ref-window-return">Window return</a></li>
+          <li><a href="#ref-dte" data-ref-anchor="ref-dte">DTE bucket</a></li>
+          <li><a href="#ref-ztier" data-ref-anchor="ref-ztier">Z-tier</a></li>
+          <li><a href="#ref-grade-reasons" data-ref-anchor="ref-grade-reasons">Why (grade reasons)</a></li>
+        </ul>
+      </li>
+      <li><a href="#ref-modes" data-ref-anchor="ref-modes">Mode toggle</a></li>
+      <li><a href="#ref-horizons" data-ref-anchor="ref-horizons">Horizons (5d / 15d)</a></li>
+      <li><a href="#ref-warmup" data-ref-anchor="ref-warmup">Warmup banner</a></li>
+      <li><a href="#ref-tabs" data-ref-anchor="ref-tabs">Tabs &amp; workflow</a></li>
+      <li><a href="#ref-chip-glossary" data-ref-anchor="ref-chip-glossary">Chip glossary</a></li>
+    </ul>
+  </aside>
+
+  <div class="ref-body">
+
+    <section id="ref-overview" class="ref-section">
+      <h3>How to read a Flow Tracker card</h3>
+      <p>
+        Each card is one ticker over your chosen horizon (5d or 15d).
+        The header badges tell you the shape of the setup at a glance;
+        the metrics table below expands on the numbers; the &quot;Why&quot;
+        line calls out the two or three components doing the most work.
+      </p>
+      <p>
+        Three badges to anchor on:
+      </p>
+      <ol>
+        <li>
+          <strong>Conviction (e.g. 7.4/10 A-)</strong> — how good the
+          options flow is on its own. Pure flow quality, no price
+          confirmation baked in.
+        </li>
+        <li>
+          <strong>Stack (e.g. Stack 49 D)</strong> — the same flow plus
+          everything else (dark pool, chains, insider, price, dealer).
+          Tells you &quot;how many independent signals agree.&quot;
+        </li>
+        <li>
+          <strong>Direction + trend</strong> — <em>NET BULLISH /
+          BEARISH</em> and <em>ACCELERATING / STEADY / FADING</em>. If
+          these disagree with the scores, the scores usually win.
+        </li>
+      </ol>
+      <p class="ref-tip">
+        Tip: if the 0-10 conviction and the Stack score disagree a lot,
+        the flow is strong but not confirmed by price, DP, insiders, or
+        chain structure. That&apos;s a flow-only setup — size smaller.
+      </p>
+    </section>
+
+    <section id="ref-scoring" class="ref-section">
+      <h3>Scoring rules</h3>
+      <p>
+        Four distinct numbers, each measuring a different thing. They
+        share some raw inputs but live at different levels of
+        abstraction.
+      </p>
+    </section>
+
+    <section id="ref-conviction-score" class="ref-section">
+      <h4>Conviction score (0-10) + letter grade</h4>
+      <p>
+        A weighted blend of the six flow-quality components, scaled
+        0-10 and mapped to a letter grade:
+      </p>
+      <ul class="ref-list">
+        <li><strong>Persistence</strong> — how many of the window&apos;s days had directional flow.</li>
+        <li><strong>Intensity</strong> — premium / market cap (how big relative to the name).</li>
+        <li><strong>Consistency</strong> — daily premium stability vs a single-day spike.</li>
+        <li><strong>Acceleration</strong> — is the premium trend rising? (t-stat on the daily slope).</li>
+        <li><strong>Mass</strong> — absolute cumulative premium.</li>
+        <li><strong>OI change</strong> — directional open-interest move, filtered for sane ranges.</li>
+      </ul>
+      <p>
+        The blend is then multiplied by the <strong>DTE bucket</strong>
+        (0-7d softens 10%, 31-90d and 91+d boost 5%) and haircut by
+        15% if the window put/call ratio flags a hedging risk. A small
+        <strong>dark-pool alignment</strong> bonus is applied later in
+        the server (up to ~10%) when DP bias agrees with flow direction.
+      </p>
+      <p>
+        <strong>Window return does NOT adjust this score</strong> — it
+        lives only in the Stack. Keeps &quot;conviction&quot; a pure
+        flow-quality read that doesn&apos;t degrade just because price
+        hasn&apos;t confirmed yet.
+      </p>
+      <p>
+        Letter-grade mapping (from <code>app/features/grade_explainer.py</code>):
+      </p>
+      <table class="ref-table">
+        <thead><tr><th>Score</th><th>Grade</th><th>Read it as</th></tr></thead>
+        <tbody>
+          <tr><td>&ge; 8.5</td><td>A+</td><td>Textbook flow</td></tr>
+          <tr><td>7.5 - 8.5</td><td>A</td><td>Very strong</td></tr>
+          <tr><td>6.75 - 7.5</td><td>A-</td><td>Strong</td></tr>
+          <tr><td>6.0 - 6.75</td><td>B+</td><td>Good</td></tr>
+          <tr><td>5.0 - 6.0</td><td>B</td><td>Decent</td></tr>
+          <tr><td>4.0 - 5.0</td><td>B-</td><td>Marginal</td></tr>
+          <tr><td>&lt; 4.0</td><td>C</td><td>Don&apos;t chase</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="ref-stack" class="ref-section">
+      <h4>Conviction Stack (0-100) + letter tier</h4>
+      <p>
+        Multi-signal confluence. Six capped components, summing to 100:
+      </p>
+      <table class="ref-table">
+        <thead><tr><th>Component</th><th>Max</th><th>What it measures</th></tr></thead>
+        <tbody>
+          <tr><td>Flow core</td><td>50</td><td>Conviction score &times; 5. This is why Stack moves with the 0-10.</td></tr>
+          <tr><td>Dark pool</td><td>15</td><td>DP bias and notional-per-mcap; + z-bonus when DP volume is historically hot.</td></tr>
+          <tr><td>Price</td><td>12</td><td>Window return + session tone + relative strength. This is where the <code>+X%</code> pill contributes.</td></tr>
+          <tr><td>Chain</td><td>10</td><td>Strike structure — single-strike focus vs smeared flow.</td></tr>
+          <tr><td>Insider</td><td>8</td><td>Recent insider buys/sells aligned with the trade direction.</td></tr>
+          <tr><td>Dealer</td><td>5</td><td>Dealer hedging bias (chase / supply / neutral).</td></tr>
+        </tbody>
+      </table>
+      <p>Tier labels:</p>
+      <ul class="ref-list">
+        <li><strong>Stack A (Elite, 80+)</strong> — everything agrees. Rare.</li>
+        <li><strong>Stack B (Strong, 65-79)</strong> — flow plus at least 2-3 other signals.</li>
+        <li><strong>Stack C (Moderate, 50-64)</strong> — flow plus one confirmation.</li>
+        <li><strong>Stack D (Weak, &lt;50)</strong> — flow only, no confluence.</li>
+      </ul>
+      <p class="ref-tip">
+        A high 0-10 with a Stack D means the options flow is strong but
+        nothing else is confirming yet. Still tradable, but smaller
+        size / tighter stop.
+      </p>
+    </section>
+
+    <section id="ref-accumulation" class="ref-section">
+      <h4>Accumulation score (0-100)</h4>
+      <p>
+        Measures <em>shape of the pattern</em> rather than magnitude.
+        Fixed weights:
+      </p>
+      <ul class="ref-list">
+        <li>0.35 &times; days of active flow in the window</li>
+        <li>0.30 &times; one-sidedness (share of premium on the dominant side)</li>
+        <li>0.25 &times; rising trend (acceleration t-stat)</li>
+        <li>0.10 &times; premium / market cap in bps</li>
+      </ul>
+      <p>
+        Used as the gate for the <strong>Accumulation mode</strong>
+        toggle and as one component of the &quot;Why&quot; line on the
+        card. The ACC badge is no longer shown on the card header to
+        reduce clutter — the score itself is still computed and still
+        drives the mode filter.
+      </p>
+    </section>
+
+    <section id="ref-window-return" class="ref-section">
+      <h4>Window return (+/- X%)</h4>
+      <p>
+        Price change of the underlying over the tracker window (5 or
+        15 trading days). Shown as a colored pill — green when aligned
+        with the trade direction, orange when fighting.
+      </p>
+      <p>
+        Feeds the Stack&apos;s price component (up to 12 pts). Does
+        <strong>not</strong> move the 0-10 conviction score (by
+        design — conviction is flow-only).
+      </p>
+      <p>
+        &quot;Fighting flow&quot; with a large magnitude (e.g. bullish
+        flow while price is down 5%) is a specific signature: buyers
+        haven&apos;t been paid yet. Often late-chase risk; sometimes a
+        setup before a reversal. Treat as a question, not an answer.
+      </p>
+    </section>
+
+    <section id="ref-dte" class="ref-section">
+      <h4>Dominant DTE bucket</h4>
+      <p>
+        Which expiry bucket carries the most unusual premium in the
+        window:
+      </p>
+      <table class="ref-table">
+        <thead><tr><th>Bucket</th><th>Days to expiry</th><th>Score effect</th><th>Read it as</th></tr></thead>
+        <tbody>
+          <tr><td>0-7d</td><td>Weekly</td><td>-10% multiplier</td><td>Lottery / hedging-prone</td></tr>
+          <tr><td>8-30d</td><td>Standard swing</td><td>neutral</td><td>Default read</td></tr>
+          <tr><td>31-90d</td><td>Medium term</td><td>+5% multiplier</td><td>Real positioning</td></tr>
+          <tr><td>91+d</td><td>LEAPs</td><td>+5% multiplier</td><td>Structural / thematic commitment</td></tr>
+        </tbody>
+      </table>
+      <p>
+        The badge on the card (e.g. <code>91+d</code>) is the dominant
+        bucket for this row. Bucket is also used to filter Flow
+        Tracker&apos;s sub-panels.
+      </p>
+    </section>
+
+    <section id="ref-ztier" class="ref-section">
+      <h4>Z-tier (z30 / z&middot;shrunk / z&middot;peer / abs)</h4>
+      <p>
+        Confidence label for the rolling z-score baseline. Z-scoring
+        measures how unusual today&apos;s flow is vs the ticker&apos;s
+        own recent history; when history is thin we fall back step by
+        step:
+      </p>
+      <ol>
+        <li>
+          <strong>z30 (Tier 1)</strong> — &ge;20 days of own history.
+          Full per-ticker z-score. Most trustworthy.
+        </li>
+        <li>
+          <strong>z&middot;shrunk (Tier 2)</strong> — 5-19 days of own
+          history. Shrunken toward the cross-section to avoid
+          over-fitting to a short sample.
+        </li>
+        <li>
+          <strong>z&middot;peer (Tier 3)</strong> — &lt;5 days of own
+          history. Uses today&apos;s cross-sectional cohort as the
+          baseline. Still useful, but less ticker-specific.
+        </li>
+        <li>
+          <strong>abs (Tier 4)</strong> — absolute hand-tuned
+          thresholds. No history available at all.
+        </li>
+      </ol>
+      <p>
+        The z-tier is a caveat, not a magnitude. A &quot;z&middot;peer
+        A-&quot; setup isn&apos;t weaker than a &quot;z30 A-&quot; — we
+        just have less data behind it.
+      </p>
+    </section>
+
+    <section id="ref-grade-reasons" class="ref-section">
+      <h4>Why line (grade reasons)</h4>
+      <p>
+        The &quot;Why&quot; row on the card decomposes the conviction
+        score into its top two or three drivers, plus context bullets
+        that don&apos;t directly move the grade but matter for
+        interpretation.
+      </p>
+      <ul class="ref-list">
+        <li><strong>Driver</strong> — component that pushed the score up.</li>
+        <li><strong>Drag</strong> — component that pulled the score down.</li>
+        <li><strong>Context-driver / context-drag</strong> — informational (e.g. &quot;price confirms flow&quot;, &quot;weekly DTE&quot;). These are 0-point bullets, they&apos;re there for color.</li>
+      </ul>
+    </section>
+
+    <section id="ref-modes" class="ref-section">
+      <h3>Mode toggle (Strong / Accum / All)</h3>
+      <p>
+        Three progressively stricter filters on the Flow Tracker list:
+      </p>
+      <ul class="ref-list">
+        <li><strong>All</strong> — every ticker that cleared the base qualifying flow gates.</li>
+        <li><strong>Accumulation</strong> — subset: accumulation score above threshold AND persistence across the window AND sane liquidity.</li>
+        <li><strong>Strong</strong> — subset of Accumulation: grade at least A-, plus additional gates on intensity and OI.</li>
+      </ul>
+      <p>
+        The three are strict subsets: Strong &sube; Accumulation &sube;
+        All. Header counts like &quot;3 strong / 8 accum / 14 all&quot;
+        always count the full population before the hard-filter cut.
+      </p>
+    </section>
+
+    <section id="ref-horizons" class="ref-section">
+      <h3>Horizons (5d / 15d)</h3>
+      <p>
+        Toggle between two lookback windows:
+      </p>
+      <ul class="ref-list">
+        <li>
+          <strong>5d</strong> — aggressive. Surfaces acceleration and
+          fresh positioning. Use when looking for entries on names that
+          have started moving recently.
+        </li>
+        <li>
+          <strong>15d</strong> — patient. Surfaces sustained
+          accumulation. Use to find names where flow has been
+          relentless for three weeks without a headline.
+        </li>
+      </ul>
+      <p>
+        The &quot;2H&quot; agreement chip on each card tells you
+        whether both horizons surface this ticker (with matching
+        direction). &quot;2H ↑ 100%&quot; means both windows agree and
+        the flow is bullish across both.
+      </p>
+    </section>
+
+    <section id="ref-warmup" class="ref-section">
+      <h3>Warmup banner</h3>
+      <p>
+        When you see <em>&quot;Rebuilding history (day X of 3)&quot;</em>
+        at the top, the multi-day flow regression is still warming up.
+        Flow Tracker results are visible but should be treated with
+        caution until the banner clears — the day-over-day comparisons
+        are only as reliable as the history they draw from.
+      </p>
+      <p>
+        Typical cause: a snapshot purge, a fresh install, or a config
+        change that invalidated the previous regression window.
+      </p>
+    </section>
+
+    <section id="ref-tabs" class="ref-section">
+      <h3>Tabs &amp; workflow</h3>
+      <p>
+        The sidebar groups tabs by what you do with them:
+      </p>
+      <h4>Decide</h4>
+      <ul class="ref-list">
+        <li><strong>Overview</strong> — the shortlist: &quot;trades to take now&quot; and promotion candidates.</li>
+        <li><strong>Candidates</strong> — full set of names that passed the scoring pipeline but aren&apos;t yet on the watchlist.</li>
+        <li><strong>Watchlist</strong> — names you&apos;ve explicitly flagged to monitor.</li>
+      </ul>
+      <h4>Execute</h4>
+      <ul class="ref-list">
+        <li><strong>Positions</strong> — open trades with live structure, stops, and sizing.</li>
+        <li><strong>Risk</strong> — portfolio-level regime, sizing multiplier, HALT caveats.</li>
+      </ul>
+      <h4>Context</h4>
+      <ul class="ref-list">
+        <li><strong>Flow Tracker</strong> — multi-day regression of unusual options flow. The main discovery surface.</li>
+        <li><strong>Unusual Flow</strong> — raw single-day unusual prints.</li>
+        <li><strong>Dark Pool</strong> — block prints with side inference.</li>
+        <li><strong>Hot Chains</strong> — most-active strikes across the universe.</li>
+        <li><strong>Near Misses</strong> — names that almost qualified; useful for spotting early setups.</li>
+      </ul>
+      <h4>Review</h4>
+      <ul class="ref-list">
+        <li><strong>Trade Log</strong> — every trade closed, with outcome.</li>
+        <li><strong>Performance</strong> — PnL attribution.</li>
+        <li><strong>Agent Shadow</strong> — what the agent would have done.</li>
+        <li><strong>Search</strong> — free-form ticker lookup across history.</li>
+      </ul>
+    </section>
+
+    <section id="ref-chip-glossary" class="ref-section">
+      <h3>Chip glossary</h3>
+      <p>Everything else you might see on a card, in alphabetical-ish order:</p>
+
+      <h4>Direction &amp; trend</h4>
+      <ul class="ref-list">
+        <li><strong>NET BULLISH / NET BEARISH</strong> — which side carried the majority of unusual premium in the window.</li>
+        <li><strong>ACCELERATING / STEADY / FADING</strong> — slope of daily premium. Accelerating = today&apos;s premium bigger than the window average.</li>
+        <li><strong>2H ↑ N%</strong> — both horizons (5d AND 15d) surface this ticker with aligned direction; N% is the agreement confidence.</li>
+      </ul>
+
+      <h4>Liquidity &amp; structure</h4>
+      <ul class="ref-list">
+        <li><strong>DEEP / HEALTHY / THIN / ILLIQUID</strong> — ADV-based liquidity tier. ILLIQUID rows are hard-filtered from Flow Tracker since you can&apos;t really fill there.</li>
+        <li><strong>Debit spread / Long call / Long put / ATM straddle</strong> — suggested trade structure given IV rank, premium budget, and direction.</li>
+      </ul>
+
+      <h4>External signals</h4>
+      <ul class="ref-list">
+        <li><strong>DP tier / DP aligned</strong> — dark pool z-tier and whether its bias agrees with flow direction. Drives the Stack&apos;s DP component and a small bonus on the 0-10.</li>
+        <li><strong>Sentiment pill</strong> — session tone (STRENGTH / WEAKNESS / NEUTRAL) derived from intraday price/volume signature.</li>
+        <li><strong>ER / Earnings badge</strong> — days to next reported earnings. Red when within the window; scale position sizing accordingly.</li>
+        <li><strong>Sector chip</strong> — sector tag; when multiple cards in the same sector + direction show up, the card also shows a &quot;+N in sector&quot; cross-reference.</li>
+      </ul>
+
+      <h4>Metrics table</h4>
+      <ul class="ref-list">
+        <li><strong>Prem / mcap bps</strong> — unusual premium as basis points of market cap. 50+ bps is large.</li>
+        <li><strong>Cumulative premium</strong> — raw dollar premium over the window; total with bullish share in parens.</li>
+        <li><strong>Active days</strong> — days in the window with qualifying flow.</li>
+        <li><strong>Avg vol vs 30d</strong> — today&apos;s options volume in multiples of the 30-day average.</li>
+        <li><strong>OI change</strong> — net open-interest change on the dominant side.</li>
+        <li><strong>IV rank</strong> — 0-100 percentile of current implied vol against the past year.</li>
+        <li><strong>P/C ratio</strong> — window put/call ratio; relative (vs ticker baseline) if history allows, absolute otherwise.</li>
+        <li><strong>Avg |&Delta;|</strong> — premium-weighted average option delta. Higher = more directional conviction; &quot;PRX&quot; tag = delta came from proxy greeks rather than UW quotes.</li>
+        <li><strong>t=</strong> — acceleration t-stat. Above +1.5 is meaningful rising; below -1.5 is meaningful fading.</li>
+      </ul>
+    </section>
+
+  </div>
+
+</div>

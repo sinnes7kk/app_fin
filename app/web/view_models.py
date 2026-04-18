@@ -102,6 +102,132 @@ def _risk_pct_for_score(score: float | None) -> float:
     return 0.0
 
 
+# Premium-Mix UI copy — single source of truth so templates + narrative
+# modules pull from the same blurbs.  Each bucket has a short label, a
+# plain-English tooltip, and a "signal" hint (what a trader should take
+# away when that bucket dominates).
+PREMIUM_BUCKET_COPY: dict[str, dict[str, str]] = {
+    "total": {
+        "label": "Total directional",
+        "tip": "UW's aggregate of all directional (ASK calls + BID puts) premium for the day, across every DTE. Authoritative for Flow Tracker's multi-day accumulation regression.",
+        "signal": "The honest total bid from the tape.",
+    },
+    "lottery": {
+        "label": "Lottery (0-14d)",
+        "tip": "Unusual flow (>=$500K/trade) expiring within 2 weeks. Cheap, high-gamma, fast decay. Common on earnings, squeeze setups, and binary catalysts.",
+        "signal": "Event bet — size accordingly, not a positional conviction read.",
+    },
+    "swing": {
+        "label": "Swing (30-120d)",
+        "tip": "Unusual flow in the 30-120 day sweet spot. This is the institutional swing window — most of your signal pipeline's edge lives here.",
+        "signal": "Classic institutional positioning. The bread-and-butter signal.",
+    },
+    "leap": {
+        "label": "LEAP (180d+)",
+        "tip": "Unusual flow expiring 6+ months out. Slow, deep-pocket structural bets. Less common but high conviction when present.",
+        "signal": "Deep positional commitment — worth taking seriously.",
+    },
+    "other": {
+        "label": "Other DTE",
+        "tip": "Unusual flow in 15-29d or 121-179d — the gaps between lottery / swing / LEAP buckets. Usually a mix of earnings-cycle and mid-term bets.",
+        "signal": "Mixed horizons. Look at the side (bull/bear) more than the bucket.",
+    },
+    "unusual": {
+        "label": "Unusual flow",
+        "tip": "Sum of lottery + swing + LEAP + other — all unusual (>=$500K/trade) directional flow, regardless of DTE. Subset of Total directional.",
+        "signal": "How much of today's aggregate came from institutional-sized prints.",
+    },
+}
+
+
+def _pct(part: float, whole: float) -> float:
+    if whole <= 0:
+        return 0.0
+    try:
+        return round(float(part) / float(whole) * 100.0, 1)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _build_premium_mix_ui(row: dict[str, Any]) -> dict[str, Any] | None:
+    """Normalize ``row.premium_mix`` into a UI-friendly payload.
+
+    Combines bullish + bearish into a single "dominant side" number per
+    bucket (falls back to totals when direction is unclear) plus per-
+    bucket percent-of-total for easy sparkline / stacked-bar rendering.
+    Returns ``None`` when the row has no taxonomy data (legacy / ranked
+    signal rows — those fall back to the existing Flow-Feature panel).
+    """
+    mix = row.get("premium_mix")
+    if not isinstance(mix, dict):
+        return None
+
+    def _f(key: str) -> float:
+        try:
+            return float(mix.get(key) or 0.0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    total_bull = _f("total_bullish")
+    total_bear = _f("total_bearish")
+    total_gross = total_bull + total_bear
+    if total_gross <= 0:
+        return None
+
+    bull_share_pct = _pct(total_bull, total_gross)
+
+    def _bucket(key: str) -> dict[str, Any]:
+        bull = _f(f"{key}_bullish")
+        bear = _f(f"{key}_bearish")
+        gross = bull + bear
+        copy = PREMIUM_BUCKET_COPY.get(key, {})
+        return {
+            "key": key,
+            "label": copy.get("label", key.title()),
+            "tip": copy.get("tip"),
+            "signal": copy.get("signal"),
+            "bullish": round(bull, 2),
+            "bearish": round(bear, 2),
+            "gross": round(gross, 2),
+            "pct_of_total": _pct(gross, total_gross),
+            "pct_bullish": _pct(bull, gross) if gross > 0 else 0.0,
+        }
+
+    buckets = [_bucket(k) for k in ("swing", "lottery", "leap", "other")]
+    dominant = max(buckets, key=lambda b: b["gross"]) if any(b["gross"] > 0 for b in buckets) else None
+
+    total_copy = PREMIUM_BUCKET_COPY["total"]
+    unusual_copy = PREMIUM_BUCKET_COPY["unusual"]
+
+    return {
+        "source": mix.get("source"),
+        "total": {
+            "label": total_copy["label"],
+            "tip": total_copy["tip"],
+            "signal": total_copy["signal"],
+            "bullish": round(total_bull, 2),
+            "bearish": round(total_bear, 2),
+            "gross": round(total_gross, 2),
+            "pct_bullish": bull_share_pct,
+        },
+        "unusual": {
+            "label": unusual_copy["label"],
+            "tip": unusual_copy["tip"],
+            "signal": unusual_copy["signal"],
+            "bullish": round(_f("unusual_bullish"), 2),
+            "bearish": round(_f("unusual_bearish"), 2),
+            "gross": round(_f("unusual_bullish") + _f("unusual_bearish"), 2),
+            "pct_of_total": _pct(
+                _f("unusual_bullish") + _f("unusual_bearish"),
+                total_gross,
+            ),
+        },
+        "buckets": buckets,
+        "dominant_bucket": dominant["key"] if dominant else None,
+        "dominant_label": dominant["label"] if dominant else None,
+    }
+
+
 @dataclass
 class TraderCardView:
     """Shape expected by `_trader_card.html::trader_card`.
@@ -138,6 +264,11 @@ class TraderCardView:
     # alternatives + avoid + caveats) consumed by the Trader Card
     # "Structure" tab.
     trade_structure: dict[str, Any] | None = None
+    # Premium-Taxonomy plan — normalized mix payload for the Trader Card
+    # "Premium Mix" panel (total directional + lottery / swing / LEAP /
+    # other, each with tooltip copy).  ``None`` when the row has no
+    # taxonomy data (legacy rows / ranked signal rows).
+    premium_mix_ui: dict[str, Any] | None = None
 
     @classmethod
     def from_row(
@@ -244,6 +375,8 @@ class TraderCardView:
         # payload so the Structure tab can render it inline.
         structure = attach_sizing_context(structure, risk_regime)
 
+        premium_mix_ui = _build_premium_mix_ui(row)
+
         return cls(
             row=dict(row),
             size_shares=size_shares,
@@ -260,6 +393,7 @@ class TraderCardView:
             conviction_stack=stack,
             narrative=narrative,
             trade_structure=structure,
+            premium_mix_ui=premium_mix_ui,
         )
 
     def to_template(self) -> dict[str, Any]:
@@ -282,6 +416,7 @@ class TraderCardView:
         out["conviction_stack"] = self.conviction_stack
         out["narrative"] = self.narrative
         out["trade_structure"] = self.trade_structure
+        out["premium_mix_ui"] = self.premium_mix_ui
         return out
 
 

@@ -1852,7 +1852,51 @@ def _build_action_bar(
         # Wave 8 — full regime payload + condensed pill summary.
         "risk_regime": risk_regime_payload,
         "risk_regime_summary": risk_regime_summary,
+        # Premium-Taxonomy plan — warm-up chip.  Only lit while the
+        # tracker's history is rebuilding after a purge.
+        "flow_tracker_warmup": _flow_tracker_warmup_state(),
     }
+
+
+def _flow_tracker_warmup_state() -> dict | None:
+    """Return ``{"active": bool, "day": int, "target": int}`` if the
+    Flow Tracker is still warming up (fewer than ``FLOW_TRACKER_WARMUP_DAYS``
+    distinct trading-day snapshots in ``screener_snapshots.csv``), else
+    ``None``.
+
+    Gated behind ``FLOW_TRACKER_WARMUP_BANNER_ENABLED`` so the chip can
+    be switched off entirely once we're past the migration window.
+    """
+    try:
+        from app.config import (
+            FLOW_TRACKER_WARMUP_BANNER_ENABLED,
+            FLOW_TRACKER_WARMUP_DAYS,
+        )
+        from app.features.flow_tracker import SNAPSHOTS_PATH
+    except Exception:
+        return None
+
+    if not FLOW_TRACKER_WARMUP_BANNER_ENABLED:
+        return None
+
+    target = int(FLOW_TRACKER_WARMUP_DAYS)
+    if target <= 0:
+        return None
+
+    try:
+        if not SNAPSHOTS_PATH.exists():
+            return {"active": True, "day": 0, "target": target}
+        df = pd.read_csv(SNAPSHOTS_PATH, usecols=["date"])
+    except Exception:
+        return None
+
+    if df is None or df.empty or "date" not in df.columns:
+        return {"active": True, "day": 0, "target": target}
+
+    distinct_days = df["date"].dropna().astype(str).nunique()
+    if distinct_days >= target:
+        return None
+    return {"active": True, "day": int(distinct_days), "target": target}
 
 
 def _actionable_now(
@@ -2129,6 +2173,24 @@ def _build_flow_tracker(
     rows = _enrich_flow_tracker_delta(rows, flow)
     rows = _enrich_flow_tracker_ztier(rows)
     rows = _enrich_flow_tracker_decision(rows, risk_regime=risk_regime)
+
+    # Flow-Tracker-Swing-Radar: drop illiquid tickers from the radar so
+    # the list stays swing-tradable.  ILLIQUID tier is ADV < $1M — any
+    # fill there is essentially market-making the name.  Done after the
+    # decision enrichment so liquidity is computed exactly once.
+    from app.config import FLOW_TRACKER_HARD_ILLIQUID_FILTER
+    if FLOW_TRACKER_HARD_ILLIQUID_FILTER:
+        dropped = 0
+        kept: list[dict] = []
+        for r in rows:
+            tier = str((r.get("liquidity") or {}).get("liquidity_tier") or "").upper()
+            if tier == "ILLIQUID":
+                dropped += 1
+                continue
+            kept.append(r)
+        if dropped:
+            print(f"  [flow-tracker] swing-radar: dropped {dropped} illiquid names")
+        rows = kept
     return rows
 
 
@@ -2202,6 +2264,14 @@ def _enrich_flow_tracker_decision(
                 )
             except Exception:
                 pass
+
+        # Premium-Taxonomy plan — normalize the mix payload so the
+        # Trader-Card modal can render the Premium Mix panel directly.
+        try:
+            from app.web.view_models import _build_premium_mix_ui
+            r["premium_mix_ui"] = _build_premium_mix_ui(r)
+        except Exception:
+            r["premium_mix_ui"] = None
     return rows
 
 
@@ -2925,6 +2995,33 @@ def index():
         insider_by_ticker=_insider_by_ticker,
         risk_regime=_risk_regime_for_tracker,
     )
+
+    # Flow-Tracker-Swing-Radar: cross-reference chip.  Tag each tracker
+    # row as either "also in signals" (the ticker appears on today's
+    # bullish/bearish signal list) or "radar only" (the tracker surfaces
+    # it from the multi-day regression but the signal pipeline passed).
+    # Gives the trader a quick filter for "this is a new idea vs. this
+    # confirms what we're already watching".
+    try:
+        _bull_tickers = set()
+        _bear_tickers = set()
+        try:
+            if isinstance(bull, pd.DataFrame) and "ticker" in bull.columns:
+                _bull_tickers = {str(t).upper() for t in bull["ticker"].dropna().tolist()}
+            if isinstance(bear, pd.DataFrame) and "ticker" in bear.columns:
+                _bear_tickers = {str(t).upper() for t in bear["ticker"].dropna().tolist()}
+        except Exception:
+            _bull_tickers = _bear_tickers = set()
+        for r in _flow_tracker_rows:
+            sym = str(r.get("ticker") or "").upper()
+            direction = str(r.get("direction") or "").upper()
+            signal_set = _bull_tickers if direction == "BULLISH" else _bear_tickers
+            r["cross_ref"] = {
+                "in_signals": sym in signal_set,
+                "label": "Also in signals" if sym in signal_set else "Radar only",
+            }
+    except Exception:
+        pass
 
     ctx = {
         "rejected_html": _paginate_card_fragments(
