@@ -4099,7 +4099,7 @@
           var anchor = tocLink.getAttribute('data-ref-anchor');
           if (anchor) open(anchor);
         }
-      });
+      }, true);
       document.addEventListener('keydown', function(e){
         if (e.key === 'Escape' && modal.getAttribute('aria-hidden') === 'false') close();
       });
