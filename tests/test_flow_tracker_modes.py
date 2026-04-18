@@ -428,6 +428,33 @@ def test_a7_oi_change_contributes_to_score():
     )
 
 
+def test_nan_scalars_coerce_to_zero():
+    """Regression: NaN-poisoned snapshot fields must not leak to the UI.
+
+    Pandas rows with a partial UW payload often carry ``float('nan')``
+    for ``total_oi_change_perc`` / ``iv_rank`` / ``put_call_ratio`` /
+    ``close``.  The legacy ``float(x or 0)`` idiom returned ``nan`` (NaN
+    is truthy), which rendered as ``+nan%`` / ``$nan`` in the Flow
+    Tracker cards.  This test builds snapshots with explicit ``nan``s
+    and asserts the tracker row exposes finite numbers.
+    """
+    days = _days_back(5)
+    rows = [_strong_row_with_extras("NANY", d, bull=3_000_000 + i * 200_000,
+                                    perc_3d=0.9) for i, d in enumerate(days)]
+    # Poison the exact fields that flow to the "More metrics" section.
+    for r in rows:
+        r["total_oi_change_perc"] = float("nan")
+        r["iv_rank"] = float("nan")
+        r["put_call_ratio"] = float("nan")
+        r["close"] = float("nan")
+    out = _run_with_synthetic(rows)
+    row = next(r for r in out if r["ticker"] == "NANY")
+    for k in ("latest_oi_change", "latest_iv_rank", "latest_close", "latest_put_call_ratio"):
+        v = row[k]
+        assert isinstance(v, (int, float)), f"{k} is not numeric: {type(v)}"
+        assert v == v, f"{k} is still NaN: {v!r}"  # NaN != NaN
+
+
 def test_a1_a2_enrichment_populates_on_row():
     """Enrichment columns should round-trip from snapshot → tracker row."""
     days = _days_back(5)
@@ -667,6 +694,7 @@ if __name__ == "__main__":
         test_a4_window_return_fighting_flow_drags_score,
         test_a6_3d_percentile_gates_accumulation,
         test_a7_oi_change_contributes_to_score,
+        test_nan_scalars_coerce_to_zero,
         test_a1_a2_enrichment_populates_on_row,
         # Wave 0.5 Cluster C
         test_c1_retention_keeps_15d_window,

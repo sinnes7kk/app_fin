@@ -32,6 +32,26 @@ from app.config import (
 _GRADE_RANK = {"C": 0, "B-": 1, "B": 2, "B+": 3, "A-": 4, "A": 5, "A+": 6}
 
 
+def _num(v, default: float = 0.0) -> float:
+    """Coerce ``v`` to ``float``, mapping ``None`` / ``NaN`` / non-numeric to ``default``.
+
+    Prevents the "NaN is truthy" trap where ``float(x or 0)`` returns
+    ``nan`` when ``x`` is ``float('nan')`` (pandas-originated missing
+    values).  Any UI dict value that flows into ``"%+.1f"|format`` /
+    ``toFixed`` must go through this helper so the template never
+    renders ``+nan%`` / ``$nan``.
+    """
+    if v is None:
+        return default
+    try:
+        x = float(v)
+    except (TypeError, ValueError):
+        return default
+    if x != x:  # NaN check
+        return default
+    return x
+
+
 def _mode_passes(row: dict, mode_cfg: dict) -> bool:
     """Return True if a scored row clears every gate defined by ``mode_cfg``.
 
@@ -44,13 +64,13 @@ def _mode_passes(row: dict, mode_cfg: dict) -> bool:
     cum_total = row.get("_cum_total")
     if cum_total is None:
         cum_total = row.get("cumulative_premium", 0.0)
-    if float(cum_total or 0) < mode_cfg["min_cum_premium"]:
+    if _num(cum_total) < mode_cfg["min_cum_premium"]:
         return False
-    if float(row.get("prem_mcap_bps", 0) or 0) < mode_cfg["min_prem_mcap_bps"]:
+    if _num(row.get("prem_mcap_bps")) < mode_cfg["min_prem_mcap_bps"]:
         return False
-    if float(row.get("_consistency_raw", 0) or 0) < mode_cfg["min_consistency"]:
+    if _num(row.get("_consistency_raw")) < mode_cfg["min_consistency"]:
         return False
-    if float(row.get("_accel_t_stat", 0) or 0) < mode_cfg["min_accel_t"]:
+    if _num(row.get("_accel_t_stat")) < mode_cfg["min_accel_t"]:
         return False
     if mode_cfg["exclude_hedging"] and row.get("hedging_risk"):
         return False
@@ -654,11 +674,14 @@ def compute_multi_day_flow(
             "total_days": total_days,
             "persistence_ratio": persistence_ratio,
             "trend": trend,
-            "avg_vol_ratio_30d": round(float(avg_vol_30d), 2),
-            "latest_oi_change": round(float(latest.get("total_oi_change_perc") or 0), 2),
-            "latest_iv_rank": round(float(latest.get("iv_rank") or 0), 1),
-            "latest_close": round(float(latest.get("close") or 0), 2),
-            "latest_put_call_ratio": round(float(latest.get("put_call_ratio") or 0), 2),
+            "avg_vol_ratio_30d": round(_num(avg_vol_30d), 2),
+            # NaN-safe coercion — pandas snapshots frequently carry NaN
+            # for tickers where UW returned a partial row.  Without the
+            # guard these flowed into templates as "+nan%" / "$nan".
+            "latest_oi_change": round(_num(latest.get("total_oi_change_perc")), 2),
+            "latest_iv_rank": round(_num(latest.get("iv_rank")), 1),
+            "latest_close": round(_num(latest.get("close")), 2),
+            "latest_put_call_ratio": round(_num(latest.get("put_call_ratio")), 2),
             "window_avg_pcr": round(window_avg_pcr, 3),
             "ticker_pcr_median": round(pcr_median, 3),
             "ticker_pcr_history_n": pcr_history_n,
