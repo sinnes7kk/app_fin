@@ -101,25 +101,6 @@ def add_volume_oi_ratio(df: pd.DataFrame) -> pd.DataFrame:
 RECENCY_HALF_LIFE_HOURS = 6.0
 
 
-def compute_flow_velocity(df: pd.DataFrame) -> pd.DataFrame:
-    """DEPRECATED — no-op stub retained for API back-compat.
-
-    The median-split premium ratio this function implemented was non-directional,
-    unbounded, and penalised single-event tickers. It has been superseded by
-    ``directional_momentum`` (see ``app.signals.pipeline._enrich_net_prem_ticks``),
-    which is derived from UW ``/stock/{ticker}/net-prem-ticks`` — directional by
-    construction and bounded to ``[-1, 1]``.
-
-    This function now simply adds a ``flow_velocity`` column of ``0.0`` so any
-    legacy caller still receives the expected schema.
-    """
-    if df.empty:
-        return df.copy()
-    out = df.copy()
-    out["flow_velocity"] = 0.0
-    return out
-
-
 def add_recency_weight(df: pd.DataFrame) -> pd.DataFrame:
     """Apply exponential time-decay to premiums so recent flow matters more.
 
@@ -872,6 +853,13 @@ def aggregate_flow_by_ticker(
                 "bearish_flow_intensity",
                 "bullish_score",
                 "bearish_score",
+                # Wave 2 — repeat-flow acceleration columns.
+                "bullish_repeat_2h",
+                "bearish_repeat_2h",
+                "bullish_accel_ratio",
+                "bearish_accel_ratio",
+                "bullish_accel_score",
+                "bearish_accel_score",
             ]
         )
 
@@ -887,11 +875,6 @@ def aggregate_flow_by_ticker(
 
     if "repeat_flow_count" not in out.columns:
         out = add_repeat_flow_count(out)
-
-    # flow_velocity is retired (see compute_flow_velocity docstring). We still
-    # emit a 0.0 column downstream for back-compat with old snapshot readers.
-    if "flow_velocity" not in out.columns:
-        out["flow_velocity"] = 0.0
 
     if "is_sweep" not in out.columns:
         out["is_sweep"] = False
@@ -919,6 +902,27 @@ def aggregate_flow_by_ticker(
     ).astype(int)
     out["bearish_sweep_component"] = (
         (out["direction"] == "SHORT") & (out["is_sweep"])
+    ).astype(int)
+
+    # Wave 2 — repeat-flow acceleration.  Flags trades within the last 2h
+    # of the most-recent print in the frame (treats today's last observed
+    # event as "now" so backtests are deterministic).  The downstream
+    # aggregation converts this into `bullish_repeat_2h` / `bearish_repeat_2h`
+    # and derives `*_accel_ratio = repeat_2h / count`.  Ratio centred on
+    # 2/6.5≈0.308 (flat-distribution baseline for a 6.5h session).
+    if "event_ts" in out.columns and not out["event_ts"].isna().all():
+        _ts = pd.to_datetime(out["event_ts"], errors="coerce", utc=True)
+        _now_ref = _ts.max()
+        _within_2h = (_now_ref - _ts) <= pd.Timedelta(hours=2)
+        out["is_within_2h"] = _within_2h.fillna(False)
+    else:
+        out["is_within_2h"] = False
+
+    out["bullish_repeat_2h_component"] = (
+        (out["direction"] == "LONG") & out["is_within_2h"]
+    ).astype(int)
+    out["bearish_repeat_2h_component"] = (
+        (out["direction"] == "SHORT") & out["is_within_2h"]
     ).astype(int)
 
     out["bullish_sweep_premium_component"] = conf_premium.where(
@@ -1004,7 +1008,6 @@ def aggregate_flow_by_ticker(
         bearish_max_trade_premium=("bearish_trade_premium_component", "max"),
         bullish_repeat_count=("bullish_repeat_component", "sum"),
         bearish_repeat_count=("bearish_repeat_component", "sum"),
-        flow_velocity=("flow_velocity", "max"),
         bullish_premium_raw=("bullish_premium_raw_component", "sum"),
         bearish_premium_raw=("bearish_premium_raw_component", "sum"),
         bullish_delta_premium_raw=("bullish_delta_premium_component", "sum"),
@@ -1015,6 +1018,9 @@ def aggregate_flow_by_ticker(
         bearish_premium_side=("bearish_premium_side", "sum"),
         bullish_uw_delta_premium=("bullish_uw_delta_premium", "sum"),
         bearish_uw_delta_premium=("bearish_uw_delta_premium", "sum"),
+        # Wave 2 — 2h repeat-flow counts per direction.
+        bullish_repeat_2h=("bullish_repeat_2h_component", "sum"),
+        bearish_repeat_2h=("bearish_repeat_2h_component", "sum"),
     ).reset_index()
 
     # Fill direction-specific nulls
@@ -1034,7 +1040,6 @@ def aggregate_flow_by_ticker(
         "bearish_max_trade_premium",
         "bullish_repeat_count",
         "bearish_repeat_count",
-        "flow_velocity",
         "bullish_premium_raw",
         "bearish_premium_raw",
         "bullish_delta_premium_raw",
@@ -1045,6 +1050,8 @@ def aggregate_flow_by_ticker(
         "bearish_premium_side",
         "bullish_uw_delta_premium",
         "bearish_uw_delta_premium",
+        "bullish_repeat_2h",
+        "bearish_repeat_2h",
     ]
     agg[fill_zero_cols] = agg[fill_zero_cols].fillna(0)
 
@@ -1088,6 +1095,93 @@ def aggregate_flow_by_ticker(
 
     # DTE score
     agg["dte_score"] = agg["avg_dte"].apply(_dte_score)
+
+    # ------------------------------------------------------------------
+    # Wave 2 — repeat-flow acceleration.
+    # `*_accel_ratio`   = fraction of today's directional prints that landed
+    #                     in the last 2h.  0.308 is the flat-distribution
+    #                     reference (last 2h of a 6.5h session).
+    # `*_accel_score`   = ratio minus baseline, clipped to [-0.5, +0.7].
+    #                     Positive → late-session ramp (accumulation cue).
+    #                     Negative → flow died off earlier in the day.
+    # ------------------------------------------------------------------
+    _FLAT_BASELINE = 2.0 / 6.5  # ~0.308
+    agg["bullish_accel_ratio"] = np.where(
+        agg["bullish_count"] > 0,
+        agg["bullish_repeat_2h"] / agg["bullish_count"],
+        0.0,
+    )
+    agg["bearish_accel_ratio"] = np.where(
+        agg["bearish_count"] > 0,
+        agg["bearish_repeat_2h"] / agg["bearish_count"],
+        0.0,
+    )
+    agg["bullish_accel_score"] = np.clip(
+        agg["bullish_accel_ratio"] - _FLAT_BASELINE, -0.5, 0.7
+    )
+    agg["bearish_accel_score"] = np.clip(
+        agg["bearish_accel_ratio"] - _FLAT_BASELINE, -0.5, 0.7
+    )
+
+    # ------------------------------------------------------------------
+    # Wave 0.5 A1/A2 — structural enrichment per ticker.
+    #   dominant_dte_bucket : premium-weighted dominant DTE bucket (str).
+    #   sweep_share         : sweep-count / total-count on the dominant side.
+    #   multileg_share      : multileg-count / total-count (all sides).
+    # Persisted into screener_snapshots so `compute_multi_day_flow` can
+    # consume window-averaged versions and the grade explainer can cite
+    # them as reasons.
+    # ------------------------------------------------------------------
+    from app.config import FLOW_TRACKER_DTE_BUCKETS
+
+    def _bucket_for(dte: float) -> str | None:
+        if pd.isna(dte):
+            return None
+        for label, lo, hi, _mult in FLOW_TRACKER_DTE_BUCKETS:
+            if lo <= dte <= hi:
+                return label
+        return None
+
+    out["_dte_bucket"] = out["dte"].apply(_bucket_for)
+    if "is_multileg" not in out.columns:
+        out["is_multileg"] = False
+    out["is_multileg"] = out["is_multileg"].fillna(False).astype(bool)
+
+    # Dominant DTE bucket = bucket with the largest sum of premium per ticker.
+    dte_bucket_premium = (
+        out.dropna(subset=["_dte_bucket"])
+        .groupby(["ticker", "_dte_bucket"])["premium"]
+        .sum()
+        .reset_index()
+    )
+    if not dte_bucket_premium.empty:
+        idx = dte_bucket_premium.groupby("ticker")["premium"].idxmax()
+        dominant = (
+            dte_bucket_premium.loc[idx, ["ticker", "_dte_bucket"]]
+            .rename(columns={"_dte_bucket": "dominant_dte_bucket"})
+        )
+        agg = agg.merge(dominant, on="ticker", how="left")
+    else:
+        agg["dominant_dte_bucket"] = None
+
+    # Sweep & multileg shares.  Sweep share uses the side that owns the row's
+    # `dominant_direction` so "bullish sweeps / bullish trades" is a clean
+    # read of how aggressive the dominant-side flow is.
+    total_count_series = agg["total_count"].replace(0, np.nan)
+    bullish_count_safe = agg["bullish_count"].replace(0, np.nan)
+    bearish_count_safe = agg["bearish_count"].replace(0, np.nan)
+    bullish_sweep_ratio = (agg["bullish_sweep_count"] / bullish_count_safe).fillna(0.0)
+    bearish_sweep_ratio = (agg["bearish_sweep_count"] / bearish_count_safe).fillna(0.0)
+    agg["sweep_share"] = np.where(
+        agg["dominant_direction"] == "SHORT",
+        bearish_sweep_ratio,
+        bullish_sweep_ratio,
+    )
+
+    multileg_per_ticker = out.groupby("ticker")["is_multileg"].sum()
+    agg["multileg_count"] = agg["ticker"].map(multileg_per_ticker).fillna(0).astype(int)
+    agg["multileg_share"] = (agg["multileg_count"] / total_count_series).fillna(0.0)
+    agg[["sweep_share", "multileg_share"]] = agg[["sweep_share", "multileg_share"]].clip(0.0, 1.0).round(4)
 
     # Market-cap-based flow intensity — premium / marketcap gives a
     # size-normalised measure of how large the directional bet is relative

@@ -466,6 +466,28 @@
                 }.get(tf.conviction_grade, 'tc-grade-c') %}
                 <span class="badge tc-grade {{ _gcls }}" style="margin-left:0.3rem" title="Flow-score grade ({{ '%.1f'|format(tf.flow_score_10) }}/10)">{{ tf.conviction_grade }} · {{ "%.1f"|format(tf.flow_score_10) }}</span>
               {% endif %}
+              {# Wave 5 — Conviction Stack chip.  Mirrors the Flow Tracker card chip
+                 but uses flow_score_scaled (top_flow rows don't carry full candidate
+                 enrichment). #}
+              {% if tf.conviction_stack and tf.conviction_stack.score is defined %}
+                {% set _stk_cls = {
+                  'elite':'tc-stack-elite','strong':'tc-stack-strong',
+                  'moderate':'tc-stack-moderate','weak':'tc-stack-weak'
+                }.get(tf.conviction_stack.tier, 'tc-stack-weak') %}
+                {% set _stk_tip %}Stack {{ tf.conviction_stack.score }}/100 · {{ tf.conviction_stack.tier_label }}{% if tf.conviction_stack.top_drivers %}&#10;+ {{ tf.conviction_stack.top_drivers|join(', ') }}{% endif %}{% if tf.conviction_stack.top_drags %}&#10;– {{ tf.conviction_stack.top_drags|join(', ') }}{% endif %}{% endset %}
+                <span class="badge tc-stack {{ _stk_cls }}" style="margin-left:0.3rem" title="{{ _stk_tip }}">{{ tf.conviction_stack.tier_label }} · {{ tf.conviction_stack.score }}</span>
+              {% endif %}
+              {# Wave 5 — Dealer hedge chip. #}
+              {% if tf.dealer_hedge_bias and tf.dealer_hedge_bias != 'neutral' %}
+                {% set _dh_cls = 'tc-dealer-chase' if tf.dealer_hedge_bias == 'chase' else ('tc-dealer-suppress' if tf.dealer_hedge_bias == 'suppress' else '') %}
+                <span class="badge tc-dealer {{ _dh_cls }}" style="margin-left:0.3rem" title="Dealer hedge bias: {{ tf.dealer_hedge_label or tf.dealer_hedge_bias }}{% if tf.pin_risk_distance_pct is not none %} · pin {{ '%.1f'|format(tf.pin_risk_distance_pct) }}% away{% endif %}">
+                  {{ 'CHASE' if tf.dealer_hedge_bias == 'chase' else ('PIN' if tf.dealer_hedge_bias == 'suppress' else tf.dealer_hedge_bias|upper) }}
+                </span>
+              {% endif %}
+              {# Wave 5 — Catalyst (earnings) chip. #}
+              {% if tf.catalyst_label %}
+                <span class="badge tc-catalyst tc-catalyst-{{ tf.catalyst_tone or 'warm' }}" style="margin-left:0.3rem" title="Earnings in {{ tf.days_until_earnings|int }} day(s) — binary risk around the print.">{{ tf.catalyst_label }}</span>
+              {% endif %}
               {% if tf.label_cls %}<span class="{{ tf.label_cls }}" style="font-weight:600;margin-left:0.3rem">{{ tf.label }}</span>{% else %}<span style="margin-left:0.3rem;opacity:0.7">{{ tf.label }}</span>{% endif %}
             </span>
           </header>
@@ -488,12 +510,12 @@
             </dd>
             {% endif %}
             {% if tf.grade_reasons %}
-            {% set _why_tip_full %}{% for r in tf.grade_reasons %}{% if r.kind == 'drag' %}↓{% else %}+{% endif %} {{ r.label }}: {{ "%.2f"|format(r.points) }} pts{% if not loop.last %}&#10;{% endif %}{% endfor %}{% endset %}
+            {% set _why_tip_full %}{% for r in tf.grade_reasons %}{% if r.kind == 'drag' %}↓{% elif r.kind == 'context-drag' %}~↓{% elif r.kind == 'context-driver' %}~+{% else %}+{% endif %} {{ r.label }}{% if r.kind in ['driver','drag'] and r.points is defined and r.points is not none %}: {{ "%.2f"|format(r.points) }} pts{% endif %}{% if not loop.last %}&#10;{% endif %}{% endfor %}{% endset %}
             <dt>Why</dt>
             <dd>
               <span class="ft-why-inline" title="{{ _why_tip_full }}">
                 {% for r in tf.grade_reasons[:3] %}
-                  {% if r.kind == 'drag' %}<span class="ft-why-drag">{{ r.label }} (drag)</span>{% else %}{{ r.label }}{% endif %}{% if not loop.last %} · {% endif %}
+                  {% if r.kind == 'drag' %}<span class="ft-why-drag">{{ r.label }} (drag)</span>{% elif r.kind == 'context-drag' %}<span class="ft-why-ctx-drag">{{ r.label }}</span>{% elif r.kind == 'context-driver' %}<span class="ft-why-ctx-driver">{{ r.label }}</span>{% else %}{{ r.label }}{% endif %}{% if not loop.last %} · {% endif %}
                 {% endfor %}
               </span>
             </dd>
@@ -505,6 +527,65 @@
       {% endif %}
 
       <h2 style="margin:1.6rem 0 0.6rem;font-size:1rem;opacity:0.9">Individual Trades</h2>
+
+      {# Wave 5 — Individual Trades toolbar.
+         • Opening-only toggle sends a full-page reload with ``?opening_only=1``
+           because the downstream ``fetch_recent_alert_flow`` needs a fresh
+           UW round-trip with ``size_greater_oi=true`` appended.
+         • Ticker / direction / option-type filters and the sort dropdown
+           operate client-side on the already-rendered cards (each card
+           emits ``data-uf-*`` attrs).  No re-fetch needed.
+         • "Min premium" is a quick slider to trim the noisy long tail
+           without reloading. #}
+      <div class="uf-toolbar" id="uf-toolbar">
+        <label class="uf-tool uf-tool-toggle" title="Only show prints whose size exceeded existing open interest — a stronger proxy for newly opened positions (vs. closing trades).">
+          <input type="checkbox" id="uf-opening-only" {% if alerts_opening_only %}checked{% endif %}>
+          <span>Opening only</span>
+          <span class="uf-tool-help" title="Layers size_greater_oi=true on top of the default vol_greater_oi filter. Triggers a page reload.">ⓘ</span>
+        </label>
+        <label class="uf-tool">
+          <span class="uf-tool-label">Ticker</span>
+          <input type="search" id="uf-filter-ticker" placeholder="AAPL, NVDA…" size="10" autocomplete="off">
+        </label>
+        <label class="uf-tool">
+          <span class="uf-tool-label">Direction</span>
+          <select id="uf-filter-direction">
+            <option value="">All</option>
+            <option value="LONG">Long</option>
+            <option value="SHORT">Short</option>
+          </select>
+        </label>
+        <label class="uf-tool">
+          <span class="uf-tool-label">Type</span>
+          <select id="uf-filter-opttype">
+            <option value="">All</option>
+            <option value="CALL">Call</option>
+            <option value="PUT">Put</option>
+          </select>
+        </label>
+        <label class="uf-tool">
+          <span class="uf-tool-label">Min $</span>
+          <select id="uf-filter-min-prem" title="Minimum premium">
+            <option value="0">Any</option>
+            <option value="100000">$100K</option>
+            <option value="250000">$250K</option>
+            <option value="500000">$500K</option>
+            <option value="1000000">$1M</option>
+          </select>
+        </label>
+        <label class="uf-tool">
+          <span class="uf-tool-label">Sort</span>
+          <select id="uf-sort">
+            <option value="bps">Prem/MCap (bps)</option>
+            <option value="premium">Premium</option>
+            <option value="event-ts">Time (newest)</option>
+            <option value="dte-asc">DTE (soonest)</option>
+            <option value="dte-desc">DTE (furthest)</option>
+          </select>
+        </label>
+        <span class="uf-count" id="uf-count" aria-live="polite"></span>
+      </div>
+
       <div id="alerts-table-wrap">
         {{ alerts_html | safe }}
       </div>
@@ -513,7 +594,13 @@
     <!-- ═══════ FLOW TRACKER ═══════ -->
     <section id="panel-flow-tracker" class="panel" role="tabpanel">
       <h1 class="panel-title">Flow Tracker</h1>
-      <p class="tab-intro">Tickers with <strong>repeat unusual options activity</strong> over the last {{ flow_tracker_lookback }} trading days. Ranked by a composite conviction score: persistence, absolute intensity, premium-weighted directional consistency, log-regression acceleration, and cumulative mass — with a 15% haircut applied when the P/C ratio looks like hedging.</p>
+      {# Wave 0 — mode-aware intro copy rendered inline via data attrs so the client-side toggle can swap without a re-render. #}
+      <p class="tab-intro" id="ft-intro"
+         data-intro-strong_accumulation="Names with unusual options activity on every day of the last {{ flow_tracker_lookback }}, strongly one-sided, and still rising."
+         data-intro-accumulation="Names with consistent multi-day one-sided options flow — the classic accumulation pattern."
+         data-intro-all="All tickers clearing the base multi-day persistence gate over the last {{ flow_tracker_lookback }} trading days.">
+        Names with consistent multi-day one-sided options flow — the classic accumulation pattern.
+      </p>
 
       {% if grade_stats_header %}
       <div class="grade-stats-header" title="Forward-return backtest of historical Flow Tracker grades (excess vs SPY, R-multiple assumes {{ '%.0f%%'|format((grade_stats.assumed_stop_pct or 0.02) * 100) }} stop).">
@@ -523,10 +610,136 @@
       {% endif %}
 
       {% if flow_tracker %}
+      {% set _counts = flow_tracker[0].mode_counts if flow_tracker[0].mode_counts is defined else {'strong_accumulation':0,'accumulation':0,'all':(flow_tracker|length)} %}
+
+      {# Wave 1 — "Now What" 3-card hero strip.  Computed server-side in
+         _build_flow_tracker_hero: highest conviction, biggest sector
+         cluster, and the cleanest ready-to-trade setup.  Each card
+         anchors back to its detail card below. #}
+      {% if flow_tracker_hero %}
+      <div class="ft-hero-strip" role="region" aria-label="Now What — top-level Flow Tracker summary">
+        {# Card 1 — top conviction. #}
+        {% if flow_tracker_hero.top %}
+          {% set _t = flow_tracker_hero.top %}
+          <a class="ft-hero-card ft-hero-top"
+             href="#ft-card-{{ _t.ticker }}"
+             title="Highest conviction score across the current view.">
+            <span class="ft-hero-label">Top Conviction</span>
+            <span class="ft-hero-headline">
+              <span class="ft-hero-ticker">{{ _t.ticker }}</span>
+              <span class="ft-hero-grade ft-hero-grade-{{ _t.conviction_grade | replace('+','plus') | replace('-','minus') }}">{{ _t.conviction_score }}/10 {{ _t.conviction_grade }}</span>
+            </span>
+            <span class="ft-hero-sub">
+              {% if _t.direction == 'BULLISH' %}
+                <span class="ft-hero-dir ft-hero-dir-bull">BULL</span>
+              {% else %}
+                <span class="ft-hero-dir ft-hero-dir-bear">BEAR</span>
+              {% endif %}
+              <span class="ft-hero-sector">{{ _t.sector or '—' }}</span>
+              {% if _t.top_reason %}<span class="ft-hero-reason">· {{ _t.top_reason }}</span>{% endif %}
+            </span>
+          </a>
+        {% endif %}
+
+        {# Card 2 — hottest sector cluster. #}
+        {% if flow_tracker_hero.sector %}
+          {% set _s = flow_tracker_hero.sector %}
+          <div class="ft-hero-card ft-hero-sector"
+               title="Sector + direction with the most names passing the Accumulation gate — a one-sided sector bid.">
+            <span class="ft-hero-label">Hottest Sector</span>
+            <span class="ft-hero-headline">
+              <span class="ft-hero-sector-name">{{ _s.sector }}</span>
+              {% if _s.direction == 'BULLISH' %}
+                <span class="ft-hero-dir ft-hero-dir-bull">{{ _s.count }} BULL</span>
+              {% else %}
+                <span class="ft-hero-dir ft-hero-dir-bear">{{ _s.count }} BEAR</span>
+              {% endif %}
+            </span>
+            <span class="ft-hero-sub">
+              {% for tk in _s.tickers %}
+                <a class="ft-hero-tk-link" href="#ft-card-{{ tk }}">{{ tk }}</a>{% if not loop.last %} · {% endif %}
+              {% endfor %}
+              <span class="ft-hero-reason">· ${{ '{:,.0f}'.format(_s.total_premium) }} total</span>
+            </span>
+          </div>
+        {% else %}
+          <div class="ft-hero-card ft-hero-sector ft-hero-empty"
+               title="Need ≥2 names in the same sector + direction passing the Accumulation gate for a cluster signal.">
+            <span class="ft-hero-label">Hottest Sector</span>
+            <span class="ft-hero-headline"><span class="ft-hero-empty-msg">No sector cluster</span></span>
+            <span class="ft-hero-sub">Flow is fragmented across sectors — no one-sided bid.</span>
+          </div>
+        {% endif %}
+
+        {# Card 3 — cleanest ready-to-trade setup. #}
+        {% if flow_tracker_hero.setup %}
+          {% set _r = flow_tracker_hero.setup %}
+          <a class="ft-hero-card ft-hero-setup{% if flow_tracker_hero.setup_is_fallback %} ft-hero-setup-fallback{% endif %}"
+             href="#ft-card-{{ _r.ticker }}"
+             title="{% if flow_tracker_hero.setup_is_fallback %}No row passes all clean-setup filters (Strong+DP-aligned+price-aligned+IV≤65+no ER≤5d); falling back to top conviction.{% else %}Passes Strong gate, DP-aligned, price confirms flow, IV rank ≤65, no earnings within 5 days.{% endif %}">
+            <span class="ft-hero-label">
+              {% if flow_tracker_hero.setup_is_fallback %}Cleanest Setup*{% else %}Cleanest Setup{% endif %}
+            </span>
+            <span class="ft-hero-headline">
+              <span class="ft-hero-ticker">{{ _r.ticker }}</span>
+              <span class="ft-hero-grade ft-hero-grade-{{ _r.conviction_grade | replace('+','plus') | replace('-','minus') }}">{{ _r.conviction_score }}/10 {{ _r.conviction_grade }}</span>
+            </span>
+            <span class="ft-hero-sub">
+              {% if _r.direction == 'BULLISH' %}
+                <span class="ft-hero-dir ft-hero-dir-bull">BULL</span>
+              {% else %}
+                <span class="ft-hero-dir ft-hero-dir-bear">BEAR</span>
+              {% endif %}
+              {% if _r.dp_aligned %}<span class="ft-hero-tag">DP✓</span>{% endif %}
+              {% if _r.window_return_pct is not none and _r.window_return_pct != 0 %}<span class="ft-hero-tag">{{ '%+.1f'|format(_r.window_return_pct) }}%</span>{% endif %}
+              {% if _r.iv_rank is not none %}<span class="ft-hero-tag">IV {{ _r.iv_rank }}</span>{% endif %}
+              {% if _r.earnings_in is not none and _r.earnings_in <= 10 %}<span class="ft-hero-tag ft-hero-tag-warn">ER {{ _r.earnings_in }}d</span>{% endif %}
+            </span>
+          </a>
+        {% endif %}
+      </div>
+      {% endif %}
+
+      {# Wave 0 — mode toggle + live funnel counts.  Persisted in localStorage by
+         the ft-mode-toggle JS block.  Rows below carry passes_{strong,accumulation,all}
+         flags so client-side filtering is O(n). #}
+      <div class="ft-mode-toggle-row">
+        <div class="ft-mode-toggle" role="tablist" aria-label="Flow Tracker mode">
+          <button type="button" class="ft-mode-btn" data-mode="strong_accumulation" role="tab" title="Every day active, strictly rising, A-tier or better">Strong</button>
+          <button type="button" class="ft-mode-btn" data-mode="accumulation" role="tab" title="Most days active, one-sided, non-fading, B+ or better">Accumulation</button>
+          <button type="button" class="ft-mode-btn" data-mode="all" role="tab" title="Legacy loose gate — every qualifying ticker">All</button>
+        </div>
+        {# Wave 0.5 C1 — horizon toggle.  Links preserve the server-side
+           mode query if we ever add one; clicking navigates with
+           ?horizon=5d|15d which drives compute_multi_day_flow's lookback. #}
+        <div class="ft-horizon-toggle" role="tablist" aria-label="Flow Tracker horizon"
+             title="How many trading days back the tracker aggregates.  15d needs ≥4 active days and confirms persistence over a longer window; 5d is the default quick read.">
+          {% for key, cfg in flow_tracker_horizons_config.items() %}
+            <a class="ft-horizon-btn{% if key == flow_tracker_active_horizon %} ft-horizon-btn-active{% endif %}"
+               href="?horizon={{ key }}"
+               role="tab"
+               aria-selected="{{ 'true' if key == flow_tracker_active_horizon else 'false' }}">{{ cfg.label }}</a>
+          {% endfor %}
+        </div>
+        <div class="ft-funnel-counts" aria-live="polite">
+          <span class="ft-funnel-item"><span class="ft-funnel-label">Strong</span> <span id="ft-count-strong">{{ _counts.strong_accumulation }}</span></span>
+          <span class="ft-funnel-sep">·</span>
+          <span class="ft-funnel-item"><span class="ft-funnel-label">Accumulation</span> <span id="ft-count-accumulation">{{ _counts.accumulation }}</span></span>
+          <span class="ft-funnel-sep">·</span>
+          <span class="ft-funnel-item"><span class="ft-funnel-label">All</span> <span id="ft-count-all">{{ _counts.all }}</span></span>
+          <span class="ft-funnel-sep">·</span>
+          <span class="ft-funnel-item ft-funnel-window">window {{ flow_tracker_lookback }}d</span>
+        </div>
+      </div>
+      <div class="ft-auto-widen-notice" id="ft-auto-widen-notice" hidden>
+        <span id="ft-auto-widen-text"></span>
+        <button type="button" class="ft-lock-btn" id="ft-lock-mode-btn">Lock to selected</button>
+      </div>
+
       <div class="perf-grid" style="margin-bottom:1.2rem">
         <div class="perf-card">
-          <span class="perf-label">Showing</span>
-          <span class="perf-value">
+          <span class="perf-label">Showing <span class="ft-mode-label" id="ft-mode-label">Accumulation</span></span>
+          <span class="perf-value" id="ft-showing-count">
             {% if flow_tracker[0].total_qualified is defined and flow_tracker[0].total_qualified > (flow_tracker | length) %}
               {{ flow_tracker | length }} of {{ flow_tracker[0].total_qualified }}
             {% else %}
@@ -535,12 +748,14 @@
           </span>
         </div>
         <div class="perf-card">
-          <span class="perf-label">Grade A</span>
-          <span class="perf-value">{{ flow_tracker | selectattr('conviction_grade', 'eq', 'A') | list | length }}</span>
+          <span class="perf-label">Grade A+/A/A-</span>
+          <span class="perf-value" id="ft-grade-a-count">
+            {% set _ga = flow_tracker | selectattr('conviction_grade', 'in', ['A+','A','A-']) | list | length %}{{ _ga }}
+          </span>
         </div>
         <div class="perf-card">
           <span class="perf-label">Top conviction</span>
-          <span class="perf-value" style="font-size:1rem">{{ flow_tracker[0].ticker }} ({{ flow_tracker[0].conviction_score }})</span>
+          <span class="perf-value" id="ft-top-conviction" style="font-size:1rem">{{ flow_tracker[0].ticker }} ({{ flow_tracker[0].conviction_score }})</span>
         </div>
         <div class="perf-card">
           <span class="perf-label">Window</span>
@@ -550,7 +765,14 @@
 
       <div class="data-card-list" id="ft-card-list">
         {% for ft in flow_tracker %}
-        <article class="data-card data-card--interactive" data-ticker="{{ ft.ticker }}" style="cursor:pointer">
+        <article class="data-card data-card--interactive ft-card"
+                 id="ft-card-{{ ft.ticker }}"
+                 data-ticker="{{ ft.ticker }}"
+                 data-passes-strong="{{ '1' if ft.passes_strong else '0' }}"
+                 data-passes-accumulation="{{ '1' if ft.passes_accumulation else '0' }}"
+                 data-passes-all="{{ '1' if ft.passes_all else '0' }}"
+                 data-grade="{{ ft.conviction_grade }}"
+                 style="cursor:pointer">
           <header class="data-card-header data-card-head">
             <strong class="data-card-ticker">{{ ft.ticker }}</strong>
             <span class="data-card-badges">
@@ -570,6 +792,92 @@
               {% else %}
                 <span class="badge tc-grade tc-grade-c" style="font-weight:700;letter-spacing:0.03em" title="Conviction grade C (score < 4.0)">{{ ft.conviction_score }}/10 C</span>
               {% endif %}
+              {% if ft.accumulation_score is defined and ft.accumulation_score is not none %}
+                {% set _accum = ft.accumulation_score %}
+                {% if _accum >= 75 %}
+                  {% set _accum_cls = 'tc-accum-high' %}
+                {% elif _accum >= 50 %}
+                  {% set _accum_cls = 'tc-accum-mid' %}
+                {% else %}
+                  {% set _accum_cls = 'tc-accum-low' %}
+                {% endif %}
+                <span class="badge tc-accum-chip {{ _accum_cls }}"
+                      title="Accumulation score (0-100): 0.35 × days + 0.30 × one-sidedness + 0.25 × rising + 0.10 × per-bps. ≥75 = strong accumulation, 50-74 = moderate, &lt;50 = weak.">ACC {{ "%.0f"|format(_accum) }}</span>
+              {% endif %}
+              {# Wave 4 — composite Conviction Stack chip (replaces F/D/C/I dots).
+                 Flow (50) + DP (15) + Chain (10) + Insider (8) + Price (12) +
+                 Dealer (5) = 100.  Surfaces "how many independent signals
+                 agree" in a single number so traders can rank across rows
+                 without reading six columns. #}
+              {% if ft.conviction_stack and ft.conviction_stack.score is not none %}
+                {% set _st = ft.conviction_stack %}
+                {% set _stcls = 'tc-stack-elite' if _st.tier == 'elite' else ('tc-stack-strong' if _st.tier == 'strong' else ('tc-stack-moderate' if _st.tier == 'moderate' else 'tc-stack-weak')) %}
+                {% set _drv = _st.top_drivers[:2] | join(', ') if _st.top_drivers else 'no strong drivers' %}
+                {% set _drg = ', '.join(_st.top_drags[:2]) if _st.top_drags else '' %}
+                <span class="badge tc-stack {{ _stcls }}"
+                      title="Conviction Stack {{ _st.score }}/100 — {{ _st.tier_label }}. Drivers: {{ _drv }}.{% if _drg %} Drags: {{ _drg }}.{% endif %} Components: flow 50 · DP 15 · chain 10 · price 12 · insider 8 · dealer 5.">
+                  <span class="tc-stack-label">Stack</span>
+                  <span class="tc-stack-score">{{ _st.score }}</span>
+                  <span class="tc-stack-tier">{{ _st.tier_label | replace('Stack ', '') }}</span>
+                </span>
+              {% endif %}
+              {# Wave 0.5 A1 — dominant DTE bucket chip.  0-7d softened, 31-90/91+ boosted. #}
+              {% if ft.dominant_dte_bucket %}
+                {% if ft.dominant_dte_bucket == '0-7' %}
+                  {% set _dte_cls = 'tc-dte-short' %}
+                  {% set _dte_tip = 'Dominant flow DTE = 0-7d (weekly).  Lottery/hedging-prone; score softened 10%.' %}
+                {% elif ft.dominant_dte_bucket == '91+' %}
+                  {% set _dte_cls = 'tc-dte-long' %}
+                  {% set _dte_tip = 'Dominant flow DTE ≥ 91d (LEAPs).  Structural commitment; score boosted 5%.' %}
+                {% elif ft.dominant_dte_bucket == '31-90' %}
+                  {% set _dte_cls = 'tc-dte-mid' %}
+                  {% set _dte_tip = 'Dominant flow DTE = 31-90d (medium-term).  Score boosted 5%.' %}
+                {% else %}
+                  {% set _dte_cls = 'tc-dte-std' %}
+                  {% set _dte_tip = 'Dominant flow DTE = 8-30d (standard swing).' %}
+                {% endif %}
+                <span class="badge tc-dte-chip {{ _dte_cls }}" title="{{ _dte_tip }}">{{ ft.dominant_dte_bucket }}d</span>
+              {% endif %}
+              {# Wave 0.5 A4 — window-return pill. #}
+              {% if ft.window_return_pct is defined and ft.window_return_pct is not none and ft.window_return_pct != 0 %}
+                {% set _ret = ft.window_return_pct %}
+                {% set _ret_aligned = (ft.direction == 'BULLISH' and _ret > 0) or (ft.direction == 'BEARISH' and _ret < 0) %}
+                {% if _ret_aligned %}
+                  {% set _ret_cls = 'tc-ret-aligned' %}
+                  {% set _ret_tip = 'Price ' ~ ('up' if _ret > 0 else 'down') ~ ' ' ~ '%.1f'|format(_ret) ~ '% over the window — confirms flow direction.' %}
+                {% else %}
+                  {% set _ret_cls = 'tc-ret-fight' %}
+                  {% set _ret_tip = 'Price ' ~ ('up' if _ret > 0 else 'down') ~ ' ' ~ '%.1f'|format(_ret) ~ '% — fighting flow direction (chase risk).' %}
+                {% endif %}
+                <span class="badge tc-ret-chip {{ _ret_cls }}" title="{{ _ret_tip }}">{{ '%+.1f'|format(_ret) }}%</span>
+              {% endif %}
+              {# Wave 0.5 C2 — z-tier chip.  Shows the rolling z-score
+                 baseline confidence (30-day full / shrunken / peer / abs
+                 fallback).  Weaker tiers = the number behind the score is
+                 less trustworthy, caveat-emptor. #}
+              {% if ft.z_tier is defined and ft.z_tier is not none %}
+                {% if ft.z_tier == 1 %}
+                  {% set _zt_cls = 'tc-ztier tc-ztier-full' %}
+                  {% set _zt_tip = '30-day per-ticker z-score baseline (full confidence)' %}
+                {% elif ft.z_tier == 2 %}
+                  {% set _zt_cls = 'tc-ztier tc-ztier-shrunk' %}
+                  {% set _zt_tip = 'Per-ticker z-score with shrinkage toward cross-section (5-19 days of history)' %}
+                {% elif ft.z_tier == 3 %}
+                  {% set _zt_cls = 'tc-ztier tc-ztier-peer' %}
+                  {% set _zt_tip = 'Cross-sectional peer z-score (ticker has < 5 days of own history)' %}
+                {% else %}
+                  {% set _zt_cls = 'tc-ztier tc-ztier-abs' %}
+                  {% set _zt_tip = 'Absolute threshold fallback — z-score cohort unavailable' %}
+                {% endif %}
+                <span class="badge {{ _zt_cls }}" title="{{ _zt_tip }}">{{ ft.z_tier_label or 'z?' }}</span>
+              {% endif %}
+              {# Wave 0.5 C3 — sector accumulation cluster. #}
+              {% if ft.sector_accumulating_count is defined and ft.sector_accumulating_count and ft.sector_accumulating_count > 0 %}
+                <span class="badge tc-sector-chip"
+                      title="Other names in {{ ft.sector }} that also pass the Accumulation gate on the same side — sector-wide bid.">
+                  +{{ ft.sector_accumulating_count }} in sector
+                </span>
+              {% endif %}
               <span class="badge" style="opacity:0.7;font-size:0.7rem">{{ ft.sector }}</span>
               {% if ft.direction == "BULLISH" %}
                 <span class="badge badge-long">NET BULLISH</span>
@@ -582,6 +890,23 @@
                 <span class="badge" style="background:rgba(248,81,73,0.15);color:#f85149">Fading</span>
               {% else %}
                 <span class="badge" style="background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.5)">Steady</span>
+              {% endif %}
+              {# Wave 2 — intraday 2h repeat-flow acceleration chip.
+                 Complements the multi-day regression-based `trend` above
+                 with an *intraday* read: what fraction of today's
+                 directional prints landed in the last 2h.  Rendered only
+                 when the ratio is meaningfully non-flat so the row stays
+                 uncluttered on quiet names. #}
+              {% if ft.accel_label_today == 'accelerating' %}
+                <span class="badge tc-accel tc-accel-up"
+                      title="Intraday: {{ (ft.accel_ratio_today * 100) | round | int }}% of today's {{ ft.direction | lower }} prints landed in the last 2h (flat-session baseline ≈ 31%). Late-session ramp.">
+                  2h ↑ {{ (ft.accel_ratio_today * 100) | round | int }}%
+                </span>
+              {% elif ft.accel_label_today == 'fading' %}
+                <span class="badge tc-accel tc-accel-dn"
+                      title="Intraday: only {{ (ft.accel_ratio_today * 100) | round | int }}% of today's {{ ft.direction | lower }} prints landed in the last 2h (flat-session baseline ≈ 31%). Flow died off earlier in the day.">
+                  2h ↓ {{ (ft.accel_ratio_today * 100) | round | int }}%
+                </span>
               {% endif %}
               {% if ft.sentiment %}
                 {% if ft.sentiment.combined_label == "bullish" %}
@@ -617,6 +942,12 @@
               {% endif %}
             </span>
           </header>
+          {# Wave 1 — above-the-fold essentials only: size vs mcap,
+             cumulative premium, active-days heatmap, latest price, and
+             the grade-reason "Why" chips.  Everything else (vol, OI, IV,
+             PCR, avg |Δ|, DP gauges, chain detail, insider detail) moves
+             into a "More metrics" <details> block below so the card stays
+             scannable. #}
           <dl class="card-metrics">
             <dt>Prem/Mcap</dt>
             <dd>
@@ -647,6 +978,23 @@
               </span>
               <span style="margin-left:0.4rem">{{ ft.active_days }}/{{ ft.total_days }}</span>
             </dd>
+            <dt>Price</dt><dd>${{ "%.2f"|format(ft.latest_close) }}</dd>
+            {% if ft.grade_reasons %}
+            {% set _why_tip = ft.grade_reasons | map(attribute='label') | list | join(' · ') %}
+            {% set _why_tip_full %}{% for r in ft.grade_reasons %}{% if r.kind == 'drag' %}↓{% elif r.kind == 'context-drag' %}~↓{% elif r.kind == 'context-driver' %}~+{% else %}+{% endif %} {{ r.label }}{% if r.kind in ['driver','drag'] and r.points is defined and r.points is not none %}: {{ "%.2f"|format(r.points) }} pts{% endif %}{% if not loop.last %}&#10;{% endif %}{% endfor %}{% endset %}
+            <dt>Why</dt>
+            <dd>
+              <span class="ft-why-inline" title="{{ _why_tip_full }}">
+                {% for r in ft.grade_reasons[:3] %}
+                  {% if r.kind == 'drag' %}<span class="ft-why-drag">{{ r.label }} (drag)</span>{% elif r.kind == 'context-drag' %}<span class="ft-why-ctx-drag">{{ r.label }}</span>{% elif r.kind == 'context-driver' %}<span class="ft-why-ctx-driver">{{ r.label }}</span>{% else %}{{ r.label }}{% endif %}{% if not loop.last %} · {% endif %}
+                {% endfor %}
+              </span>
+            </dd>
+            {% endif %}
+          </dl>
+          <details class="ft-more-metrics">
+            <summary>More metrics</summary>
+          <dl class="card-metrics">
             <dt>Avg vol vs 30d</dt>
             <dd>{{ "%.1f"|format(ft.avg_vol_ratio_30d) }}x</dd>
             <dt>OI change</dt>
@@ -655,7 +1003,6 @@
             </dd>
             <dt>IV Rank</dt><dd>{{ ft.latest_iv_rank }}</dd>
             <dt>P/C Ratio</dt><dd>{{ ft.latest_put_call_ratio }}</dd>
-            <dt>Price</dt><dd>${{ "%.2f"|format(ft.latest_close) }}</dd>
             {% if ft.avg_delta is not none and ft.avg_delta > 0 %}
             <dt>Avg |Δ|</dt>
             <dd>
@@ -668,18 +1015,6 @@
                 {% elif ft.delta_source_mix is not none %}
                   <span class="ft-avg-delta-src src-proxy">MIX {{ "%.0f"|format(ft.delta_source_mix * 100) }}%</span>
                 {% endif %}
-              </span>
-            </dd>
-            {% endif %}
-            {% if ft.grade_reasons %}
-            {% set _why_tip = ft.grade_reasons | map(attribute='label') | list | join(' · ') %}
-            {% set _why_tip_full %}{% for r in ft.grade_reasons %}{% if r.kind == 'drag' %}↓{% else %}+{% endif %} {{ r.label }}: {{ "%.2f"|format(r.points) }} pts{% if not loop.last %}&#10;{% endif %}{% endfor %}{% endset %}
-            <dt>Why</dt>
-            <dd>
-              <span class="ft-why-inline" title="{{ _why_tip_full }}">
-                {% for r in ft.grade_reasons[:3] %}
-                  {% if r.kind == 'drag' %}<span class="ft-why-drag">{{ r.label }} (drag)</span>{% else %}{{ r.label }}{% endif %}{% if not loop.last %} · {% endif %}
-                {% endfor %}
               </span>
             </dd>
             {% endif %}
@@ -771,6 +1106,7 @@
             {% endif %}
             {% endif %}
           </dl>
+          </details>
           {{ flow_tracker_insight(ft) }}
           {% if ft.sentiment and (ft.sentiment.st_messages or ft.sentiment.rd_mentions) %}
           <details class="ft-social">
@@ -1154,6 +1490,17 @@
                   <span class="badge" style="background:rgba(63,185,80,0.15);color:#3fb950">Consistent</span>
                 {% elif dt.bias_consistency_label == "Consistent seller" %}
                   <span class="badge" style="background:rgba(248,81,73,0.15);color:#f85149">Consistent</span>
+                {% endif %}
+                {# Wave 2 — dp z-tier.  Quantifies how unusual today's DP
+                   notional is vs this ticker's own 30d history (with a
+                   peer fallback for cold-start names).  |z| >= 2 is the
+                   visual threshold — below that, DP is just noise. #}
+                {% if dt.dp_z is not none and (dt.dp_z >= 2.0 or dt.dp_z <= -2.0) %}
+                  {% set _cls = 'dp-z-hot' if dt.dp_z > 0 else 'dp-z-cold' %}
+                  <span class="badge dp-z-tier {{ _cls }}"
+                        title="DP notional z-score vs ticker's own 30d history ({{ dt.dp_tier_label }}). |z|>=2 is the threshold we treat as genuinely unusual for this name.">
+                    {{ dt.dp_tier_label }} {{ '+' if dt.dp_z > 0 else '' }}{{ '%.1f'|format(dt.dp_z) }}σ
+                  </span>
                 {% endif %}
                 {% if dt.ticker in (flow_tracker | map(attribute='ticker') | list) %}
                   <span class="badge badge-dp-aligned" style="font-size:0.65rem">Flow Tracker</span>
@@ -1897,8 +2244,7 @@
       var dir = _dirPrefix(m);
       var isLong = dir === "bullish";
       var l1p = Math.log1p;
-      // Weights sum to 1.0 (rebalanced after flow_velocity was retired; its
-      // 0.13 share was redistributed * 1/0.87 across the remaining 7 components).
+      // Weights sum to 1.0 across the 7 directional flow components.
       var components = [
         { name: "Flow intensity", w: 0.29, weight: "29%", val: _num(m[dir + "_flow_intensity"]) * 10000, fmtFn: function(v){ return v.toFixed(2) + " bps"; }, thresh: [0.6, 0.15], scoreFn: function(v){ return _clipScale(l1p(v), l1p(0.01), l1p(1.0)); }, desc: "Directional options premium as basis points of market cap" },
         { name: "Premium / trade", w: 0.17, weight: "17%", val: _num(m[dir + "_ppt_bps"]), fmtFn: function(v){ return v.toFixed(3) + " bps"; }, thresh: [0.3, 0.03], scoreFn: function(v){ return _clipScale(l1p(v), l1p(0.005), l1p(0.5)); }, desc: "Avg per-trade premium as basis points of market cap" },
@@ -1954,7 +2300,7 @@
       }
 
       // Directional momentum — post-score bonus added to final_score (not
-      // counted toward the 10-pt flow total above). Replaces retired flow_velocity.
+      // counted toward the 10-pt flow total above).
       var dm = _num(m.delta_momentum);
       var dmFactor = isLong ? Math.max(0, dm) : Math.max(0, -dm);
       var dmPtsRaw = _present(m.directional_momentum_pts) ? _num(m.directional_momentum_pts) : dmFactor * 1.3;
@@ -1988,7 +2334,24 @@
       var breakdownPairs = [["Gamma alignment (0-2.5)", fmtConvictionHtml(bd.gamma)], ["Wall proximity (0-2.5)", fmtConvictionHtml(bd.wall)], ["OI structure (0-1.5)", fmtConvictionHtml(bd.oi)], ["Premium bias (0-1)", fmtConvictionHtml(bd.premBias)], ["IV rank (0-2.5)", fmtConvictionHtml(bd.ivRank)], ["Total options score", fmtConvictionHtml(bd.total)]];
       var bk = detailSectionRaw("Options score breakdown", breakdownPairs);
       if (bk) parts.push(bk);
-      var gammaPairs = [["Gamma regime", m.gamma_regime], ["Net GEX", m.net_gex], ["Gamma flip estimate", m.gamma_flip_level_estimate], ["Nearest call wall", m.nearest_call_wall], ["Nearest put wall", m.nearest_put_wall], ["Dist to call wall %", m.distance_to_call_wall_pct], ["Dist to put wall %", m.distance_to_put_wall_pct], ["IV rank", _present(m.iv_rank) ? _num(m.iv_rank).toFixed(1) : null], ["Current IV", _present(m.iv_current) ? (_num(m.iv_current) * 100).toFixed(1) + "%" : null]];
+      // Wave 2 — dealer-hedge bias + pin-risk strike are derived from the
+      // same spot-GEX fetch.  We surface both as detail rows alongside the
+      // existing gamma regime / flip level / walls.
+      var pinRiskDisplay = null;
+      if (_present(m.pin_risk_strike)) {
+        var pinDist = _present(m.pin_risk_distance_pct) ? (_num(m.pin_risk_distance_pct) >= 0 ? "+" : "") + _num(m.pin_risk_distance_pct).toFixed(1) + "%" : "";
+        var pinConc = _present(m.pin_risk_concentration) ? " · " + Math.round(_num(m.pin_risk_concentration) * 100) + "% concentration" : "";
+        pinRiskDisplay = _num(m.pin_risk_strike) + (pinDist ? " (" + pinDist + ")" : "") + pinConc;
+      }
+      // Wave 2 — surface the IV-rank 5d delta in the detail panel too.
+      var ivDeltaDisplay = null;
+      if (_present(m.iv_rank_5d_delta)) {
+        var d = _num(m.iv_rank_5d_delta);
+        var sign = d > 0 ? "+" : "";
+        var n = _present(m.iv_rank_5d_samples) ? m.iv_rank_5d_samples : 0;
+        ivDeltaDisplay = sign + d.toFixed(1) + " pts (" + n + " samples)";
+      }
+      var gammaPairs = [["Gamma regime", m.gamma_regime], ["Dealer hedge bias", m.dealer_hedge_label || m.dealer_hedge_bias], ["Pin-risk strike", pinRiskDisplay], ["Net GEX", m.net_gex], ["Gamma flip estimate", m.gamma_flip_level_estimate], ["Nearest call wall", m.nearest_call_wall], ["Nearest put wall", m.nearest_put_wall], ["Dist to call wall %", m.distance_to_call_wall_pct], ["Dist to put wall %", m.distance_to_put_wall_pct], ["IV rank", _present(m.iv_rank) ? _num(m.iv_rank).toFixed(1) : null], ["IV rank 5d delta", ivDeltaDisplay], ["Current IV", _present(m.iv_current) ? (_num(m.iv_current) * 100).toFixed(1) + "%" : null]];
       var gammaBlock = detailSection("Gamma, wall & IV levels", gammaPairs);
       if (gammaBlock) parts.push(gammaBlock);
       var oiPairs = [["Call OI", m.ticker_call_oi], ["Put OI", m.ticker_put_oi], ["P/C ratio", m.ticker_put_call_ratio], ["Near-term OI", m.near_term_oi], ["Swing DTE OI", m.swing_dte_oi], ["Long-dated OI", m.long_dated_oi]];
@@ -2217,13 +2580,177 @@
     }
 
     function subtabBarHtml() {
-      var ids = ["verdict", "conviction", "price", "options", "plan", "position", "chart"];
-      var labels = { verdict: "Verdict", conviction: "Conviction", price: "Price action", options: "Flow & Options", plan: "Plan", position: "Position", chart: "Chart" };
+      // Wave 6 — "Why?" tab sits after Verdict so reading the modal top-to-
+      // bottom gives you the bottom line, then the narrative, then the raw
+      // component breakdown.
+      var ids = ["verdict", "why", "structure", "conviction", "price", "options", "plan", "position", "chart"];
+      var labels = { verdict: "Verdict", why: "Why?", structure: "Structure", conviction: "Conviction", price: "Price action", options: "Flow & Options", plan: "Plan", position: "Position", chart: "Chart" };
       return '<div class="detail-subtabs" role="tablist">' + ids.map(function (id, i) { return '<button type="button" class="detail-subtab' + (i === 0 ? " active" : "") + '" role="tab" aria-selected="' + (i === 0 ? "true" : "false") + '" data-subtab="' + id + '">' + labels[id] + "</button>"; }).join("") + "</div>";
     }
 
+    /* ── Wave 6 — Narrative renderer (shared across modals).
+       Takes an array of {tone, icon, label, detail} bullets and renders
+       them as a semantic list.  Includes a teaching-mode toggle stored in
+       localStorage so power users can collapse the bullet details.  */
+    function narrativeTeachingEnabled() {
+      try { return localStorage.getItem("flow-narrative-teaching") !== "0"; } catch (e) { return true; }
+    }
+    function setNarrativeTeaching(on) {
+      try { localStorage.setItem("flow-narrative-teaching", on ? "1" : "0"); } catch (e) {}
+      document.querySelectorAll(".tc-narrative").forEach(function (n) {
+        n.classList.toggle("tc-narrative--terse", !on);
+      });
+    }
+    function buildNarrativeHtml(bullets, opts) {
+      opts = opts || {};
+      var ctx = opts.context || "this setup";
+      if (!Array.isArray(bullets) || !bullets.length) {
+        return '<div class="tc-narrative-empty"><p>Not enough data to narrate ' + escHtml(ctx) + ' yet.</p>' +
+               '<p style="opacity:0.6;font-size:0.82rem;margin-top:0.5rem">Bullets appear once flow, dark pool or chain signals start to differentiate.</p></div>';
+      }
+      var teach = narrativeTeachingEnabled();
+      var cls = "tc-narrative" + (teach ? "" : " tc-narrative--terse");
+      var header = '<div class="tc-narrative-controls">' +
+        '<label class="tc-narrative-toggle" title="Toggle detail explanations on/off. Saved to this browser.">' +
+        '<input type="checkbox" class="tc-narrative-teach-toggle"' + (teach ? " checked" : "") + '>' +
+        '<span>Explain</span></label>' +
+        '</div>';
+      var body = '<ul class="' + cls + '">';
+      for (var i = 0; i < bullets.length; i++) {
+        var b = bullets[i] || {};
+        var tone = String(b.tone || "neutral").toLowerCase();
+        var icon = b.icon || "•";
+        var label = b.label || "";
+        var detail = b.detail || "";
+        body += '<li class="tc-narrative-item tc-narrative-' + escHtml(tone) + '">' +
+          '<span class="tc-narrative-icon" aria-hidden="true">' + escHtml(icon) + '</span>' +
+          '<div class="tc-narrative-body">' +
+          '<div class="tc-narrative-label">' + escHtml(label) + '</div>' +
+          (detail ? '<div class="tc-narrative-detail">' + escHtml(detail) + '</div>' : '') +
+          '</div></li>';
+      }
+      body += '</ul>';
+      return header + body;
+    }
+    function bindNarrativeToggle(panel) {
+      if (!panel) return;
+      var cb = panel.querySelector(".tc-narrative-teach-toggle");
+      if (!cb) return;
+      cb.addEventListener("change", function () { setNarrativeTeaching(cb.checked); });
+    }
+
+    /* ── Wave 7 — Structure renderer (shared across modals).
+       Renders trade_structure = {side, primary, alternatives[], avoid[],
+       caveats[]} as a compact ladder: primary card on top, alternatives
+       as a row of secondary cards, avoid list, then caveats.  Structure
+       is a pure view of the row payload — no client-side decisions. */
+    function _structTone(s) {
+      var t = (s && s.tone) ? String(s.tone).toLowerCase() : "neutral";
+      return "tc-rec-" + t;
+    }
+    function buildStructureHtml(s, opts) {
+      opts = opts || {};
+      var ctx = opts.context || "this setup";
+      if (!s || !s.primary) {
+        return '<div class="tc-rec-empty"><p>No structure recommendation for ' + escHtml(ctx) + ' yet.</p>' +
+               '<p style="opacity:0.6;font-size:0.82rem;margin-top:0.5rem">Needs direction + IV context before a ladder can be proposed.</p></div>';
+      }
+      var side = escHtml(String(s.side || "NEUTRAL"));
+      var html = '<div class="tc-rec-wrap" data-side="' + side + '">';
+      html += '<div class="tc-rec-primary ' + _structTone(s.primary) + '">';
+      html += '<div class="tc-rec-heading"><span class="tc-rec-kicker">Primary</span>' +
+              '<span class="tc-rec-label">' + escHtml(s.primary.label || s.primary.structure || "—") + '</span></div>';
+      if (s.primary.rationale) {
+        html += '<div class="tc-rec-rationale">' + escHtml(s.primary.rationale) + '</div>';
+      }
+      html += '</div>';
+
+      if (Array.isArray(s.alternatives) && s.alternatives.length) {
+        html += '<div class="tc-rec-alts-wrap"><div class="tc-rec-kicker">Alternatives</div>';
+        html += '<ul class="tc-rec-alts">';
+        for (var i = 0; i < s.alternatives.length; i++) {
+          var a = s.alternatives[i] || {};
+          html += '<li class="tc-rec-alt ' + _structTone(a) + '">';
+          html += '<div class="tc-rec-label">' + escHtml(a.label || a.structure || "—") + '</div>';
+          if (a.rationale) {
+            html += '<div class="tc-rec-rationale">' + escHtml(a.rationale) + '</div>';
+          }
+          html += '</li>';
+        }
+        html += '</ul></div>';
+      }
+
+      if (Array.isArray(s.avoid) && s.avoid.length) {
+        html += '<div class="tc-rec-avoid-wrap"><div class="tc-rec-kicker tc-rec-kicker-neg">Avoid</div>';
+        html += '<ul class="tc-rec-avoid">';
+        for (var j = 0; j < s.avoid.length; j++) {
+          var v = s.avoid[j] || {};
+          html += '<li class="tc-rec-avoid-item">' +
+            '<span class="tc-rec-avoid-label">' + escHtml(v.label || v.structure || "—") + '</span>';
+          if (v.reason) {
+            html += '<span class="tc-rec-avoid-reason"> — ' + escHtml(v.reason) + '</span>';
+          }
+          html += '</li>';
+        }
+        html += '</ul></div>';
+      }
+
+      if (Array.isArray(s.caveats) && s.caveats.length) {
+        html += '<div class="tc-rec-caveats-wrap"><div class="tc-rec-kicker tc-rec-kicker-warn">Caveats</div>';
+        html += '<ul class="tc-rec-caveats">';
+        for (var k = 0; k < s.caveats.length; k++) {
+          html += '<li class="tc-rec-caveat">' + escHtml(String(s.caveats[k] || "")) + '</li>';
+        }
+        html += '</ul></div>';
+      }
+
+      // Wave 8 — render sizing context when the server attached it.
+      if (s.sizing_context && typeof s.sizing_context === "object") {
+        html += buildSizingContextHtml(s.sizing_context);
+      }
+
+      html += '</div>';
+      return html;
+    }
+
+    /* Wave 8 sizing-context renderer. Consumed by the Structure tab. */
+    function buildSizingContextHtml(ctx) {
+      if (!ctx) return "";
+      var tier = String(ctx.tier || ctx.regime_tier || "neutral").toLowerCase();
+      var mult = (ctx.multiplier !== undefined) ? ctx.multiplier : (ctx.sizing_multiplier !== undefined ? ctx.sizing_multiplier : null);
+      var label = ctx.label || ctx.tier_label || "Risk regime";
+      var html = '<div class="tc-rec-sizing tc-rec-sizing-' + escHtml(tier) + '">';
+      html += '<div class="tc-rec-kicker">Sizing context</div>';
+      html += '<div class="tc-rec-sizing-line">';
+      html += '<span class="tc-rec-sizing-label">' + escHtml(label) + '</span>';
+      if (mult !== null && mult !== undefined) {
+        html += '<span class="tc-rec-sizing-mult">×' + Number(mult).toFixed(2) + ' sizing</span>';
+      }
+      html += '</div>';
+      if (Array.isArray(ctx.checks) && ctx.checks.length) {
+        html += '<ul class="tc-rec-sizing-checks">';
+        for (var i = 0; i < ctx.checks.length; i++) {
+          var ch = ctx.checks[i] || {};
+          var tone = String(ch.tone || ch.status || "info").toLowerCase();
+          html += '<li class="tc-rec-sizing-check tc-rec-check-' + escHtml(tone) + '">' +
+                  '<span class="tc-rec-check-label">' + escHtml(ch.label || "") + '</span>';
+          if (ch.detail) {
+            html += '<span class="tc-rec-check-detail"> — ' + escHtml(ch.detail) + '</span>';
+          }
+          html += '</li>';
+        }
+        html += '</ul>';
+      }
+      html += '</div>';
+      return html;
+    }
+
     function detailPanelsHtml(m, ticker) {
+      var narrativeHtml = buildNarrativeHtml(m && m.narrative, { context: ticker || "this ticker" });
+      var structureHtml = buildStructureHtml(m && m.trade_structure, { context: ticker || "this ticker" });
       return '<div class="detail-subtab-panel active" data-panel="verdict">' + buildVerdictDl(m) + "</div>" +
+        '<div class="detail-subtab-panel" data-panel="why">' + narrativeHtml + "</div>" +
+        '<div class="detail-subtab-panel" data-panel="structure">' + structureHtml + "</div>" +
         '<div class="detail-subtab-panel" data-panel="conviction">' + buildConvictionDl(m) + "</div>" +
         '<div class="detail-subtab-panel" data-panel="price">' + buildPriceActionDl(m) + "</div>" +
         '<div class="detail-subtab-panel" data-panel="options">' + buildOptionsDl(m) + "</div>" +
@@ -2278,6 +2805,7 @@
         var body = '<div class="detail-subtabs-wrap">' + subtabBarHtml() + '<div class="detail-subtab-panels">' + detailPanelsHtml(m, displayTicker) + "</div></div>";
         panel.innerHTML = wrapDetailModal('<div class="detail-header"><span class="detail-ticker">' + escHtml(displayTicker) + '</span><button type="button" class="detail-close" aria-label="Close">&times;</button></div><div class="detail-body">' + body + "</div>");
         bindDetailSubtabs(panel);
+        bindNarrativeToggle(panel);
         attachModalClose(panel);
       }
       panel.setAttribute("data-ticker", key);
@@ -2356,6 +2884,100 @@
         window.location.href = url.toString();
       });
 
+      /* ── Wave 5 — Unusual Flow toolbar (sort/filter/opening-only) ── */
+      (function wireUfToolbar() {
+        var tb = document.getElementById("uf-toolbar");
+        var wrap = document.getElementById("alerts-table-wrap");
+        if (!tb || !wrap) return;
+
+        var openingToggle = document.getElementById("uf-opening-only");
+        var tickerInput = document.getElementById("uf-filter-ticker");
+        var dirSel = document.getElementById("uf-filter-direction");
+        var optTypeSel = document.getElementById("uf-filter-opttype");
+        var minPremSel = document.getElementById("uf-filter-min-prem");
+        var sortSel = document.getElementById("uf-sort");
+        var countEl = document.getElementById("uf-count");
+
+        /* Opening-only forces a reload because we need UW to re-query with
+           size_greater_oi=true.  We also persist the checkbox state by URL
+           param so it survives pagination links. */
+        if (openingToggle) {
+          openingToggle.addEventListener("change", function () {
+            var url = new URL(window.location);
+            if (openingToggle.checked) url.searchParams.set("opening_only", "1");
+            else url.searchParams.delete("opening_only");
+            url.searchParams.set("tab", "unusual-flow");
+            window.location.href = url.toString();
+          });
+        }
+
+        function applyFilters() {
+          var tq = (tickerInput && tickerInput.value || "").trim().toUpperCase();
+          var wantDir = (dirSel && dirSel.value || "").toUpperCase();
+          var wantType = (optTypeSel && optTypeSel.value || "").toUpperCase();
+          var minPrem = parseFloat((minPremSel && minPremSel.value) || "0") || 0;
+          var sortKey = (sortSel && sortSel.value) || "bps";
+
+          var cards = Array.prototype.slice.call(wrap.querySelectorAll(".uf-card"));
+          var shown = 0;
+          cards.forEach(function (c) {
+            var t = (c.getAttribute("data-uf-ticker") || "").toUpperCase();
+            var d = (c.getAttribute("data-uf-direction") || "").toUpperCase();
+            var ot = (c.getAttribute("data-uf-option-type") || "").toUpperCase();
+            var prem = parseFloat(c.getAttribute("data-uf-premium") || "0") || 0;
+            var pass =
+              (!tq || t.indexOf(tq) === 0 || t.indexOf(tq) > -1) &&
+              (!wantDir || d === wantDir) &&
+              (!wantType || ot === wantType) &&
+              (!minPrem || prem >= minPrem);
+            c.style.display = pass ? "" : "none";
+            if (pass) shown++;
+          });
+          if (countEl) countEl.textContent = shown + "/" + cards.length + " shown";
+
+          /* Sort visible cards.  We mutate the DOM order but keep hidden
+             cards appended at the end so re-filters don't re-sort them. */
+          var visible = cards.filter(function (c) { return c.style.display !== "none"; });
+          var hidden = cards.filter(function (c) { return c.style.display === "none"; });
+
+          function getKey(c) {
+            switch (sortKey) {
+              case "premium": return parseFloat(c.getAttribute("data-uf-premium") || "0") || 0;
+              case "event-ts": return Date.parse(c.getAttribute("data-uf-event-ts") || "") || 0;
+              case "dte-asc": return parseFloat(c.getAttribute("data-uf-dte") || "0") || 0;
+              case "dte-desc": return -(parseFloat(c.getAttribute("data-uf-dte") || "0") || 0);
+              case "bps":
+              default:
+                var v = parseFloat(c.getAttribute("data-uf-bps") || "");
+                return isFinite(v) ? v : -Infinity;
+            }
+          }
+          var ascending = (sortKey === "dte-asc");
+          visible.sort(function (a, b) {
+            var ka = getKey(a), kb = getKey(b);
+            return ascending ? (ka - kb) : (kb - ka);
+          });
+
+          /* Re-append in new order; parent is the first card's parent since
+             the card-grid wrapper lives a level up from each <article>. */
+          if (visible.length) {
+            var parent = visible[0].parentNode;
+            visible.forEach(function (c) { parent.appendChild(c); });
+            hidden.forEach(function (c) { parent.appendChild(c); });
+          }
+        }
+
+        ["input", "change"].forEach(function (evt) {
+          if (tickerInput) tickerInput.addEventListener(evt, applyFilters);
+          if (dirSel) dirSel.addEventListener(evt, applyFilters);
+          if (optTypeSel) optTypeSel.addEventListener(evt, applyFilters);
+          if (minPremSel) minPremSel.addEventListener(evt, applyFilters);
+          if (sortSel) sortSel.addEventListener(evt, applyFilters);
+        });
+
+        applyFilters();
+      })();
+
       /* Candidate pills */
       var candPills = document.getElementById("candidates-pills");
       if (candPills) {
@@ -2391,6 +3013,148 @@
       if (posPanel) wirePanelCardClicks(posPanel, "detail-positions", "position", POSITIONS_IDX);
     })();
 
+    /* ── Flow Tracker mode toggle (Wave 0 — Strong/Accumulation/All) ── */
+    (function () {
+      var listEl = document.getElementById("ft-card-list");
+      var toggle = document.querySelector(".ft-mode-toggle");
+      if (!listEl || !toggle) return;
+
+      var DEFAULT_MODE = {{ flow_tracker_mode_default | tojson }};
+      var AUTO_WIDEN_MIN = {{ flow_tracker_auto_widen_min | tojson }};
+      var MODE_LABELS = {
+        strong_accumulation: "Strong",
+        accumulation: "Accumulation",
+        all: "All"
+      };
+      var MODE_ORDER = ["strong_accumulation", "accumulation", "all"];
+
+      function countByMode() {
+        var cards = listEl.querySelectorAll(".ft-card");
+        var counts = { strong_accumulation: 0, accumulation: 0, all: 0 };
+        cards.forEach(function (c) {
+          if (c.getAttribute("data-passes-strong") === "1") counts.strong_accumulation++;
+          if (c.getAttribute("data-passes-accumulation") === "1") counts.accumulation++;
+          if (c.getAttribute("data-passes-all") === "1") counts.all++;
+        });
+        return counts;
+      }
+
+      function applyMode(mode, opts) {
+        opts = opts || {};
+        var cards = listEl.querySelectorAll(".ft-card");
+        var shown = 0;
+        cards.forEach(function (c) {
+          var pass = c.getAttribute("data-passes-" + (mode === "strong_accumulation" ? "strong" : mode)) === "1";
+          c.style.display = pass ? "" : "none";
+          if (pass) shown++;
+        });
+
+        toggle.querySelectorAll(".ft-mode-btn").forEach(function (b) {
+          var active = b.getAttribute("data-mode") === mode;
+          b.classList.toggle("active", active);
+          b.setAttribute("aria-selected", active ? "true" : "false");
+        });
+
+        var lbl = document.getElementById("ft-mode-label");
+        if (lbl) lbl.textContent = MODE_LABELS[mode] || mode;
+        var showing = document.getElementById("ft-showing-count");
+        if (showing) showing.textContent = String(shown);
+
+        var introEl = document.getElementById("ft-intro");
+        if (introEl) {
+          var introTxt = introEl.getAttribute("data-intro-" + mode);
+          if (introTxt) introEl.textContent = introTxt;
+        }
+
+        var topEl = document.getElementById("ft-top-conviction");
+        if (topEl) {
+          var firstVisible = null;
+          for (var i = 0; i < cards.length; i++) {
+            if (cards[i].style.display !== "none") { firstVisible = cards[i]; break; }
+          }
+          if (firstVisible) {
+            var badge = firstVisible.querySelector(".tc-grade");
+            var t = firstVisible.getAttribute("data-ticker");
+            var score = badge ? (badge.textContent.split("/")[0] || "") : "";
+            topEl.textContent = t + " (" + score.trim() + ")";
+          } else {
+            topEl.textContent = "—";
+          }
+        }
+
+        var gaEl = document.getElementById("ft-grade-a-count");
+        if (gaEl) {
+          var ga = 0;
+          cards.forEach(function (c) {
+            if (c.style.display === "none") return;
+            var g = c.getAttribute("data-grade");
+            if (g === "A+" || g === "A" || g === "A-") ga++;
+          });
+          gaEl.textContent = String(ga);
+        }
+
+        var notice = document.getElementById("ft-auto-widen-notice");
+        var noticeText = document.getElementById("ft-auto-widen-text");
+        if (notice) notice.hidden = true;
+      }
+
+      function setMode(mode, opts) {
+        if (!MODE_LABELS[mode]) mode = DEFAULT_MODE;
+        opts = opts || {};
+        try { localStorage.setItem("ft-mode", mode); } catch (e) {}
+
+        var locked = false;
+        try { locked = localStorage.getItem("ft-mode-locked") === "1"; } catch (e) {}
+        if (opts.userPicked) locked = false; // fresh pick clears lock
+
+        var counts = countByMode();
+        var targetMode = mode;
+        if (!locked && counts[mode] < AUTO_WIDEN_MIN) {
+          // auto-widen to the first mode that has ≥ AUTO_WIDEN_MIN names.
+          for (var j = MODE_ORDER.indexOf(mode) + 1; j < MODE_ORDER.length; j++) {
+            if (counts[MODE_ORDER[j]] >= AUTO_WIDEN_MIN) { targetMode = MODE_ORDER[j]; break; }
+          }
+        }
+        applyMode(targetMode, opts);
+
+        var notice = document.getElementById("ft-auto-widen-notice");
+        var noticeText = document.getElementById("ft-auto-widen-text");
+        if (!locked && targetMode !== mode && notice && noticeText) {
+          noticeText.textContent =
+            MODE_LABELS[mode] + " returned " + counts[mode] +
+            " name" + (counts[mode] === 1 ? "" : "s") +
+            " — widened to " + MODE_LABELS[targetMode] + " (" + counts[targetMode] + ").";
+          notice.hidden = false;
+          notice.setAttribute("data-locked-mode", mode);
+        } else if (notice) {
+          notice.hidden = true;
+        }
+      }
+
+      toggle.querySelectorAll(".ft-mode-btn").forEach(function (btn) {
+        btn.addEventListener("click", function () {
+          var m = btn.getAttribute("data-mode");
+          try { localStorage.removeItem("ft-mode-locked"); } catch (e) {}
+          setMode(m, { userPicked: true });
+        });
+      });
+
+      var lockBtn = document.getElementById("ft-lock-mode-btn");
+      if (lockBtn) {
+        lockBtn.addEventListener("click", function () {
+          var notice = document.getElementById("ft-auto-widen-notice");
+          var lockedMode = notice && notice.getAttribute("data-locked-mode");
+          if (!lockedMode) return;
+          try { localStorage.setItem("ft-mode-locked", "1"); } catch (e) {}
+          setMode(lockedMode);
+        });
+      }
+
+      var saved = null;
+      try { saved = localStorage.getItem("ft-mode"); } catch (e) {}
+      setMode(saved || DEFAULT_MODE);
+    })();
+
     /* ── Flow Tracker detail modal ── */
     (function () {
       var ftList = document.getElementById("ft-card-list");
@@ -2404,6 +3168,8 @@
       function ftSubtabBar() {
         return '<div class="detail-subtabs" role="tablist">' +
           '<button type="button" class="detail-subtab active" role="tab" aria-selected="true" data-subtab="summary">Flow Summary</button>' +
+          '<button type="button" class="detail-subtab" role="tab" aria-selected="false" data-subtab="why">Why?</button>' +
+          '<button type="button" class="detail-subtab" role="tab" aria-selected="false" data-subtab="structure">Structure</button>' +
           '<button type="button" class="detail-subtab" role="tab" aria-selected="false" data-subtab="chart">Chart</button>' +
           '</div>';
       }
@@ -2468,7 +3234,11 @@
       }
 
       function ftPanelsHtml(d, ticker) {
+        var narrative = buildNarrativeHtml(d && d.narrative, { context: ticker });
+        var structure = buildStructureHtml(d && d.trade_structure, { context: ticker });
         return '<div class="detail-subtab-panel active" data-panel="summary">' + ftSummaryHtml(d) + '</div>' +
+          '<div class="detail-subtab-panel" data-panel="why">' + narrative + '</div>' +
+          '<div class="detail-subtab-panel" data-panel="structure">' + structure + '</div>' +
           '<div class="detail-subtab-panel" data-panel="chart"><div class="tv-chart-wrap" id="tv-chart-ft-' + escHtml(ticker) + '"></div></div>';
       }
 
@@ -2497,6 +3267,7 @@
           '<div class="detail-body">' + body + '</div>'
         );
         bindDetailSubtabs(ftPanel);
+        bindNarrativeToggle(ftPanel);
         attachModalClose(ftPanel);
         ftPanel.setAttribute("data-ticker", ticker);
         ftPanel.classList.add("detail-panel--modal-open");
@@ -3128,6 +3899,22 @@
           btns.forEach(function(x) { x.classList.remove("active"); });
           b.classList.add("active");
           if (target === "multiday") drawAggregateChart();
+        });
+      });
+    })();
+
+    // Wave 8 — Risk Regime pill toggle.  Clicking the Action Bar's
+    // Risk-Regime pill reveals / hides the detailed checks panel so the
+    // trader can see exactly which inputs drove the tier.
+    (function() {
+      document.querySelectorAll('[data-ab-regime-toggle]').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+          var host = btn.closest('.ab-riskregime');
+          if (!host) return;
+          var panel = host.querySelector('[data-ab-regime-panel]');
+          if (!panel) return;
+          var open = host.classList.toggle('open');
+          panel.style.display = open ? 'block' : 'none';
         });
       });
     })();

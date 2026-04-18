@@ -132,12 +132,22 @@ def fetch_flow_raw(
     Fetch raw flow alerts from the Unusual Whales API.
 
     Parameters are passed straight through as query-string filters.
+
+    When :data:`app.config.FLOW_OPENING_ONLY` is ``True`` the fetch
+    automatically appends ``size_greater_oi=true`` so UW returns only
+    prints whose size exceeded the existing open interest (a proxy for
+    opening trades).  Individual callers can still override via
+    ``extra_params``.
     """
+    from app.config import FLOW_OPENING_ONLY  # lazy import to avoid cycles
+
     params: dict = {"limit": limit}
     if ticker:
         params["ticker_symbol"] = ticker
     if min_premium is not None:
         params["min_premium"] = min_premium
+    if FLOW_OPENING_ONLY and "size_greater_oi" not in extra_params:
+        extra_params["size_greater_oi"] = "true"
     params.update(extra_params)
 
     resp = _uw_request(FLOW_ALERTS_ENDPOINT, params=params)
@@ -159,6 +169,7 @@ RENAME_MAP = {
     "alert_rule": "alert_rule",
     "has_sweep": "is_sweep",
     "has_floor": "is_floor",
+    "has_multileg": "is_multileg",
     "total_ask_side_prem": "ask_side_premium",
     "total_bid_side_prem": "bid_side_premium",
     "marketcap": "marketcap",
@@ -311,19 +322,57 @@ def fetch_net_prem_ticks(ticker: str) -> dict | None:
     else:
         premium_direction = 0.5
 
-    # Delta momentum: compare latest vs a point ~25% back in the series
+    # ----------------------------------------------------------------
+    # Wave 2 — delta momentum via OLS regression slope.
+    # Prior approach compared `latest vs data[len/4]` which was noisy on
+    # days where the 25%-back sample happened to be an outlier tick.
+    # The OLS slope of net_delta vs tick index uses every point and is
+    # naturally robust.  We normalise by the series amplitude so the
+    # result stays in [-1, 1] and is comparable across tickers.
+    # ----------------------------------------------------------------
     delta_momentum = 0.0
+    delta_momentum_tstat = 0.0
     if len(data) >= 4:
-        earlier_idx = max(0, len(data) // 4)
-        earlier_delta = _f(data[earlier_idx], "net_delta")
-        if abs(earlier_delta) > 0:
-            delta_momentum = (net_delta - earlier_delta) / max(abs(earlier_delta), abs(net_delta), 1.0)
-        else:
-            delta_momentum = 1.0 if net_delta > 0 else (-1.0 if net_delta < 0 else 0.0)
+        ys = [_f(row, "net_delta") for row in data]
+        n = len(ys)
+        # Small-series guard: fall back to simple endpoint compare when
+        # regression is under-identified (OLS needs ≥ 2 dof for a t-stat).
+        if n >= 4:
+            mean_x = (n - 1) / 2.0
+            mean_y = sum(ys) / n
+            ss_xx = sum((i - mean_x) ** 2 for i in range(n))
+            ss_xy = sum((i - mean_x) * (y - mean_y) for i, y in enumerate(ys))
+            slope = ss_xy / ss_xx if ss_xx > 0 else 0.0
+
+            # Residuals + t-stat (slope over its standard error).
+            residuals = [ys[i] - (mean_y + slope * (i - mean_x)) for i in range(n)]
+            dof = max(n - 2, 1)
+            sse = sum(r * r for r in residuals)
+            s_err = (sse / dof) ** 0.5
+            se_slope = s_err / (ss_xx ** 0.5) if ss_xx > 0 else 0.0
+            if se_slope > 1e-9:
+                delta_momentum_tstat = slope / se_slope
+            elif slope == 0:
+                delta_momentum_tstat = 0.0
+            else:
+                delta_momentum_tstat = 5.0 if slope > 0 else -5.0
+
+            # Normalise: scale the per-tick slope into a net move across
+            # the full series, then divide by max(|mean_y|, |net_delta|,
+            # 1.0) so magnitudes stay directly comparable to the legacy
+            # ±1 delta_momentum range.  Using the full-series move rather
+            # than the raw slope keeps the signal proportional to "how
+            # much ground did net_delta cover over the session".
+            total_move = slope * (n - 1)
+            scale = max(abs(mean_y), abs(net_delta), 1.0)
+            delta_momentum = total_move / scale
 
     return {
         "intraday_premium_direction": round(max(0.0, min(premium_direction, 1.0)), 4),
         "delta_momentum": round(max(-1.0, min(delta_momentum, 1.0)), 4),
+        "delta_momentum_tstat": round(
+            max(-5.0, min(delta_momentum_tstat, 5.0)), 3
+        ),
         "net_delta": round(net_delta, 2),
         "net_call_premium": round(net_call, 2),
         "net_put_premium": round(net_put, 2),
@@ -567,8 +616,25 @@ def fetch_uw_alerts(limit: int = 500, hours_back: int = 48) -> list[str]:
     return sorted(tickers)
 
 
-def fetch_recent_alert_flow(limit: int = 150, hours_back: int = 24) -> pd.DataFrame:
-    """Return normalized flow rows for recent UW sweep + vol>Oi alerts (for UI / research)."""
+def fetch_recent_alert_flow(
+    limit: int = 150,
+    hours_back: int = 24,
+    *,
+    opening_only: bool | None = None,
+) -> pd.DataFrame:
+    """Return normalized flow rows for recent UW sweep + vol>Oi alerts (for UI / research).
+
+    Wave 5 — ``opening_only`` layers ``size_greater_oi=true`` on top of the
+    existing ``vol_greater_oi`` filter so the caller sees only prints whose
+    *own size* exceeded the chain's prior open interest (a stronger proxy
+    for a new-position open vs. an existing-position close).  When left as
+    ``None`` the module-wide :data:`app.config.FLOW_OPENING_ONLY` flag
+    decides.  Explicit ``True``/``False`` always wins, so the
+    ``/api/alerts`` endpoint can let the UI toggle the filter live without
+    mutating global config.
+    """
+    from app.config import FLOW_OPENING_ONLY  # lazy import avoids cycles
+
     newer_than = (
         datetime.now(tz=timezone.utc) - timedelta(hours=hours_back)
     ).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -578,6 +644,9 @@ def fetch_recent_alert_flow(limit: int = 150, hours_back: int = 24) -> pd.DataFr
         "vol_greater_oi": "true",
         "newer_than": newer_than,
     }
+    effective_opening = FLOW_OPENING_ONLY if opening_only is None else bool(opening_only)
+    if effective_opening:
+        params["size_greater_oi"] = "true"
     try:
         resp = _uw_request(FLOW_ALERTS_ENDPOINT, params=params)
         resp.raise_for_status()

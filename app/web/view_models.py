@@ -12,8 +12,49 @@ from dataclasses import dataclass, field, asdict
 from typing import Any
 
 from app.config import PORTFOLIO_CAPITAL, SIZING_TIERS
+from app.features.conviction_stack import compute_conviction_stack
+from app.features.flow_narrative import build_flow_feature_narrative
 from app.features.flow_stats import TIER_ABS, TIER_LABELS
 from app.features.grade_explainer import build_flow_grade_reasons
+from app.features.trade_structure import recommend_structure
+
+
+def attach_sizing_context(
+    trade_structure: dict[str, Any] | None,
+    risk_regime: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """Attach a ``sizing_context`` block to a ``trade_structure`` payload.
+
+    Wave 8 — the Structure tab renders ``trade_structure.sizing_context``
+    as a coloured strip beneath the primary recommendation, and surfaces
+    any regime HALT/elevated warning as an extra caveat so size-down is
+    obvious at a glance.  Returns the (possibly mutated) structure dict
+    or ``None`` if either input is missing.
+    """
+    if not isinstance(trade_structure, dict) or not isinstance(risk_regime, dict):
+        return trade_structure
+
+    tier = risk_regime.get("tier") or "calm"
+    trade_structure["sizing_context"] = {
+        "tier": tier,
+        "label": risk_regime.get("tier_label") or tier.title(),
+        "multiplier": risk_regime.get("multiplier"),
+        "checks": risk_regime.get("checks") or [],
+        "halt_reason": risk_regime.get("halt_reason"),
+    }
+
+    halt = risk_regime.get("halt_reason")
+    caveats = trade_structure.setdefault("caveats", [])
+    if halt:
+        caveats.insert(0, f"Regime HALT — {halt}. Stand aside until the catalyst clears.")
+    elif tier in {"panic", "elevated"}:
+        mult = risk_regime.get("multiplier")
+        caveats.append(
+            f"Risk regime is {risk_regime.get('tier_label') or tier}"
+            + (f" (×{float(mult):.2f} sizing)" if isinstance(mult, (int, float)) else "")
+            + " — trim size accordingly."
+        )
+    return trade_structure
 
 
 def _derive_flow_confidence_tier(row: dict[str, Any]) -> tuple[int | None, str | None]:
@@ -87,6 +128,16 @@ class TraderCardView:
     avg_delta: float | None = None
     delta_source_mix: float | None = None
     grade_reasons: list[dict[str, Any]] = field(default_factory=list)
+    # Wave 4 — composite 0-100 Conviction Stack.  Condenses the old F/D/C/I
+    # dot row plus dealer / price confirmation into a single chip.
+    conviction_stack: dict[str, Any] | None = None
+    # Wave 6 — plain-English narrative bullets for the Trader Card's
+    # "Why?" tab.  A short ordered list of {tone, icon, label, detail}.
+    narrative: list[dict[str, Any]] = field(default_factory=list)
+    # Wave 7 — structure recommendation payload (primary vehicle +
+    # alternatives + avoid + caveats) consumed by the Trader Card
+    # "Structure" tab.
+    trade_structure: dict[str, Any] | None = None
 
     @classmethod
     def from_row(
@@ -95,12 +146,14 @@ class TraderCardView:
         *,
         vix_sizing_mult: float | None = None,
         capital: float = PORTFOLIO_CAPITAL,
+        risk_regime: dict[str, Any] | None = None,
     ) -> "TraderCardView":
         """Build a view from an enriched signal row.
 
-        Sizing is a *projection* based on SIZING_TIERS × VIX multiplier — it
-        is deliberately identical to what `open_positions` would pick at
-        portfolio-open time so the card's numbers match the executed trade.
+        Sizing is a *projection* based on SIZING_TIERS × VIX multiplier × the
+        Wave 8 ``risk_regime.multiplier`` (if provided) — it is deliberately
+        identical to what `open_positions` would pick at portfolio-open
+        time so the card's numbers match the executed trade.
         """
         entry = row.get("entry_price")
         stop = row.get("stop_price")
@@ -112,6 +165,16 @@ class TraderCardView:
         risk_dollar = None
         heat_pct = None
 
+        # Wave 8 — layered regime multiplier on top of the legacy VIX one.
+        regime_mult = 1.0
+        if isinstance(risk_regime, dict):
+            try:
+                rm = float(risk_regime.get("multiplier"))
+                if rm >= 0:
+                    regime_mult = rm
+            except (TypeError, ValueError):
+                pass
+
         try:
             ep = float(entry) if entry is not None else None
             sp = float(stop) if stop is not None else None
@@ -120,7 +183,7 @@ class TraderCardView:
                 if risk_per_share > 0:
                     risk_pct = _risk_pct_for_score(score)
                     vm = vix_sizing_mult or 1.0
-                    risk_dollar_budget = capital * risk_pct * vm
+                    risk_dollar_budget = capital * risk_pct * vm * regime_mult
                     if risk_dollar_budget > 0:
                         shares = int(risk_dollar_budget / risk_per_share)
                         if shares > 0:
@@ -154,6 +217,33 @@ class TraderCardView:
             except Exception:
                 reasons = []
 
+        try:
+            stack = compute_conviction_stack(dict(row))
+        except Exception:
+            stack = None
+
+        # Wave 6 — build narrative AFTER stack so the narrative can
+        # consume the stack tier as its headline bullet.
+        row_for_narrative = dict(row)
+        if stack is not None:
+            row_for_narrative["conviction_stack"] = stack
+        try:
+            narrative = build_flow_feature_narrative(row_for_narrative)
+        except Exception:
+            narrative = []
+
+        # Wave 7 — structure recommendation uses the same enriched row
+        # (including the freshly-attached conviction_stack) so the ladder
+        # tier-gating stays consistent with the Stack chip.
+        try:
+            structure = recommend_structure(row_for_narrative)
+        except Exception:
+            structure = None
+
+        # Wave 8 — attach the regime-aware sizing context to the structure
+        # payload so the Structure tab can render it inline.
+        structure = attach_sizing_context(structure, risk_regime)
+
         return cls(
             row=dict(row),
             size_shares=size_shares,
@@ -167,6 +257,9 @@ class TraderCardView:
             avg_delta=avg_delta,
             delta_source_mix=delta_src_mix,
             grade_reasons=reasons or [],
+            conviction_stack=stack,
+            narrative=narrative,
+            trade_structure=structure,
         )
 
     def to_template(self) -> dict[str, Any]:
@@ -186,6 +279,9 @@ class TraderCardView:
         out["avg_delta"] = self.avg_delta
         out["delta_source_mix"] = self.delta_source_mix
         out["grade_reasons"] = self.grade_reasons
+        out["conviction_stack"] = self.conviction_stack
+        out["narrative"] = self.narrative
+        out["trade_structure"] = self.trade_structure
         return out
 
 
@@ -194,13 +290,20 @@ def build_trader_card_rows(
     *,
     vix_sizing_mult: float | None = None,
     capital: float = PORTFOLIO_CAPITAL,
+    risk_regime: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
-    """Convenience wrapper for list-of-rows."""
+    """Convenience wrapper for list-of-rows.
+
+    Wave 8 — pass ``risk_regime`` through so trader cards carry the
+    regime-aware sizing multiplier and attach the sizing context to
+    their Structure tab.
+    """
     return [
         TraderCardView.from_row(
             r,
             vix_sizing_mult=vix_sizing_mult,
             capital=capital,
+            risk_regime=risk_regime,
         ).to_template()
         for r in rows
     ]

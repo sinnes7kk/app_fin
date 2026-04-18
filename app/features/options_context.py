@@ -33,6 +33,19 @@ def _empty_context() -> dict:
         "gamma_regime": "NEUTRAL",
         "gamma_flip_level_estimate": None,
         "net_gex": None,
+        # Wave 2 — dealer hedge bias derived from net_gex sign/magnitude.
+        # "suppress" = positive net gamma → dealers short vol / pin price;
+        # "chase"    = negative net gamma → dealers long vol / amplify moves;
+        # "neutral"  = |net_gex| too small to matter.
+        "dealer_hedge_bias": "neutral",
+        "dealer_hedge_label": None,
+        # Wave 2 — pin-risk strike: highest-concentration gamma level within
+        # ±5% of spot.  When the dominant strike carries a meaningful share
+        # of the total gamma near spot, price tends to magnetise toward it
+        # (especially into weekly expiry).
+        "pin_risk_strike": None,
+        "pin_risk_distance_pct": None,
+        "pin_risk_concentration": None,  # share of near-spot gamma on pin strike (0-1)
         "nearest_call_wall": None,
         "nearest_put_wall": None,
         "distance_to_call_wall_pct": None,
@@ -56,6 +69,12 @@ def _empty_context() -> dict:
         # Implied volatility context
         "iv_rank": None,
         "iv_current": None,
+        # Wave 2 — rolling IV-rank delta (current minus oldest sample in the
+        # 5d window) persisted via app.features.iv_rank_history.  Positive =
+        # vol expanding (options getting richer); negative = vol contracting
+        # (options getting cheaper / IV crush setup).
+        "iv_rank_5d_delta": None,
+        "iv_rank_5d_samples": 0,
     }
 
 
@@ -63,8 +82,18 @@ def _empty_context() -> dict:
 # Private helpers — one per UW endpoint
 # ---------------------------------------------------------------------------
 
-def _fetch_gex_context(ticker: str) -> dict | None:
-    """Spot GEX by strike -> gamma regime, net GEX, flip level estimate."""
+# Wave 2 — pin-risk tuning.
+# Any strike within ±PIN_RISK_BAND_PCT of spot competes for "pin" status.
+# A strike only qualifies as a pin-risk level when it carries at least
+# PIN_RISK_MIN_CONCENTRATION of the absolute gamma in that band (otherwise
+# the flow is diffuse and no single strike acts as a magnet).
+PIN_RISK_BAND_PCT = 5.0
+PIN_RISK_MIN_CONCENTRATION = 0.25
+
+
+def _fetch_gex_context(ticker: str, spot: float | None = None) -> dict | None:
+    """Spot GEX by strike -> gamma regime, net GEX, flip level estimate,
+    dealer hedge bias, and (when *spot* is supplied) pin-risk strike."""
     url = f"{BASE_URL}/stock/{ticker}/spot-exposures/strike"
     try:
         resp = _uw_request(url)
@@ -101,22 +130,61 @@ def _fetch_gex_context(ticker: str) -> dict | None:
     else:
         regime = "NEGATIVE"
 
+    # Wave 2 — dealer hedge bias.  Translates the raw net_gex sign into a
+    # trader-facing label:
+    #   positive net_gex → dealers are NET LONG gamma → they SELL rallies
+    #                      and BUY dips → dampens moves → "suppress".
+    #   negative net_gex → dealers are NET SHORT gamma → they BUY rallies
+    #                      and SELL dips → amplifies moves → "chase".
+    if regime == "POSITIVE":
+        dealer_bias = "suppress"
+        dealer_label = "Dealers suppress (pinning)"
+    elif regime == "NEGATIVE":
+        dealer_bias = "chase"
+        dealer_label = "Dealers chase (volatility amplified)"
+    else:
+        dealer_bias = "neutral"
+        dealer_label = "Dealer gamma balanced"
+
     # Gamma flip estimate: strike where cumulative GEX crosses zero
     flip_level: float | None = None
     cum = 0.0
-    prev_strike = strikes[0][0]
     for strike, gamma in strikes:
         prev_cum = cum
         cum += gamma
         if prev_cum != 0.0 and ((prev_cum > 0 and cum <= 0) or (prev_cum < 0 and cum >= 0)):
             flip_level = strike
             break
-        prev_strike = strike
+
+    # Wave 2 — pin-risk strike.  Look at strikes within ±PIN_RISK_BAND_PCT
+    # of spot, find the one with the largest |gamma|, and only surface it
+    # when its share of the near-spot gamma is high enough to actually
+    # magnetise price (PIN_RISK_MIN_CONCENTRATION).
+    pin_strike: float | None = None
+    pin_distance_pct: float | None = None
+    pin_concentration: float | None = None
+    if spot is not None and spot > 0:
+        lo = spot * (1 - PIN_RISK_BAND_PCT / 100.0)
+        hi = spot * (1 + PIN_RISK_BAND_PCT / 100.0)
+        band = [(s, g) for (s, g) in strikes if lo <= s <= hi]
+        total_abs = sum(abs(g) for _, g in band)
+        if band and total_abs > 0:
+            dom_strike, dom_gamma = max(band, key=lambda pair: abs(pair[1]))
+            concentration = abs(dom_gamma) / total_abs
+            if concentration >= PIN_RISK_MIN_CONCENTRATION:
+                pin_strike = round(dom_strike, 2)
+                pin_distance_pct = round((dom_strike - spot) / spot * 100.0, 2)
+                pin_concentration = round(concentration, 3)
 
     return {
         "net_gex": round(net_gex, 2),
         "gamma_regime": regime,
         "gamma_flip_level_estimate": round(flip_level, 2) if flip_level is not None else None,
+        "dealer_hedge_bias": dealer_bias,
+        "dealer_hedge_label": dealer_label,
+        "pin_risk_strike": pin_strike,
+        "pin_risk_distance_pct": pin_distance_pct,
+        "pin_risk_concentration": pin_concentration,
     }
 
 
@@ -341,7 +409,7 @@ def fetch_options_context(ticker: str, spot: float) -> dict:
     ctx = _empty_context()
     sources: list[str] = []
 
-    gex = _fetch_gex_context(ticker)
+    gex = _fetch_gex_context(ticker, spot)
     if gex is not None:
         ctx.update(gex)
         sources.append("spot_gex")
@@ -365,6 +433,21 @@ def fetch_options_context(ticker: str, spot: float) -> dict:
     if iv is not None:
         ctx.update(iv)
         sources.append("interpolated_iv")
+
+        # Wave 2 — record today's IV rank into the rolling history store
+        # and attach the rolling 5d delta to the context.  Failures in the
+        # history layer must never break the options-context pipeline.
+        try:
+            from app.features.iv_rank_history import (
+                compute_iv_rank_delta,
+                record_iv_rank,
+            )
+            record_iv_rank(ticker, ctx.get("iv_rank"))
+            _cur, _delta, _n = compute_iv_rank_delta(ticker)
+            ctx["iv_rank_5d_delta"] = _delta
+            ctx["iv_rank_5d_samples"] = _n
+        except Exception:
+            pass
 
     ctx["options_context_sources_used"] = sources
     ctx["options_context_available"] = len(sources) > 0

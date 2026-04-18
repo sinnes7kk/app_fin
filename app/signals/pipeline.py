@@ -311,7 +311,7 @@ def _attach_price_checks_to_ranked(
 
 
 _FLOW_COMPONENT_KEYS = [
-    "flow_velocity", "repeat_flow_count", "dte_score", "flow_imbalance_ratio",
+    "repeat_flow_count", "dte_score", "flow_imbalance_ratio",
     "bullish_flow_intensity", "bearish_flow_intensity",
     "bullish_premium_per_trade", "bearish_premium_per_trade",
     "bullish_vol_oi", "bearish_vol_oi",
@@ -524,6 +524,12 @@ def run_price_validation_for_bullish_candidates(
                 "gamma_regime": opts_ctx.get("gamma_regime"),
                 "net_gex": opts_ctx.get("net_gex"),
                 "gamma_flip_level_estimate": opts_ctx.get("gamma_flip_level_estimate"),
+                # Wave 2 — dealer hedge bias + pin-risk strike.
+                "dealer_hedge_bias": opts_ctx.get("dealer_hedge_bias"),
+                "dealer_hedge_label": opts_ctx.get("dealer_hedge_label"),
+                "pin_risk_strike": opts_ctx.get("pin_risk_strike"),
+                "pin_risk_distance_pct": opts_ctx.get("pin_risk_distance_pct"),
+                "pin_risk_concentration": opts_ctx.get("pin_risk_concentration"),
                 "nearest_call_wall": opts_ctx.get("nearest_call_wall"),
                 "nearest_put_wall": opts_ctx.get("nearest_put_wall"),
                 "distance_to_call_wall_pct": opts_ctx.get("distance_to_call_wall_pct"),
@@ -536,6 +542,9 @@ def run_price_validation_for_bullish_candidates(
                 "long_dated_oi": opts_ctx.get("long_dated_oi"),
                 "iv_rank": opts_ctx.get("iv_rank"),
                 "iv_current": opts_ctx.get("iv_current"),
+                # Wave 2 — rolling 5d IV-rank delta.
+                "iv_rank_5d_delta": opts_ctx.get("iv_rank_5d_delta"),
+                "iv_rank_5d_samples": opts_ctx.get("iv_rank_5d_samples"),
                 "counter_trend": counter_trend,
                 "source": "fresh",
                 "trade_plan": trade_plan,
@@ -670,6 +679,12 @@ def run_price_validation_for_bearish_candidates(
                 "gamma_regime": opts_ctx.get("gamma_regime"),
                 "net_gex": opts_ctx.get("net_gex"),
                 "gamma_flip_level_estimate": opts_ctx.get("gamma_flip_level_estimate"),
+                # Wave 2 — dealer hedge bias + pin-risk strike.
+                "dealer_hedge_bias": opts_ctx.get("dealer_hedge_bias"),
+                "dealer_hedge_label": opts_ctx.get("dealer_hedge_label"),
+                "pin_risk_strike": opts_ctx.get("pin_risk_strike"),
+                "pin_risk_distance_pct": opts_ctx.get("pin_risk_distance_pct"),
+                "pin_risk_concentration": opts_ctx.get("pin_risk_concentration"),
                 "nearest_call_wall": opts_ctx.get("nearest_call_wall"),
                 "nearest_put_wall": opts_ctx.get("nearest_put_wall"),
                 "distance_to_call_wall_pct": opts_ctx.get("distance_to_call_wall_pct"),
@@ -682,6 +697,9 @@ def run_price_validation_for_bearish_candidates(
                 "long_dated_oi": opts_ctx.get("long_dated_oi"),
                 "iv_rank": opts_ctx.get("iv_rank"),
                 "iv_current": opts_ctx.get("iv_current"),
+                # Wave 2 — rolling 5d IV-rank delta.
+                "iv_rank_5d_delta": opts_ctx.get("iv_rank_5d_delta"),
+                "iv_rank_5d_samples": opts_ctx.get("iv_rank_5d_samples"),
                 "counter_trend": counter_trend,
                 "source": "watchlist_rs_demote" if rs_demote else "fresh",
                 "trade_plan": trade_plan,
@@ -755,10 +773,9 @@ def _enrich_agg_options(results: list[dict]) -> list[dict]:
 
 
 # Split from the former combined NET_PREM_WEIGHT=0.08 so directional momentum
-# can carry a meaningful weight (replacing the retired flow_velocity component
-# of the flow score).
+# can carry a meaningful weight.
 NET_PREM_ALIGNMENT_WEIGHT = 0.056       # was 0.7 * 0.08
-DIRECTIONAL_MOMENTUM_WEIGHT = 0.13      # was 0.3 * 0.08 = 0.024; bumped to replace retired flow_velocity
+DIRECTIONAL_MOMENTUM_WEIGHT = 0.13      # bumped from 0.024 when the net-prem-ticks directional component was adopted
 NET_PREM_WEIGHT = NET_PREM_ALIGNMENT_WEIGHT + DIRECTIONAL_MOMENTUM_WEIGHT  # back-compat alias
 DARK_POOL_WEIGHT = 0.05
 
@@ -771,20 +788,25 @@ def _enrich_net_prem_ticks(results: list[dict]) -> list[dict]:
     * **Alignment bonus** — rewards intraday call/put premium pointing the
       same way as our thesis.
     * **Directional momentum bonus** — rewards acceleration of signed net
-      delta in our thesis direction. This replaces the retired
-      ``flow_velocity`` component of the flow score (same max impact).
+      delta in our thesis direction.
     """
     for r in results:
         npt = fetch_net_prem_ticks(r["ticker"])
         if npt is None:
             r["intraday_premium_direction"] = None
             r["delta_momentum"] = None
+            r["delta_momentum_tstat"] = None
             r["directional_momentum"] = 0.0
             r["directional_momentum_pts"] = 0.0
             continue
 
         r["intraday_premium_direction"] = npt["intraday_premium_direction"]
         r["delta_momentum"] = npt["delta_momentum"]
+        # Wave 2 — delta_momentum now comes from an OLS slope across the
+        # intraday tick series (noise-robust).  The t-stat quantifies
+        # statistical confidence; |t| > 1 typically maps to a meaningful
+        # trend worth acting on.
+        r["delta_momentum_tstat"] = npt.get("delta_momentum_tstat")
         r["net_delta"] = npt["net_delta"]
 
         prem_dir = npt["intraday_premium_direction"]
@@ -1429,6 +1451,7 @@ def run_flow_to_price_pipeline(
     # Stock screener discovery: one API call, broad net of unusual activity
     screener_stats = {"screener_tickers": 0, "screener_new": 0}
     screener_meta: dict[str, dict] = {}
+    screener_rows: list[dict] = []
     try:
         screener_rows = fetch_stock_screener()
 
@@ -1623,8 +1646,32 @@ def run_flow_to_price_pipeline(
     # Merge flow-feature tickers into screener snapshots so the Flow Tracker
     # sees all tickers with unusual flow, not just those from the UW screener.
     try:
-        from app.features.flow_tracker import save_flow_feature_snapshot
+        from app.features.flow_tracker import save_flow_feature_snapshot, save_screener_snapshot
         save_flow_feature_snapshot(feature_table)
+
+        # Wave 0.5 A1/A2 — back-fill today's screener rows with the
+        # structural enrichment (dominant DTE bucket, sweep share,
+        # multileg share).  save_screener_snapshot's upsert only touches
+        # today's date so historical rows are untouched.
+        if (
+            not feature_table.empty
+            and "dominant_dte_bucket" in feature_table.columns
+            and screener_rows
+        ):
+            enrichment: dict[str, dict] = {}
+            for _, fr in feature_table.iterrows():
+                t = str(fr.get("ticker", "")).upper().strip()
+                if not t:
+                    continue
+                enrichment[t] = {
+                    "dominant_dte_bucket": fr.get("dominant_dte_bucket"),
+                    "sweep_share": float(fr.get("sweep_share", 0) or 0),
+                    "multileg_share": float(fr.get("multileg_share", 0) or 0),
+                    # Wave 2 — repeat-flow acceleration per side.
+                    "bullish_accel_ratio": float(fr.get("bullish_accel_ratio", 0) or 0),
+                    "bearish_accel_ratio": float(fr.get("bearish_accel_ratio", 0) or 0),
+                }
+            save_screener_snapshot(screener_rows, flow_enrichment=enrichment)
     except Exception as e:
         print(f"  [flow-tracker] flow-feature merge failed: {e}")
 

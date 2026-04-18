@@ -58,9 +58,11 @@
     {% for r in reasons %}
     <li class="tc-reason-{{ r.kind }}">
       <span class="tc-reason-label">{{ r.label }}</span>
+      {% if r.kind in ('driver', 'drag') and r.points is defined and r.points is not none %}
       <span class="tc-reason-points">
         {% if r.kind == 'drag' %}↓ {{ "%.2f"|format(r.points) }}{% else %}+{{ "%.2f"|format(r.points) }}{% endif %}
       </span>
+      {% endif %}
     </li>
     {% endfor %}
   </ul>
@@ -88,17 +90,61 @@
   {% endif %}
 {% endmacro %}
 
-{% macro _confluence_dots(row) %}
-  {% set flow_on = (row.flow_score_scaled or 0) >= 5 %}
-  {% set dp_on = row.dark_pool and (row.dark_pool.notional_mcap_bps or 0) > 1 %}
-  {% set chain_on = row.hot_chain or row.top_chain %}
-  {% set insider_on = row.insider and row.insider.net_direction in ('buying','selling') %}
-  <span class="tc-confluence" title="Confluence sources confirming the thesis">
-    <span class="tc-dot {{ 'on' if flow_on else 'off' }}" title="Options flow">F</span>
-    <span class="tc-dot {{ 'on' if dp_on else 'off' }}" title="Dark pool">D</span>
-    <span class="tc-dot {{ 'on' if chain_on else 'off' }}" title="Hot chain">C</span>
-    <span class="tc-dot {{ 'on' if insider_on else 'off' }}" title="Insider activity">I</span>
-  </span>
+{% macro _stack_chip(row) %}
+  {# Wave 4 — composite 0-100 Conviction Stack chip.
+     Replaces the legacy F/D/C/I dot row.  Drivers / drags surface in the
+     tooltip so traders don't have to mentally reconcile six different
+     mini-signals to understand "how stacked is this setup?".
+
+     Components (total 100):
+       50  flow_core      — options flow backbone (conviction_score × 5)
+       15  dp_confirm     — dark-pool bias × notional aligned with direction
+       10  chain_confirm  — hot-chain / top-chain direction match
+        8  insider        — insider buying/selling aligned with direction
+       12  price_confirm  — session tone + RS5d/20d + window return
+        5  dealer_regime  — Wave-2 dealer hedge bias (chase amplifies)
+
+     Tiers: >=80 elite · 65-79 strong · 50-64 moderate · <50 weak.  #}
+  {% set s = row.conviction_stack %}
+  {% if s and s.score is not none %}
+    {% set tier = s.tier %}
+    {% set cls = 'tc-stack-elite' if tier == 'elite' else ('tc-stack-strong' if tier == 'strong' else ('tc-stack-moderate' if tier == 'moderate' else 'tc-stack-weak')) %}
+    {# Build a human tooltip listing the top two drivers and, if any, top drag. #}
+    {% set tip_drivers = s.top_drivers[:2] | join(', ') if s.top_drivers else 'no strong drivers' %}
+    {% set tip_drags = ', '.join(s.top_drags[:2]) if s.top_drags else '' %}
+    {% set tip -%}
+      Conviction Stack {{ s.score }}/100 — {{ s.tier_label }}.
+      Drivers: {{ tip_drivers }}.{% if tip_drags %} Drags: {{ tip_drags }}.{% endif %}
+    {%- endset %}
+    <span class="tc-stack {{ cls }}" title="{{ tip }}">
+      <span class="tc-stack-label">Stack</span>
+      <span class="tc-stack-score">{{ s.score }}</span>
+      <span class="tc-stack-tier">{{ s.tier_label | replace('Stack ', '') }}</span>
+    </span>
+  {% endif %}
+{% endmacro %}
+
+{% macro _regime_chip(row) %}
+  {# Wave 8 — regime chip on Trader Card header.  Pulls the sizing
+     context that view_models.attach_sizing_context wrote onto the
+     trade_structure payload.  Hidden in the default "calm + mult=1.0"
+     state so the header stays quiet when the market isn't flagging
+     anything.  Clicking the underlying Structure tab shows the full
+     checks list. #}
+  {% set s = row.trade_structure %}
+  {% set ctx = s.sizing_context if s else None %}
+  {% if ctx and ctx.tier and (ctx.tier != 'calm' or (ctx.multiplier is not none and (ctx.multiplier|float < 0.99 or ctx.multiplier|float > 1.01))) %}
+    {% set cls = 'tc-regime tc-regime-' ~ ctx.tier %}
+    {% set mult = ctx.multiplier %}
+    {% set halt = ctx.halt_reason %}
+    {% set tip -%}
+      Risk regime {{ ctx.label }}{% if mult is not none %} — sizing ×{{ '%.2f'|format(mult|float) }}{% endif %}{% if halt %} · HALT: {{ halt }}{% endif %}.  See Structure tab for full checks.
+    {%- endset %}
+    <span class="{{ cls }}" title="{{ tip }}">
+      <span class="tc-regime-label">{{ ctx.label }}</span>
+      {% if mult is not none %}<span class="tc-regime-mult">×{{ '%.2f'|format(mult|float) }}</span>{% endif %}
+    </span>
+  {% endif %}
 {% endmacro %}
 
 {% macro _earn_badge(row) %}
@@ -134,6 +180,37 @@
     'RISK_REVERSAL':'Risk reversal'
   }.get(exp.expression, exp.expression) %}
   <span class="tc-expression" title="{{ exp.rationale }}">{{ label }}</span>
+  {% endif %}
+{% endmacro %}
+
+{% macro _dealer_gamma_chip(row) %}
+  {# Wave 2 — dealer hedge bias + pin-risk.  Uses spot-exposures GEX to
+     surface two swing-critical reads:
+       * Dealer bias — whether dealer hedging suppresses (long gamma → sells
+         rallies / buys dips, pinning behaviour) or chases (short gamma →
+         amplifies moves).  Drives whether to expect mean-reversion or
+         follow-through on a signal.
+       * Pin-risk strike — the single largest-gamma strike within ±5% of
+         spot.  Shown only when one strike carries ≥25% of near-spot
+         gamma, i.e. when it can act as a magnet.  Matters most for
+         weekly expiries and sizing targets near the pin. #}
+  {% set bias = row.dealer_hedge_bias %}
+  {% set pin = row.pin_risk_strike %}
+  {% if bias and bias != 'neutral' %}
+    {% set cls = 'tc-dealer-suppress' if bias == 'suppress' else 'tc-dealer-chase' %}
+    {% set tip = row.dealer_hedge_label or ('Dealers ' ~ bias) %}
+    <span class="tc-dealer {{ cls }}" title="{{ tip }} (net GEX {{ row.net_gex }})">
+      {% if bias == 'suppress' %}⇄ Pin{% else %}↯ Chase{% endif %}
+    </span>
+  {% endif %}
+  {% if pin is not none %}
+    {% set dist = row.pin_risk_distance_pct %}
+    {% set conc = row.pin_risk_concentration %}
+    {% set _dist_txt = ('%+.1f'|format(dist)) ~ '%' if dist is not none else '' %}
+    {% set _conc_txt = (conc * 100)|round|int ~ '%' if conc is not none else '' %}
+    <span class="tc-pin" title="Pin-risk strike: {{ pin }}{% if dist is not none %} ({{ _dist_txt }} from spot){% endif %}{% if conc is not none %} carrying {{ _conc_txt }} of near-spot gamma — price often magnetises here into expiry{% endif %}.">
+      Pin {{ pin }}{% if dist is not none %} <span class="tc-mute">({{ _dist_txt }})</span>{% endif %}
+    </span>
   {% endif %}
 {% endmacro %}
 
@@ -195,7 +272,8 @@
       {{ _delta_chip(row) }}
     </div>
     <div class="tc-badges">
-      {{ _confluence_dots(row) }}
+      {{ _stack_chip(row) }}
+      {{ _regime_chip(row) }}
       {{ _earn_badge(row) }}
       {{ _liq_badge(row.liquidity or {}) }}
     </div>
@@ -232,7 +310,24 @@
 
   <div class="tc-row tc-row-context">
     {{ _expression_badge(row.trade_expression or {}) }}
-    {% if row.iv_rank is not none %}<span class="tc-iv" title="Implied volatility rank (0-100)">IVR {{ row.iv_rank | int }}</span>{% endif %}
+    {% if row.iv_rank is not none %}
+      {# Wave 2 — append rolling 5d IV-rank delta when we have ≥2 samples.
+         Positive = options getting richer, negative = cheaper. #}
+      {% set ivd = row.iv_rank_5d_delta %}
+      {% set _ivd_abs = (ivd if ivd is not none and ivd >= 0 else (-ivd if ivd is not none else 0)) %}
+      {% if ivd is not none and _ivd_abs >= 3.0 %}
+        {% set ivd_cls = 'tc-iv-delta-up' if ivd > 0 else 'tc-iv-delta-dn' %}
+        {% set ivd_sym = '▲' if ivd > 0 else '▼' %}
+        {% set ivd_tip = 'IV rank ' ~ ('+' if ivd > 0 else '') ~ ('%.1f'|format(ivd)) ~ ' pts over last 5d (' ~ (row.iv_rank_5d_samples or 0) ~ ' samples). Rising = options richer; falling = options cheaper.' %}
+        <span class="tc-iv" title="Implied volatility rank (0-100)">
+          IVR {{ row.iv_rank | int }}
+          <span class="tc-iv-delta {{ ivd_cls }}" title="{{ ivd_tip }}">{{ ivd_sym }}{{ '%.0f'|format(_ivd_abs) }}</span>
+        </span>
+      {% else %}
+        <span class="tc-iv" title="Implied volatility rank (0-100){% if ivd is not none %} — 5d delta {{ '+' if ivd > 0 else '' }}{{ '%.1f'|format(ivd) }}{% endif %}">IVR {{ row.iv_rank | int }}</span>
+      {% endif %}
+    {% endif %}
+    {{ _dealer_gamma_chip(row) }}
     {{ _session_chip(row.session or {}) }}
     {{ _rs_chip(row.rs or {}) }}
   </div>

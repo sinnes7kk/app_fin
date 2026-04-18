@@ -10,14 +10,90 @@ import numpy as np
 import pandas as pd
 
 from app.config import (
+    FLOW_TRACKER_DTE_BUCKETS,
     FLOW_TRACKER_ETF_EXCLUDE,
     FLOW_TRACKER_LOOKBACK_DAYS,
     FLOW_TRACKER_MAX_RESULTS,
+    FLOW_TRACKER_MIN_3D_PERCENTILE,
     FLOW_TRACKER_MIN_ACTIVE_DAYS,
     FLOW_TRACKER_MIN_MCAP,
     FLOW_TRACKER_MIN_PREM_MCAP_BPS,
     FLOW_TRACKER_MIN_PREMIUM,
+    FLOW_TRACKER_MODES,
+    FLOW_TRACKER_RETENTION_DAYS,
+    FLOW_TRACKER_RETURN_BONUS,
+    FLOW_TRACKER_RETURN_DRAG,
+    FLOW_TRACKER_WEIGHTS_ACCUM,
 )
+
+
+# Grade rank used for `min_grade_rank` gates in FLOW_TRACKER_MODES.  Higher
+# rank = better grade.  Keep in sync with `grade_explainer.conviction_grade`.
+_GRADE_RANK = {"C": 0, "B-": 1, "B": 2, "B+": 3, "A-": 4, "A": 5, "A+": 6}
+
+
+def _mode_passes(row: dict, mode_cfg: dict) -> bool:
+    """Return True if a scored row clears every gate defined by ``mode_cfg``.
+
+    ``row`` must already carry ``active_days``, ``_cum_total`` (or
+    ``cumulative_premium``), ``prem_mcap_bps``, ``_consistency_raw``,
+    ``_accel_t_stat``, ``hedging_risk``, ``conviction_grade``.
+    """
+    if row.get("active_days", 0) < mode_cfg["min_active_days"]:
+        return False
+    cum_total = row.get("_cum_total")
+    if cum_total is None:
+        cum_total = row.get("cumulative_premium", 0.0)
+    if float(cum_total or 0) < mode_cfg["min_cum_premium"]:
+        return False
+    if float(row.get("prem_mcap_bps", 0) or 0) < mode_cfg["min_prem_mcap_bps"]:
+        return False
+    if float(row.get("_consistency_raw", 0) or 0) < mode_cfg["min_consistency"]:
+        return False
+    if float(row.get("_accel_t_stat", 0) or 0) < mode_cfg["min_accel_t"]:
+        return False
+    if mode_cfg["exclude_hedging"] and row.get("hedging_risk"):
+        return False
+    grade = str(row.get("conviction_grade", "C") or "C")
+    if _GRADE_RANK.get(grade, 0) < mode_cfg["min_grade_rank"]:
+        return False
+    # Wave 0.5 A6 — 3-day percentile gate for accumulation modes only.  Uses
+    # the window max so a ticker that hit top 30% unusual activity even once
+    # during the window stays in; keeps the gate from blocking tickers whose
+    # unusualness cools off on the final day of the window.
+    if mode_cfg.get("exclude_hedging"):
+        perc_3d = row.get("perc_3_day_total_max")
+        if perc_3d is not None and float(perc_3d) > 0 and float(perc_3d) < FLOW_TRACKER_MIN_3D_PERCENTILE:
+            return False
+    return True
+
+
+def _accumulation_score(
+    active_days: int,
+    lookback_days: int,
+    consistency_raw: float,
+    accel_t_stat: float,
+    prem_mcap_bps: float,
+) -> float:
+    """Purpose-built accumulation-ness (0-100) per [0.3] in the plan.
+
+    0.35 persistence + 0.30 one-sidedness + 0.25 rising + 0.10 per-bps.
+    Each component clipped to [0, 1] before weighting.
+    """
+    lb = max(int(lookback_days), 1)
+    days_norm = min(float(active_days) / lb, 1.0)
+    consistency_norm = float(np.clip(consistency_raw, 0.0, 1.0))
+    accel_norm = float(np.clip((float(accel_t_stat) + 0.5) / 2.5, 0.0, 1.0))
+    bps_norm = float(np.clip(float(prem_mcap_bps) / 5.0, 0.0, 1.0))
+    return round(
+        100.0 * (
+            0.35 * days_norm
+            + 0.30 * consistency_norm
+            + 0.25 * accel_norm
+            + 0.10 * bps_norm
+        ),
+        1,
+    )
 
 DATA_DIR = Path(__file__).resolve().parents[2] / "data"
 SNAPSHOTS_PATH = DATA_DIR / "screener_snapshots.csv"
@@ -92,20 +168,52 @@ SNAPSHOT_COLS = [
     "iv30d",
     "perc_3_day_total",
     "perc_30_day_total",
+    # Wave 0.5 A5 — call/put premium split (usually returned by the screener
+    # as `call_premium`/`put_premium`).  Falls back to None when absent.
+    "call_premium",
+    "put_premium",
+    # Wave 0.5 A1 / A2 — flow-alert-derived enrichment attached by the
+    # pipeline via `save_screener_snapshot(..., flow_enrichment=...)` or
+    # `save_flow_feature_snapshot`.
+    "dominant_dte_bucket",
+    "sweep_share",
+    "multileg_share",
+    # Wave 2 — intraday repeat-flow acceleration per side.  Today's
+    # ``repeat_2h / directional_count`` ratio; enriched the same way as
+    # sweep_share.
+    "bullish_accel_ratio",
+    "bearish_accel_ratio",
 ]
 
 
-def save_screener_snapshot(screener_data: list[dict]) -> None:
+def save_screener_snapshot(
+    screener_data: list[dict],
+    flow_enrichment: dict[str, dict] | None = None,
+) -> None:
     """Persist today's screener response to the rolling snapshots CSV.
 
     Upserts: replaces any rows with today's date, appends new ones.
     Prunes rows older than the lookback window + buffer.
+
+    Parameters
+    ----------
+    screener_data
+        Raw screener rows from UW's ``/screener/stocks`` endpoint.
+    flow_enrichment
+        Optional ``{ticker: {key: value}}`` mapping used to fill in columns
+        the screener doesn't provide (dominant DTE bucket, sweep share,
+        multileg share).  Only keys already in :data:`SNAPSHOT_COLS` are
+        copied; missing tickers are left as ``None``.
     """
     if not screener_data:
         return
 
     today_str = str(date.today())
-    cutoff = str(date.today() - timedelta(days=FLOW_TRACKER_LOOKBACK_DAYS + 3))
+    # Wave 0.5 C1 — retention extended from LOOKBACK+3 (8d) to 21d so the
+    # 15d horizon toggle has its history and the B3 relative-PCR baseline
+    # can reach the ≥10-observation threshold.
+    cutoff = str(date.today() - timedelta(days=FLOW_TRACKER_RETENTION_DAYS))
+    flow_enrichment = flow_enrichment or {}
 
     new_rows: list[dict] = []
     for sr in screener_data:
@@ -115,6 +223,11 @@ def save_screener_snapshot(screener_data: list[dict]) -> None:
         row: dict = {"snapshot_date": today_str, "ticker": ticker}
         for col in SNAPSHOT_COLS[2:]:
             row[col] = sr.get(col)
+
+        extras = flow_enrichment.get(ticker) or {}
+        for k, v in extras.items():
+            if k in SNAPSHOT_COLS and row.get(k) in (None, "", 0):
+                row[k] = v
         new_rows.append(row)
 
     if not new_rows:
@@ -206,6 +319,14 @@ def save_flow_feature_snapshot(feature_table: pd.DataFrame) -> None:
             "iv30d": None,
             "perc_3_day_total": None,
             "perc_30_day_total": None,
+            "call_premium": None,
+            "put_premium": None,
+            "dominant_dte_bucket": row.get("dominant_dte_bucket"),
+            "sweep_share": row.get("sweep_share"),
+            "multileg_share": row.get("multileg_share"),
+            # Wave 2 — per-side acceleration ratio (today only).
+            "bullish_accel_ratio": row.get("bullish_accel_ratio"),
+            "bearish_accel_ratio": row.get("bearish_accel_ratio"),
         })
 
     if not new_rows:
@@ -290,7 +411,12 @@ def compute_multi_day_flow(
                  "total_oi_change_perc", "call_oi_change_perc", "put_oi_change_perc",
                  "put_call_ratio", "perc_3_day_total", "perc_30_day_total",
                  "call_volume", "put_volume", "volume",
-                 "call_open_interest", "put_open_interest"):
+                 "call_open_interest", "put_open_interest",
+                 # Wave 0.5 A1/A2/A5 enrichment
+                 "sweep_share", "multileg_share",
+                 "call_premium", "put_premium",
+                 # Wave 2 — repeat-flow acceleration per side.
+                 "bullish_accel_ratio", "bearish_accel_ratio"):
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
 
@@ -301,11 +427,17 @@ def compute_multi_day_flow(
 
     raw_results: list[dict] = []
 
-    for ticker, grp in df.groupby("ticker"):
-        active_dates = sorted(grp["snapshot_date"].unique())
-        active_days = len(active_dates)
+    # Wave 0.5 B2 — premium-weighted persistence.  A day only counts toward
+    # active_days when its premium clears max(15% × per-day mean, $100K).
+    # Stops `$10M day 1 + $50K × 4` from scoring persistence 5/5.
+    _PERSISTENCE_ABS_FLOOR = 100_000.0
+    _PERSISTENCE_REL_FLOOR = 0.15
 
-        if active_days < min_active_days:
+    for ticker, grp in df.groupby("ticker"):
+        raw_active_dates = sorted(grp["snapshot_date"].unique())
+        raw_active_days = len(raw_active_dates)
+
+        if raw_active_days < min_active_days:
             continue
 
         cum_bull = grp["bullish_premium"].sum()
@@ -332,15 +464,30 @@ def compute_multi_day_flow(
         if prem_mcap_bps < min_prem_mcap_bps:
             continue
 
-        persistence_ratio = round(active_days / total_days, 2)
-
-        # Build per-day premium series for regression / concentration metrics
-        daily_totals: list[tuple[int, float, float, float]] = []  # (day_idx, bull, bear, total)
-        for idx, d in enumerate(active_dates):
+        # Build per-day premium series for regression / concentration metrics.
+        # Includes every day the ticker had data so trend regression and the
+        # consistency calc see the full picture.
+        raw_daily: list[tuple[int, float, float, float, str]] = []  # (day_idx, bull, bear, total, date)
+        for idx, d in enumerate(raw_active_dates):
             day_rows = grp[grp["snapshot_date"] == d]
             db = float(day_rows["bullish_premium"].sum())
             dbe = float(day_rows["bearish_premium"].sum())
-            daily_totals.append((idx, db, dbe, db + dbe))
+            raw_daily.append((idx, db, dbe, db + dbe, d))
+
+        # Wave 0.5 B2 — premium-weighted active day count.
+        gross_window = sum(t[3] for t in raw_daily)
+        per_day_mean = gross_window / raw_active_days if raw_active_days else 0.0
+        day_threshold = max(_PERSISTENCE_ABS_FLOOR, per_day_mean * _PERSISTENCE_REL_FLOOR)
+        significant_dates = {t[4] for t in raw_daily if t[3] >= day_threshold}
+        active_days = len(significant_dates)
+        if active_days < min_active_days:
+            # Premium-weighted gate failed → drop.  Keeps single-blast tickers
+            # ($10M day 1 + pennies) out of the tracker even if raw day-count
+            # cleared min_active_days.
+            continue
+        persistence_ratio = round(active_days / total_days, 2)
+
+        daily_totals = [(i, b, be, tot) for (i, b, be, tot, _) in raw_daily]
 
         # --- Acceleration via log-linear regression ---
         # Regress log1p(daily_total) on day index, compute a t-statistic for the slope.
@@ -401,6 +548,97 @@ def compute_multi_day_flow(
         if pd.isna(avg_vol_30d):
             avg_vol_30d = 0.0
 
+        # Wave 0.5 B4 — window-averaged PCR for the hedging-risk check.  Latest
+        # day is noisy; the mean better reflects the week's protective posture.
+        pcr_series = grp["put_call_ratio"].dropna() if "put_call_ratio" in grp.columns else pd.Series(dtype=float)
+        window_avg_pcr = float(pcr_series.mean()) if not pcr_series.empty else 0.0
+
+        # Wave 0.5 B3 — relative PCR baseline for the hedging haircut.  When
+        # we have enough per-ticker history (≥10 observations) we compare to
+        # the ticker's own median PCR; otherwise we fall back to the absolute
+        # threshold.  Counts observations across the full CSV (retention
+        # window) rather than the lookback slice so this kicks in naturally
+        # once C1 extends retention.
+        pcr_median = float(pcr_series.median()) if not pcr_series.empty else 0.0
+        pcr_history_n = int(pcr_series.shape[0])
+
+        # Wave 0.5 A1 — dominant DTE bucket across the window.  Takes the
+        # most recent non-null value since screener publishes today's bucket
+        # fresh each scan; falls back to the latest available historical
+        # value so the chip stays populated when the latest screener row
+        # doesn't surface flow detail.
+        dte_bucket = None
+        if "dominant_dte_bucket" in grp.columns:
+            buckets = grp["dominant_dte_bucket"].dropna()
+            if not buckets.empty:
+                dte_bucket = str(buckets.mode().iloc[0])
+
+        # Wave 0.5 A2 — window-average sweep / multileg share.
+        sweep_share_win = float(grp["sweep_share"].mean()) if "sweep_share" in grp.columns else 0.0
+        if pd.isna(sweep_share_win):
+            sweep_share_win = 0.0
+        multileg_share_win = float(grp["multileg_share"].mean()) if "multileg_share" in grp.columns else 0.0
+        if pd.isna(multileg_share_win):
+            multileg_share_win = 0.0
+
+        # Wave 2 — today's repeat-flow acceleration ratio on the dominant side.
+        # Intraday signal: fraction of today's directional prints that landed in
+        # the last 2h.  Flat-session baseline is 2/6.5 ≈ 0.308 — we compute a
+        # centred score so the UI can threshold as: >= +0.12 accelerating,
+        # <= −0.12 fading, else steady.
+        _FLAT = 2.0 / 6.5
+        latest_bull_accel = float(latest.get("bullish_accel_ratio") or 0.0)
+        latest_bear_accel = float(latest.get("bearish_accel_ratio") or 0.0)
+        if pd.isna(latest_bull_accel):
+            latest_bull_accel = 0.0
+        if pd.isna(latest_bear_accel):
+            latest_bear_accel = 0.0
+        accel_ratio_today = latest_bull_accel if cum_bull >= cum_bear else latest_bear_accel
+        accel_score_today = round(max(-0.5, min(0.7, accel_ratio_today - _FLAT)), 3)
+        if accel_score_today >= 0.12:
+            accel_label_today = "accelerating"
+        elif accel_score_today <= -0.12:
+            accel_label_today = "fading"
+        else:
+            accel_label_today = "steady"
+
+        # Wave 0.5 A5 — window call/put premium split (takes the latest
+        # non-null observation; summed across the window doesn't really
+        # make sense because the screener reports rolling 24h values).
+        call_prem_latest = None
+        put_prem_latest = None
+        if "call_premium" in grp.columns:
+            cp = grp["call_premium"].dropna()
+            if not cp.empty:
+                call_prem_latest = float(cp.iloc[-1])
+        if "put_premium" in grp.columns:
+            pp = grp["put_premium"].dropna()
+            if not pp.empty:
+                put_prem_latest = float(pp.iloc[-1])
+
+        # Wave 0.5 A4 — window return %.  Uses first/last close in the
+        # window so we can compare flow direction to realised price action.
+        window_return_pct = 0.0
+        if "close" in grp.columns:
+            closes = grp.sort_values("snapshot_date")["close"].dropna()
+            if len(closes) >= 2 and float(closes.iloc[0]) > 0:
+                window_return_pct = round(
+                    (float(closes.iloc[-1]) / float(closes.iloc[0]) - 1.0) * 100.0, 2
+                )
+
+        # Wave 0.5 A6 — 3-day percentile.  Gate uses the latest snapshot's
+        # value; we also expose the window max for richer reasons copy.
+        perc_3d_latest = float(latest.get("perc_3_day_total") or 0.0)
+        perc_3d_window_max = float(grp["perc_3_day_total"].max()) if "perc_3_day_total" in grp.columns else 0.0
+        if pd.isna(perc_3d_window_max):
+            perc_3d_window_max = 0.0
+
+        # Wave 0.5 A7 — window-average absolute OI change, normalised to [0,1]
+        # via a 50% ceiling (50%+ daily OI growth is saturating-rare).
+        oi_change_series = grp["total_oi_change_perc"].dropna() if "total_oi_change_perc" in grp.columns else pd.Series(dtype=float)
+        oi_change_window_avg = float(oi_change_series.mean()) if not oi_change_series.empty else 0.0
+        oi_change_norm = float(np.clip(abs(oi_change_window_avg) / 50.0, 0.0, 1.0))
+
         raw_results.append({
             "ticker": ticker,
             "sector": latest.get("sector") or "—",
@@ -412,6 +650,7 @@ def compute_multi_day_flow(
             "cumulative_net": round(cum_net, 2),
             "prem_mcap_bps": prem_mcap_bps,
             "active_days": active_days,
+            "raw_active_days": raw_active_days,
             "total_days": total_days,
             "persistence_ratio": persistence_ratio,
             "trend": trend,
@@ -420,11 +659,28 @@ def compute_multi_day_flow(
             "latest_iv_rank": round(float(latest.get("iv_rank") or 0), 1),
             "latest_close": round(float(latest.get("close") or 0), 2),
             "latest_put_call_ratio": round(float(latest.get("put_call_ratio") or 0), 2),
+            "window_avg_pcr": round(window_avg_pcr, 3),
+            "ticker_pcr_median": round(pcr_median, 3),
+            "ticker_pcr_history_n": pcr_history_n,
             "marketcap": mcap,
             "daily_snapshots": daily_snaps,
+            "dominant_dte_bucket": dte_bucket,
+            "sweep_share": round(sweep_share_win, 3),
+            "multileg_share": round(multileg_share_win, 3),
+            # Wave 2 — today's repeat-flow acceleration on the dominant side.
+            "accel_ratio_today": round(accel_ratio_today, 3),
+            "accel_score_today": accel_score_today,
+            "accel_label_today": accel_label_today,
+            "call_premium_latest": call_prem_latest,
+            "put_premium_latest": put_prem_latest,
+            "window_return_pct": window_return_pct,
+            "perc_3_day_total_latest": round(perc_3d_latest, 3),
+            "perc_3_day_total_max": round(perc_3d_window_max, 3),
+            "oi_change_window_avg": round(oi_change_window_avg, 2),
             "_consistency_raw": consistency_raw,
             "_accel_raw": accel_raw,
             "_accel_t_stat": accel_t_stat,
+            "_oi_change_norm": oi_change_norm,
             "_cum_total": cum_total,
         })
 
@@ -432,15 +688,30 @@ def compute_multi_day_flow(
         return []
 
     # --- Layer 3: Composite conviction score (0–10 scale) ---
-    # Mass is still cohort-relative (captures "big vs small in today's flow") but
-    # intensity uses ABSOLUTE thresholds so grades don't drift with regime.
-    prem_vals = np.array([r["_cum_total"] for r in raw_results])
-    log_prem = np.log1p(prem_vals)
-    log_max = log_prem.max() if log_prem.max() > 0 else 1.0
-
+    # Every component now uses ABSOLUTE anchors so grades are comparable
+    # across cohort sizes and regime shifts.
+    #
     # Absolute intensity scale: 1 bps → 0, 30 bps → 1 (log-spaced).
     _INTENSITY_FLOOR = np.log1p(1.0)
     _INTENSITY_CEIL = np.log1p(30.0)
+
+    # Wave 0.5 B1 — absolute mass scale: $500K → 0, $50M → 1.  Replaces the
+    # cohort-relative `log_prem / log_prem.max()` which penalized a ticker
+    # every time peers happened to be bigger that day.
+    _MASS_FLOOR = np.log1p(5e5)
+    _MASS_CEIL = np.log1p(5e7)
+
+    # Wave 0: always score with accumulation-oriented weights so one-sidedness
+    # and acceleration carry their weight across every mode.  The 7-tier
+    # ladder stays on the same 0-10 scale.
+    w = FLOW_TRACKER_WEIGHTS_ACCUM
+
+    # Wave 0.5 B3 — relative PCR haircut thresholds.  Falls back to absolute
+    # floor when the ticker has <10 observations in the available history.
+    _PCR_RELATIVE_MULT = 1.3                # window avg / median > 1.3 → elevated
+    _PCR_RELATIVE_MIN_HISTORY = 10
+    _PCR_BULLISH_ABS = 0.9
+    _PCR_BEARISH_ABS = 0.5
 
     for i, r in enumerate(raw_results):
         persistence_norm = r["persistence_ratio"]
@@ -451,60 +722,158 @@ def compute_multi_day_flow(
         ))
         consistency_norm = r["_consistency_raw"]
         accel_norm = r["_accel_raw"]
-        mass_norm = log_prem[i] / log_max
+        log_mass = np.log1p(max(r["_cum_total"], 0.0))
+        mass_norm = float(np.clip(
+            (log_mass - _MASS_FLOOR) / (_MASS_CEIL - _MASS_FLOOR),
+            0.0, 1.0,
+        ))
+        oi_change_norm = r["_oi_change_norm"]
 
         score = (
-            0.30 * persistence_norm
-            + 0.30 * intensity_norm
-            + 0.20 * consistency_norm
-            + 0.10 * accel_norm
-            + 0.10 * mass_norm
+            w["persistence"] * persistence_norm
+            + w["intensity"]   * intensity_norm
+            + w["consistency"] * consistency_norm
+            + w["accel"]       * accel_norm
+            + w["mass"]        * mass_norm
+            + w.get("oi_change", 0.0) * oi_change_norm
         ) * 10.0
 
-        # --- P/C penalty for hedging patterns ---
-        # BULLISH direction with elevated P/C (>0.9) or BEARISH with very low P/C (<0.5)
-        # is usually protective hedging, not directional bets. Apply 15% haircut.
-        pc = r.get("latest_put_call_ratio") or 0.0
+        # Wave 0.5 A1 — DTE multiplier.  Short-dated bullish flow (<=7d) is
+        # often market-maker hedging or lottery gambling, not accumulation;
+        # LEAPs (91d+) signal structural commitment.  Applied AFTER the
+        # component sum but BEFORE PCR haircut so the two haircuts compose.
+        dte_multiplier = 1.0
+        dte_bucket_val = r.get("dominant_dte_bucket")
+        if dte_bucket_val:
+            for label, _lo, _hi, mult in FLOW_TRACKER_DTE_BUCKETS:
+                if label == dte_bucket_val:
+                    dte_multiplier = mult
+                    break
+        score *= dte_multiplier
+        r["_dte_multiplier"] = dte_multiplier
+
+        # --- Wave 0.5 B3/B4 — PCR haircut (relative-first, absolute fallback) ---
+        # Bullish with elevated PCR or bearish with suppressed PCR = protective
+        # hedging pattern, not directional conviction.  Uses the window average
+        # (B4) vs the ticker's own median when we have enough history (B3),
+        # falling back to the absolute threshold on short history so high-PCR
+        # stocks like HOOD/MSTR/biotech don't false-flag.
+        window_pcr = float(r.get("window_avg_pcr") or 0.0)
+        pcr_median = float(r.get("ticker_pcr_median") or 0.0)
+        pcr_n = int(r.get("ticker_pcr_history_n") or 0)
         hedging_risk = False
-        if pc > 0:
-            if r["direction"] == "BULLISH" and pc > 0.9:
-                hedging_risk = True
-            elif r["direction"] == "BEARISH" and pc < 0.5:
-                hedging_risk = True
+        pcr_check_mode = None
+        if window_pcr > 0:
+            if pcr_n >= _PCR_RELATIVE_MIN_HISTORY and pcr_median > 0:
+                ratio = window_pcr / pcr_median
+                pcr_check_mode = "relative"
+                if r["direction"] == "BULLISH" and ratio > _PCR_RELATIVE_MULT:
+                    hedging_risk = True
+                elif r["direction"] == "BEARISH" and ratio < (1.0 / _PCR_RELATIVE_MULT):
+                    hedging_risk = True
+            else:
+                pcr_check_mode = "absolute"
+                if r["direction"] == "BULLISH" and window_pcr > _PCR_BULLISH_ABS:
+                    hedging_risk = True
+                elif r["direction"] == "BEARISH" and window_pcr < _PCR_BEARISH_ABS:
+                    hedging_risk = True
         if hedging_risk:
             score *= 0.85
 
-        r["conviction_score"] = round(score, 1)
-        r["conviction_grade"] = _conviction_grade(score)
+        # --- Wave 0.5 A4 — window-return bonus/drag ---
+        # Flow aligned with realised price action (bullish flow + up week,
+        # bearish flow + down week) earns a small bonus; flow fighting the
+        # tape takes a small drag.  Clamped so this never dominates the
+        # component-driven score — it's context, not the primary signal.
+        ret = float(r.get("window_return_pct", 0.0))
+        return_adjustment = 0.0
+        if abs(ret) >= 0.5:
+            aligned = (
+                (r["direction"] == "BULLISH" and ret > 0)
+                or (r["direction"] == "BEARISH" and ret < 0)
+            )
+            if aligned:
+                return_adjustment = min(abs(ret) / 10.0, 1.0) * FLOW_TRACKER_RETURN_BONUS
+            else:
+                return_adjustment = -min(abs(ret) / 10.0, 1.0) * FLOW_TRACKER_RETURN_DRAG
+        score += return_adjustment
+        r["_return_adjustment"] = round(return_adjustment, 3)
+
+        r["conviction_score"] = round(max(score, 0.0), 1)
+        r["conviction_grade"] = _conviction_grade(r["conviction_score"])
         r["accel_t_stat"] = round(r["_accel_t_stat"], 2)
         r["hedging_risk"] = hedging_risk
+        r["pcr_check_mode"] = pcr_check_mode
 
         r["_intensity_norm"] = intensity_norm
         r["_consistency_norm"] = consistency_norm
         r["_accel_norm"] = accel_norm
         r["_mass_norm"] = mass_norm
+        r["_oi_change_norm_kept"] = oi_change_norm
+
+        # Wave 0.3 — purpose-built accumulation score (0-100).
+        r["accumulation_score"] = _accumulation_score(
+            active_days=r["active_days"],
+            lookback_days=lookback_days,
+            consistency_raw=r["_consistency_raw"],
+            accel_t_stat=r["_accel_t_stat"],
+            prem_mcap_bps=r["prem_mcap_bps"],
+        )
+
+        # Wave 0.1 — per-mode pass flags.  Modes are strict subsets of each
+        # other (all ⊇ accumulation ⊇ strong) so the UI can filter client-side.
+        r["passes_all"] = _mode_passes(r, FLOW_TRACKER_MODES["all"])
+        r["passes_accumulation"] = _mode_passes(r, FLOW_TRACKER_MODES["accumulation"])
+        r["passes_strong"] = _mode_passes(r, FLOW_TRACKER_MODES["strong_accumulation"])
+
         try:
             from app.features.grade_explainer import build_tracker_grade_reasons
             r["grade_reasons"] = build_tracker_grade_reasons(r)
         except Exception:
             r["grade_reasons"] = []
 
-        del r["_consistency_raw"]
-        del r["_accel_raw"]
-        del r["_accel_t_stat"]
-        del r["_cum_total"]
-        del r["_intensity_norm"]
-        del r["_consistency_norm"]
-        del r["_accel_norm"]
-        del r["_mass_norm"]
+        for _k in (
+            "_consistency_raw", "_accel_raw", "_accel_t_stat", "_cum_total",
+            "_intensity_norm", "_consistency_norm", "_accel_norm", "_mass_norm",
+            "_oi_change_norm", "_oi_change_norm_kept",
+            "_dte_multiplier", "_return_adjustment",
+        ):
+            r.pop(_k, None)
 
     raw_results.sort(key=lambda x: x["conviction_score"], reverse=True)
 
     total_qualified = len(raw_results)
+    # Funnel counts exposed to the UI for the [Strong][Accum][All] toggle.
+    count_strong = sum(1 for r in raw_results if r["passes_strong"])
+    count_accum = sum(1 for r in raw_results if r["passes_accumulation"])
+    count_all = sum(1 for r in raw_results if r["passes_all"])
+
     if max_results and len(raw_results) > max_results:
         raw_results = raw_results[:max_results]
 
+    # Wave 0.5 C3 — sector accumulation count.  For each qualifying row,
+    # count how many OTHER rows in the same sector AND direction passed
+    # the accumulation mode.  Signals sector-wide bid (e.g. "3 energy
+    # names accumulating bullish").  Excludes the row itself so lonely
+    # sector-leaders show 0, not 1.
+    by_sector_dir: dict[tuple[str, str], int] = {}
+    for r in raw_results:
+        if r.get("passes_accumulation"):
+            key = (str(r.get("sector") or "—"), str(r.get("direction") or ""))
+            by_sector_dir[key] = by_sector_dir.get(key, 0) + 1
+
     for r in raw_results:
         r["total_qualified"] = total_qualified
+        r["mode_counts"] = {
+            "strong_accumulation": count_strong,
+            "accumulation": count_accum,
+            "all": count_all,
+        }
+        key = (str(r.get("sector") or "—"), str(r.get("direction") or ""))
+        total_in_sector = by_sector_dir.get(key, 0)
+        # Exclude self only when this row is itself counted in the sector tally.
+        r["sector_accumulating_count"] = (
+            total_in_sector - 1 if r.get("passes_accumulation") else total_in_sector
+        )
 
     return raw_results

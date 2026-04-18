@@ -115,6 +115,144 @@ FLOW_TRACKER_MIN_MCAP = 500_000_000
 FLOW_TRACKER_MIN_PREM_MCAP_BPS = 0.10
 FLOW_TRACKER_MAX_RESULTS = 30
 
+# Wave 0.5 C1 — snapshot retention + horizon toggle.
+#
+# Retention is how long we keep historical rows in screener_snapshots.csv.
+# Old logic was `LOOKBACK_DAYS + 3` (8 days) which broke the 15d horizon and
+# starved the B3 relative-PCR check of per-ticker history.  21 days is
+# enough for the 15d horizon + a 6-day buffer for weekends/holidays, and
+# still short enough that the CSV stays small.
+FLOW_TRACKER_RETENTION_DAYS = 21
+
+# Horizons offered to the UI as a [5d][15d] toggle.  5d is the default
+# (matches FLOW_TRACKER_LOOKBACK_DAYS); 15d confirms persistence over a
+# longer window.  Horizon config is `{key: {label, lookback_days,
+# min_active_days}}`.
+FLOW_TRACKER_HORIZONS = {
+    "5d": {
+        "label": "5d",
+        "lookback_days": 5,
+        "min_active_days": 2,
+    },
+    "15d": {
+        "label": "15d",
+        "lookback_days": 15,
+        "min_active_days": 4,
+    },
+}
+FLOW_TRACKER_HORIZON_DEFAULT = "5d"
+
+# Flow Tracker mode-aware gating (Wave 0 — accumulation-first filtering).
+#
+# `all` is the legacy loose gate (today's behaviour).  `accumulation` is the
+# new default: most days active, strongly one-sided, non-fading, material
+# vs market cap.  `strong_accumulation` is the purest swing pattern: every
+# day active, still rising, A-tier grade.
+#
+# The composite conviction score weights shift when mode != "all" so that
+# one-sidedness + acceleration carry more weight (the actual accumulation
+# signature) at the expense of raw intensity.  Ladder grades stay on the
+# same 0-10 scale so `grade_stats.json` remains compatible.
+FLOW_TRACKER_MODE_DEFAULT = "accumulation"          # UI default on first load
+FLOW_TRACKER_AUTO_WIDEN_MIN = 5                     # auto-widen notice threshold
+
+FLOW_TRACKER_MODES = {
+    "all": {
+        "label": "All",
+        "min_active_days": 2,
+        "min_cum_premium": 250_000,
+        "min_prem_mcap_bps": 0.10,
+        "min_consistency": 0.0,
+        "min_accel_t": -99.0,
+        "exclude_hedging": False,
+        "min_grade_rank": 0,                        # C and above
+        "intro": "All tickers clearing the base multi-day persistence gate.",
+    },
+    "accumulation": {
+        "label": "Accumulation",
+        "min_active_days": 4,
+        "min_cum_premium": 1_000_000,
+        "min_prem_mcap_bps": 2.0,
+        "min_consistency": 0.55,
+        "min_accel_t": -0.5,
+        "exclude_hedging": True,
+        "min_grade_rank": 3,                        # B+ and above
+        "intro": "Names with consistent multi-day one-sided options flow — the classic accumulation pattern.",
+    },
+    "strong_accumulation": {
+        "label": "Strong",
+        "min_active_days": 5,
+        "min_cum_premium": 2_000_000,
+        "min_prem_mcap_bps": 3.0,
+        "min_consistency": 0.65,
+        "min_accel_t": 0.5,
+        "exclude_hedging": True,
+        "min_grade_rank": 4,                        # A- and above
+        "intro": "Names with unusual options activity on every day of the last 5, strongly one-sided, and still rising.",
+    },
+}
+
+# Use accumulation-mode weights for conviction scoring on every row (even
+# when the user picks "All" mode) so grades stay comparable across modes
+# and the accumulation signature always drives ranking.  The ladder (A+/A/
+# A-/B+/B/B-/C) is unchanged; this is a re-weighting within 0-10.
+#
+# Wave 0.5 A7: added `oi_change` (0.05) reclaimed from `mass` (0.10→0.05).
+# Open-interest change is a direct readout of whether positions were opened
+# vs closed and adds a structural-conviction signal that mass alone can't
+# capture.  Weights still sum to 1.0.
+FLOW_TRACKER_WEIGHTS_ACCUM = {
+    "persistence": 0.25,
+    "intensity":   0.20,
+    "consistency": 0.25,
+    "accel":       0.20,
+    "mass":        0.05,
+    "oi_change":   0.05,
+}
+FLOW_TRACKER_WEIGHTS_LEGACY = {
+    "persistence": 0.30,
+    "intensity":   0.30,
+    "consistency": 0.20,
+    "accel":       0.10,
+    "mass":        0.10,
+}
+
+# Wave 0.5 A1: dominant DTE bucket.  Labels are ordered by "near-term weak
+# structure" to "long-term commitment".  `0-7d` is the softest: short-term
+# lottery flow that resolves quickly and often in market-maker hedging
+# patterns — we apply a small haircut when the bucket dominates on
+# accumulation-mode rows.  `91+d` = LEAPs, softly boosted as structural.
+FLOW_TRACKER_DTE_BUCKETS = [
+    ("0-7",   0,   7,   0.90),   # bucket label, dte_min, dte_max, score_multiplier
+    ("8-30",  8,   30,  1.00),
+    ("31-90", 31,  90,  1.05),
+    ("91+",   91,  9999, 1.05),
+]
+
+# Wave 0.5 A6: require perc_3_day_total above this percentile for the
+# accumulation/strong-accumulation gates.  `perc_3_day_total` is UW's
+# normalized unusualness score (0..1) across the universe — values above
+# 0.70 mean "top 30% of unusual 3-day activity".
+FLOW_TRACKER_MIN_3D_PERCENTILE = 0.70
+
+# Wave 0.5 A3: when True, flow alert fetches include UW's
+# `size_greater_oi=true` flag so we only count prints that likely opened a
+# position (trade size > current OI).  Default OFF so behaviour is unchanged
+# until you explicitly cut over.
+FLOW_OPENING_ONLY = False
+
+# Wave 0.5 A4: window return pill thresholds.  Return is computed over the
+# tracker lookback window using snapshot closes.
+FLOW_TRACKER_RETURN_BONUS = 0.25   # score bonus when return aligns with direction
+FLOW_TRACKER_RETURN_DRAG = 0.25    # score drag when return is fighting direction
+
+# Wave 0.5 A8: dark-pool alignment bonus.  When DP flow direction agrees
+# with options flow direction AND DP notional is material (>3 bps of
+# market cap), we multiply the conviction score by (1 + bonus).  Max 0.30
+# (30% uplift) scaled by strength of alignment.
+DP_ALIGNMENT_MAX_BONUS = 0.30
+DP_ALIGNMENT_MIN_NOTIONAL_BPS = 3.0
+
 FLOW_TRACKER_ETF_EXCLUDE = {
     "SPY", "QQQ", "IWM", "DIA", "RSP",
     "GDX", "GDXJ", "GLD", "SLV", "AGQ",
@@ -142,6 +280,61 @@ EARNINGS_WARN_DAYS = 10       # badge threshold: "Earnings in X days"
 
 # Insider transactions
 INSIDER_BUY_BONUS = 0.3       # score bonus when insider buys align with direction
+
+# ──────────────────────────────────────────────────────────────────────────
+# Wave 8 — Risk Regime (market-aware sizing adjustments).
+#
+# Aggregates SPY-trend / VIX / VIX-term-structure / portfolio-heat / economic
+# calendar into a single multiplier that downstream sizing (trader-card
+# notional + structure-tab caveats) consumes.
+#
+# Tiers are ``calm`` / ``elevated`` / ``panic`` / ``halt`` — the multiplier
+# falls off geometrically so an ``elevated`` regime doubles the thinking
+# time before sizing up, while ``panic`` effectively stops new fresh
+# positions.
+# ──────────────────────────────────────────────────────────────────────────
+# VIX tiers driving the regime score.  Lower bound inclusive, upper exclusive.
+VIX_TIERS = [
+    ("calm",     0.0,  18.0, 1.00),
+    ("elevated", 18.0, 24.0, 0.75),
+    ("panic",    24.0, 35.0, 0.50),
+    ("halt",     35.0, 999.0, 0.25),
+]
+
+# SPY RSI bounds that flag overextension / oversold regimes.  Anything in
+# between is considered "in range".  Crossings trigger regime caveats.
+SPY_RSI_OVERBOUGHT = 70.0
+SPY_RSI_OVERSOLD = 30.0
+
+# Heat-based sizing checks.  Portfolio-wide risk % at which we start
+# halving (clamp) or halting (freeze) new risk.
+HEAT_CLAMP_PCT = 3.0
+HEAT_FREEZE_PCT = 5.0
+
+# Sector / direction concentration caps.  Checked against open positions +
+# proposed entry.  ``None`` disables the check.
+MAX_SAME_SECTOR = 3
+MAX_SAME_DIRECTION = 6
+
+# Event windows that flip us to halt regardless of other checks.  Values
+# in days (0 = today).
+HALT_ON_FOMC_WINDOW_DAYS = 1
+HALT_ON_CPI_WINDOW_DAYS = 1
+HALT_ON_NFP_WINDOW_DAYS = 1
+
+# VIX3M / VIX term-structure flag.  When VIX3M / VIX < threshold we're in
+# backwardation → risk-off.  ``None`` disables the check.
+VIX_BACKWARDATION_THRESHOLD = 1.0  # ratio below this = backwardation
+
+# Path to the hand-curated economic calendar (FOMC / CPI / NFP dates).
+# Kept out of source as a JSON blob to make it easy to update.
+ECONOMIC_CALENDAR_PATH = Path(__file__).resolve().parent / "data" / "economic_calendar.json"
+
+# Path used by the Wave 8 market-data cache.
+MARKET_INDICATORS_CACHE_PATH = (
+    Path(__file__).resolve().parents[1] / "data" / "market_indicators.json"
+)
+MARKET_INDICATORS_CACHE_TTL_HOURS = 12  # cache validity
 
 # Sentiment APIs (optional — gracefully skipped if missing)
 STOCKTWITS_API_KEY = os.environ.get("STOCKTWITS_API_KEY", "")

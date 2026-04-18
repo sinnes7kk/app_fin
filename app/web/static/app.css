@@ -1848,6 +1848,15 @@ dl.detail-grid dd {
   letter-spacing: 0.01em;
 }
 .ft-why-inline .ft-why-drag { color: rgba(255,180,80,0.85); }
+/* Wave 0.5 — context reasons: structural/narrative, no score contribution. */
+.ft-why-inline .ft-why-ctx-driver {
+  color: rgba(120,200,170,0.80);
+  border-bottom: 1px dotted rgba(120,200,170,0.40);
+}
+.ft-why-inline .ft-why-ctx-drag {
+  color: rgba(255,170,110,0.75);
+  border-bottom: 1px dotted rgba(255,170,110,0.35);
+}
 
 /* Avg |Δ| cell/metric shown next to conviction in tables */
 .ft-avg-delta {
@@ -1910,8 +1919,242 @@ dl.detail-grid dd {
   background: rgba(255,255,255,0.05);
 }
 .tc-dot.on { color: var(--good); background: rgba(63,185,80,0.2); }
+
+/* Wave 4 — composite Conviction Stack chip.  Replaces the old F/D/C/I
+   dot row with a single 0-100 score + tier label.  Full breakdown lives
+   in the tooltip so the chip itself stays scannable.  Tier colours:
+   elite = emerald · strong = teal · moderate = amber · weak = gray. */
+.tc-stack {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.12rem 0.45rem;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  font-family: var(--mono, ui-monospace, Menlo);
+  border: 1px solid transparent;
+}
+.tc-stack .tc-stack-label {
+  font-size: 0.58rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.75;
+}
+.tc-stack .tc-stack-score {
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+.tc-stack .tc-stack-tier {
+  font-size: 0.62rem;
+  padding: 0 0.25rem;
+  border-radius: 3px;
+  background: rgba(0,0,0,0.22);
+}
+.tc-stack-elite {
+  background: rgba(63,185,80,0.22);
+  color: #7bd3b3;
+  border-color: rgba(63,185,80,0.38);
+}
+.tc-stack-strong {
+  background: rgba(88,166,255,0.18);
+  color: #8ab6ff;
+  border-color: rgba(88,166,255,0.32);
+}
+.tc-stack-moderate {
+  background: rgba(255,152,0,0.16);
+  color: #ff9800;
+  border-color: rgba(255,152,0,0.26);
+}
+.tc-stack-weak {
+  background: rgba(255,255,255,0.05);
+  color: rgba(255,255,255,0.55);
+  border-color: rgba(255,255,255,0.10);
+}
+
+/* ── Wave 5 — Unusual Flow toolbar (sort/filter/opening-only) ── */
+.uf-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem 1.1rem;
+  align-items: center;
+  padding: 0.55rem 0.8rem;
+  margin: 0.6rem 0 0.85rem;
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 6px;
+  background: rgba(255,255,255,0.03);
+  font-size: 0.78rem;
+}
+.uf-tool {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: rgba(255,255,255,0.75);
+}
+.uf-tool-label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: rgba(255,255,255,0.55);
+  font-weight: 600;
+}
+.uf-tool input[type="search"],
+.uf-tool select {
+  background: rgba(255,255,255,0.05);
+  color: rgba(255,255,255,0.9);
+  border: 1px solid rgba(255,255,255,0.14);
+  border-radius: 4px;
+  padding: 0.18rem 0.45rem;
+  font-size: 0.78rem;
+  font-family: inherit;
+}
+.uf-tool input[type="search"]:focus,
+.uf-tool select:focus {
+  outline: 1px solid rgba(88,166,255,0.55);
+  border-color: rgba(88,166,255,0.55);
+}
+.uf-tool-toggle {
+  padding: 0.18rem 0.5rem;
+  border-radius: 4px;
+  background: rgba(88,166,255,0.08);
+  border: 1px solid rgba(88,166,255,0.18);
+  cursor: pointer;
+  user-select: none;
+}
+.uf-tool-toggle input[type="checkbox"] {
+  accent-color: #58a6ff;
+  margin: 0;
+}
+.uf-tool-help {
+  font-size: 0.7rem;
+  color: rgba(255,255,255,0.45);
+  cursor: help;
+}
+.uf-count {
+  margin-left: auto;
+  font-family: var(--mono, ui-monospace, Menlo);
+  font-size: 0.72rem;
+  color: rgba(255,255,255,0.55);
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   Wave 6 — Narrative bullets (Flow Tracker / Trader Card "Why?" tab)
+   ══════════════════════════════════════════════════════════════════ */
+.tc-narrative {
+  list-style: none;
+  padding: 0;
+  margin: 0.4rem 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+.tc-narrative-item {
+  display: flex;
+  gap: 0.7rem;
+  align-items: flex-start;
+  padding: 0.6rem 0.75rem;
+  border-radius: 6px;
+  background: rgba(255,255,255,0.03);
+  border-left: 3px solid rgba(255,255,255,0.15);
+  font-size: 0.85rem;
+  line-height: 1.45;
+}
+.tc-narrative-icon {
+  flex: 0 0 auto;
+  font-size: 0.95rem;
+  line-height: 1.4;
+  width: 1.1rem;
+  text-align: center;
+  font-weight: 700;
+  color: rgba(255,255,255,0.75);
+}
+.tc-narrative-body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.tc-narrative-label {
+  font-weight: 600;
+  color: rgba(255,255,255,0.92);
+}
+.tc-narrative-detail {
+  margin-top: 0.2rem;
+  font-size: 0.78rem;
+  color: rgba(255,255,255,0.62);
+  line-height: 1.5;
+}
+.tc-narrative--terse .tc-narrative-detail {
+  display: none;
+}
+
+/* Tone variants — border accent + icon colour.  Picked to match existing
+   badge colour vocabulary (grade A / bad / warn / info). */
+.tc-narrative-positive {
+  border-left-color: #3fb950;
+  background: rgba(63,185,80,0.07);
+}
+.tc-narrative-positive .tc-narrative-icon { color: #3fb950; }
+.tc-narrative-negative {
+  border-left-color: #f85149;
+  background: rgba(248,81,73,0.07);
+}
+.tc-narrative-negative .tc-narrative-icon { color: #f85149; }
+.tc-narrative-warning {
+  border-left-color: #ff9800;
+  background: rgba(255,152,0,0.07);
+}
+.tc-narrative-warning .tc-narrative-icon { color: #ffa726; }
+.tc-narrative-info {
+  border-left-color: #58a6ff;
+  background: rgba(88,166,255,0.07);
+}
+.tc-narrative-info .tc-narrative-icon { color: #58a6ff; }
+.tc-narrative-neutral {
+  border-left-color: rgba(255,255,255,0.25);
+  background: rgba(255,255,255,0.03);
+}
+.tc-narrative-neutral .tc-narrative-icon { color: rgba(255,255,255,0.55); }
+
+.tc-narrative-empty {
+  padding: 1rem;
+  background: rgba(255,255,255,0.03);
+  border-radius: 6px;
+  color: rgba(255,255,255,0.7);
+  font-size: 0.85rem;
+}
+
+.tc-narrative-controls {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 0.3rem;
+}
+.tc-narrative-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.2rem 0.55rem;
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 999px;
+  font-size: 0.72rem;
+  color: rgba(255,255,255,0.7);
+  cursor: pointer;
+  user-select: none;
+  background: rgba(255,255,255,0.03);
+}
+.tc-narrative-toggle:hover {
+  border-color: rgba(88,166,255,0.4);
+  color: rgba(255,255,255,0.9);
+}
+.tc-narrative-toggle input[type="checkbox"] {
+  accent-color: #58a6ff;
+  margin: 0;
+  width: 0.8rem;
+  height: 0.8rem;
+}
 .tc-catalyst-hot { background: rgba(248,81,73,0.2); color: var(--bad); padding: 0.1rem 0.35rem; border-radius: 3px; font-size: 0.65rem; font-weight: 600; }
 .tc-catalyst-warm { background: rgba(255,152,0,0.18); color: #ffa726; padding: 0.1rem 0.35rem; border-radius: 3px; font-size: 0.65rem; font-weight: 600; }
+.tc-catalyst { padding: 0.1rem 0.35rem; border-radius: 3px; font-size: 0.65rem; font-weight: 600; letter-spacing: 0.02em; }
 
 .tc-liq { padding: 0.1rem 0.4rem; border-radius: 3px; font-size: 0.65rem; font-weight: 600; letter-spacing: 0.04em; }
 .tc-liq-deep    { background: rgba(63,185,80,0.18); color: var(--good); }
@@ -1977,6 +2220,77 @@ dl.detail-grid dd {
 .tc-sess-strong { background: rgba(63,185,80,0.15); color: var(--good); }
 .tc-sess-weak   { background: rgba(248,81,73,0.18); color: var(--bad); }
 .tc-sess-flat   { background: rgba(255,255,255,0.05); color: var(--muted); }
+
+/* ── Wave 2 — dealer hedge bias + pin-risk chips ──
+   Surfaced on the trader card's context row next to IVR, session, RS. */
+.tc-dealer {
+  padding: 0.08rem 0.4rem;
+  border-radius: 3px;
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+.tc-dealer-suppress {
+  background: rgba(123,211,179,0.14);
+  color: #7bd3b3;
+  border: 1px solid rgba(123,211,179,0.22);
+}
+.tc-dealer-chase {
+  background: rgba(255,152,0,0.14);
+  color: #ff9800;
+  border: 1px solid rgba(255,152,0,0.22);
+}
+.tc-pin {
+  padding: 0.08rem 0.4rem;
+  border-radius: 3px;
+  background: rgba(138,92,246,0.12);
+  color: #c4b5fd;
+  font-size: 0.66rem;
+  font-weight: 600;
+  font-family: var(--mono, ui-monospace, Menlo);
+}
+
+/* Wave 2 — IV rank 5d delta badge (inline next to the IVR number). */
+.tc-iv-delta {
+  margin-left: 0.25rem;
+  padding: 0 0.25rem;
+  border-radius: 3px;
+  font-size: 0.6rem;
+  font-weight: 700;
+  font-family: var(--mono, ui-monospace, Menlo);
+}
+.tc-iv-delta-up { background: rgba(248,81,73,0.18); color: #f87171; }
+.tc-iv-delta-dn { background: rgba(63,185,80,0.15); color: #7bd3b3; }
+
+/* Wave 2 — intraday 2h repeat-flow acceleration chips on Flow Tracker rows.
+   Rendered alongside the multi-day Accelerating/Fading/Steady pill. */
+.tc-accel {
+  font-family: var(--mono, ui-monospace, Menlo);
+  letter-spacing: 0.02em;
+}
+.tc-accel-up { background: rgba(63,185,80,0.18); color: #7bd3b3; }
+.tc-accel-dn { background: rgba(248,81,73,0.18); color: #f87171; }
+
+/* Wave 2 — DP z-tier chip on multi-day dark-pool cards.  Hot (positive
+   z) = today's DP notional is unusually high for this ticker; cold
+   (negative) = unusually low.  Tier label (z30 / shrunk / peer) hints at
+   statistical confidence. */
+.badge.dp-z-tier {
+  font-family: var(--mono, ui-monospace, Menlo);
+  font-size: 0.65rem;
+  letter-spacing: 0.02em;
+  font-weight: 600;
+}
+.badge.dp-z-tier.dp-z-hot {
+  background: rgba(255,152,0,0.18);
+  color: #ff9800;
+  border: 1px solid rgba(255,152,0,0.26);
+}
+.badge.dp-z-tier.dp-z-cold {
+  background: rgba(79,195,247,0.14);
+  color: #4fc3f7;
+  border: 1px solid rgba(79,195,247,0.22);
+}
 .tc-rs { font-size: 0.66rem; font-family: var(--mono, ui-monospace, Menlo); }
 .tc-pos { color: var(--good); }
 .tc-neg { color: var(--bad); }
@@ -2065,6 +2379,167 @@ dl.detail-grid dd {
 }
 .ft-social > summary:hover { color: var(--text); }
 
+/* Wave 1 — "More metrics" disclosure on Flow Tracker cards.  Folds the
+   lower-priority secondary metrics (vol, IV, PCR, DP detail, chain detail,
+   insider detail) under a click-to-open summary so the above-the-fold
+   card stays scannable. */
+.ft-more-metrics {
+  margin-top: 0.15rem;
+}
+.ft-more-metrics > summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 0.7rem;
+  letter-spacing: 0.04em;
+  padding: 0.3rem 0.2rem;
+  border-top: 1px dashed rgba(255,255,255,0.06);
+  margin-top: 0.3rem;
+  user-select: none;
+  list-style: none;
+}
+.ft-more-metrics > summary::marker { content: ""; }
+.ft-more-metrics > summary::-webkit-details-marker { display: none; }
+.ft-more-metrics > summary::before {
+  content: "▸ ";
+  color: rgba(230,237,243,0.45);
+  display: inline-block;
+  transition: transform 0.12s ease;
+}
+.ft-more-metrics[open] > summary::before {
+  content: "▾ ";
+}
+.ft-more-metrics > summary:hover { color: var(--text); }
+.ft-more-metrics > dl.card-metrics {
+  margin-top: 0.25rem;
+}
+
+/* ── Wave 1 — "Now What" hero strip ──
+   Three actionable cards at the top of the Flow Tracker panel answering
+   "what should I look at right now": top conviction, hottest sector,
+   cleanest ready-to-trade setup.  Each card anchors back to its detail
+   row below and carries a tooltip explaining its rule. */
+.ft-hero-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 0.7rem;
+  margin-bottom: 1rem;
+}
+.ft-hero-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.75rem 0.85rem;
+  background: linear-gradient(135deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01));
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  text-decoration: none;
+  color: var(--text);
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+  position: relative;
+  overflow: hidden;
+}
+.ft-hero-card::before {
+  content: "";
+  position: absolute; top: 0; left: 0; bottom: 0;
+  width: 3px;
+  background: var(--accent, #4fc3f7);
+  opacity: 0.85;
+}
+.ft-hero-top::before { background: #7bd3b3; }
+.ft-hero-sector::before { background: #ffb05c; }
+.ft-hero-setup::before { background: #4fc3f7; }
+.ft-hero-setup-fallback::before { background: rgba(230,237,243,0.25); }
+.ft-hero-empty::before { background: rgba(230,237,243,0.15); }
+
+a.ft-hero-card:hover {
+  background: linear-gradient(135deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02));
+  border-color: rgba(255,255,255,0.18);
+  transform: translateY(-1px);
+}
+.ft-hero-empty { opacity: 0.65; }
+
+.ft-hero-label {
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(230,237,243,0.5);
+}
+.ft-hero-headline {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.ft-hero-ticker,
+.ft-hero-sector-name {
+  font-size: 1.1rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+.ft-hero-grade {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  padding: 0.15rem 0.4rem;
+  border-radius: 4px;
+  background: rgba(255,255,255,0.06);
+}
+.ft-hero-grade-Aplus { background: rgba(123,211,179,0.22); color: #9fe6c5; }
+.ft-hero-grade-A      { background: rgba(123,211,179,0.16); color: #7bd3b3; }
+.ft-hero-grade-Aminus { background: rgba(123,211,179,0.10); color: #7bd3b3; }
+.ft-hero-grade-Bplus  { background: rgba(79,195,247,0.14); color: #7bc4e0; }
+.ft-hero-grade-B      { background: rgba(79,195,247,0.10); color: #6fb4d0; }
+.ft-hero-grade-Bminus { background: rgba(255,176,92,0.14); color: #e8a86a; }
+.ft-hero-grade-C      { background: rgba(248,81,73,0.14); color: #f2877e; }
+
+.ft-hero-sub {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  font-size: 0.78rem;
+  color: rgba(230,237,243,0.78);
+}
+.ft-hero-dir {
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  padding: 0.1rem 0.4rem;
+  border-radius: 3px;
+}
+.ft-hero-dir-bull { background: rgba(63,185,80,0.18); color: #6fd97a; }
+.ft-hero-dir-bear { background: rgba(248,81,73,0.18); color: #f48379; }
+.ft-hero-sector,
+.ft-hero-reason {
+  opacity: 0.85;
+}
+.ft-hero-reason { opacity: 0.6; font-size: 0.74rem; }
+.ft-hero-tag {
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  padding: 0.1rem 0.35rem;
+  border-radius: 3px;
+  background: rgba(255,255,255,0.06);
+  color: rgba(230,237,243,0.85);
+}
+.ft-hero-tag-warn { background: rgba(255,152,0,0.18); color: #ff9800; }
+.ft-hero-tk-link {
+  color: rgba(230,237,243,0.88);
+  text-decoration: none;
+  font-weight: 600;
+  padding: 0.05rem 0.25rem;
+  border-radius: 3px;
+  background: rgba(255,255,255,0.04);
+}
+.ft-hero-tk-link:hover { background: rgba(255,255,255,0.1); color: var(--text); }
+.ft-hero-empty-msg {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: rgba(230,237,243,0.5);
+}
+
 /* ── Positions R-at-market + heat + stop-proximity tinting ── */
 .pos-r-market {
   font-size: 0.7rem;
@@ -2087,3 +2562,578 @@ dl.detail-grid dd {
 .data-card.stop-warn { border-left: 3px solid var(--warn); }
 .data-card.stop-danger { border-left: 3px solid var(--bad); box-shadow: inset 2px 0 0 rgba(248,81,73,0.15); }
 .data-card.stop-ok {}
+
+/* ───────── Flow Tracker — Wave 0 (Accumulation-first filtering) ───────── */
+
+/* Mode toggle row (Strong / Accumulation / All) with live funnel counts. */
+.ft-mode-toggle-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem 1.25rem;
+  margin: 0.25rem 0 0.9rem;
+}
+.ft-mode-toggle {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  background: rgba(255,255,255,0.02);
+}
+.ft-mode-btn {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: rgba(230,237,243,0.65);
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  padding: 0.4rem 0.9rem;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+  border-right: 1px solid var(--border);
+}
+.ft-mode-btn:last-child { border-right: 0; }
+.ft-mode-btn:hover { background: rgba(255,255,255,0.04); color: var(--text); }
+.ft-mode-btn.active {
+  background: rgba(88,166,255,0.14);
+  color: #9ec1ff;
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+/* Wave 0.5 C1 — horizon toggle ([5d][15d]). Mirrors the mode toggle visually
+   but is anchor-based since it triggers a server-side re-compute. */
+.ft-horizon-toggle {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  background: rgba(255,255,255,0.02);
+  margin-left: 0.5rem;
+}
+.ft-horizon-btn {
+  display: inline-block;
+  color: rgba(230,237,243,0.65);
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  padding: 0.4rem 0.75rem;
+  text-decoration: none;
+  border-right: 1px solid var(--border);
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.ft-horizon-btn:last-child { border-right: 0; }
+.ft-horizon-btn:hover { background: rgba(255,255,255,0.04); color: var(--text); }
+.ft-horizon-btn-active {
+  background: rgba(120,200,170,0.14);
+  color: #7bd3b3;
+  box-shadow: inset 0 -2px 0 rgba(120,200,170,0.55);
+}
+.ft-funnel-counts {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.72rem;
+  color: rgba(230,237,243,0.55);
+  font-variant-numeric: tabular-nums;
+}
+.ft-funnel-counts .ft-funnel-label {
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  opacity: 0.75;
+  margin-right: 0.15rem;
+}
+.ft-funnel-counts .ft-funnel-sep { opacity: 0.35; }
+.ft-funnel-counts .ft-funnel-window { opacity: 0.6; }
+
+.ft-mode-label {
+  display: inline;
+  margin-left: 0.3rem;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #9ec1ff;
+}
+
+/* Auto-widen notice (shown when selected mode returns < AUTO_WIDEN_MIN). */
+.ft-auto-widen-notice {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 0 0 0.9rem;
+  padding: 0.55rem 0.8rem;
+  border-radius: 6px;
+  border: 1px solid rgba(255,200,120,0.25);
+  background: rgba(255,200,120,0.06);
+  color: rgba(255,220,180,0.9);
+  font-size: 0.76rem;
+}
+.ft-auto-widen-notice .ft-lock-btn {
+  appearance: none;
+  border: 1px solid rgba(255,200,120,0.35);
+  background: transparent;
+  color: rgba(255,220,180,0.95);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  padding: 0.2rem 0.55rem;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+.ft-auto-widen-notice .ft-lock-btn:hover { background: rgba(255,200,120,0.12); }
+
+/* Accumulation score chip (0-100) rendered next to the grade badge. */
+.tc-accum-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  padding: 0.2rem 0.45rem;
+  border-radius: 3px;
+  border: 1px solid transparent;
+  margin-left: 0.2rem;
+  font-variant-numeric: tabular-nums;
+}
+.tc-accum-chip.tc-accum-high {
+  background: rgba(63,185,80,0.18);
+  color: #5fd872;
+  border-color: rgba(63,185,80,0.35);
+}
+.tc-accum-chip.tc-accum-mid {
+  background: rgba(255,152,0,0.14);
+  color: #ffb453;
+  border-color: rgba(255,152,0,0.30);
+}
+.tc-accum-chip.tc-accum-low {
+  background: rgba(255,255,255,0.05);
+  color: rgba(230,237,243,0.55);
+  border-color: rgba(255,255,255,0.08);
+}
+
+/* Wave 0.5 A1 — DTE bucket chip (shares shape with ACC chip). */
+.tc-dte-chip {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  padding: 0.18rem 0.4rem;
+  border-radius: 3px;
+  border: 1px solid transparent;
+  margin-left: 0.2rem;
+  font-variant-numeric: tabular-nums;
+}
+.tc-dte-chip.tc-dte-short {       /* 0-7d: softened */
+  background: rgba(255,152,0,0.10);
+  color: #f0a85a;
+  border-color: rgba(255,152,0,0.25);
+}
+.tc-dte-chip.tc-dte-std {         /* 8-30d: neutral */
+  background: rgba(255,255,255,0.04);
+  color: rgba(230,237,243,0.70);
+  border-color: rgba(255,255,255,0.08);
+}
+.tc-dte-chip.tc-dte-mid {         /* 31-90d: boosted */
+  background: rgba(63,185,80,0.12);
+  color: #7fc58a;
+  border-color: rgba(63,185,80,0.30);
+}
+.tc-dte-chip.tc-dte-long {        /* 91+d: strongly boosted */
+  background: rgba(63,185,80,0.20);
+  color: #5fd872;
+  border-color: rgba(63,185,80,0.40);
+}
+
+/* Wave 0.5 A4 — window-return pill. */
+.tc-ret-chip {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  padding: 0.18rem 0.4rem;
+  border-radius: 3px;
+  border: 1px solid transparent;
+  margin-left: 0.2rem;
+  font-variant-numeric: tabular-nums;
+}
+.tc-ret-chip.tc-ret-aligned {
+  background: rgba(63,185,80,0.14);
+  color: #5fd872;
+  border-color: rgba(63,185,80,0.30);
+}
+.tc-ret-chip.tc-ret-fight {
+  background: rgba(255,80,80,0.14);
+  color: #ff7f7f;
+  border-color: rgba(255,80,80,0.30);
+}
+
+/* Wave 0.5 C2 — z-tier confidence chip.  Tier 1 (z30) = solid blue, tier 2
+   (shrunk) = muted blue, tier 3 (peer) = amber warning, tier 4 (abs) = red
+   caveat-emptor. */
+.tc-ztier {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  padding: 0.14rem 0.36rem;
+  border-radius: 3px;
+  border: 1px solid transparent;
+  margin-left: 0.2rem;
+  font-variant-numeric: tabular-nums;
+  text-transform: lowercase;
+}
+.tc-ztier.tc-ztier-full {
+  background: rgba(88,166,255,0.14);
+  color: #9ec1ff;
+  border-color: rgba(88,166,255,0.30);
+}
+.tc-ztier.tc-ztier-shrunk {
+  background: rgba(88,166,255,0.08);
+  color: rgba(158,193,255,0.75);
+  border-color: rgba(88,166,255,0.20);
+}
+.tc-ztier.tc-ztier-peer {
+  background: rgba(255,152,0,0.10);
+  color: #f0a85a;
+  border-color: rgba(255,152,0,0.25);
+}
+.tc-ztier.tc-ztier-abs {
+  background: rgba(255,80,80,0.10);
+  color: #ff9090;
+  border-color: rgba(255,80,80,0.25);
+}
+
+/* Wave 0.5 C3 — sector accumulation cluster chip. */
+.tc-sector-chip {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.64rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  padding: 0.16rem 0.4rem;
+  border-radius: 3px;
+  margin-left: 0.2rem;
+  background: rgba(120,200,170,0.10);
+  color: #7bd3b3;
+  border: 1px solid rgba(120,200,170,0.22);
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   Wave 7 — Structure recommendation ladder (Trader Card / Flow
+   Tracker "Structure" tab).  Primary card on top, alternatives in a
+   grid, avoid list, caveats at the bottom.  Tones follow the same
+   colour vocabulary as .tc-narrative-*.
+   ══════════════════════════════════════════════════════════════════ */
+.tc-rec-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  margin-top: 0.4rem;
+}
+.tc-rec-kicker {
+  font-size: 0.66rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: rgba(255,255,255,0.5);
+  margin-bottom: 0.3rem;
+  display: block;
+}
+.tc-rec-kicker-warn { color: #ffa726; }
+.tc-rec-kicker-neg { color: #f85149; }
+
+.tc-rec-primary {
+  padding: 0.85rem 1rem;
+  border-radius: 8px;
+  background: rgba(255,255,255,0.03);
+  border-left: 4px solid rgba(255,255,255,0.25);
+}
+.tc-rec-primary .tc-rec-label {
+  font-size: 1.02rem;
+  font-weight: 700;
+  color: rgba(255,255,255,0.95);
+  display: inline-block;
+  margin-left: 0.4rem;
+}
+.tc-rec-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 0.2rem;
+}
+.tc-rec-heading .tc-rec-kicker {
+  margin-bottom: 0;
+}
+.tc-rec-rationale {
+  margin-top: 0.35rem;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  color: rgba(255,255,255,0.72);
+}
+
+.tc-rec-alts-wrap,
+.tc-rec-avoid-wrap,
+.tc-rec-caveats-wrap,
+.tc-rec-sizing {
+  display: block;
+}
+.tc-rec-alts {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 0.55rem;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+.tc-rec-alt {
+  padding: 0.6rem 0.75rem;
+  border-radius: 6px;
+  background: rgba(255,255,255,0.03);
+  border-left: 3px solid rgba(255,255,255,0.18);
+}
+.tc-rec-alt .tc-rec-label {
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: rgba(255,255,255,0.92);
+}
+.tc-rec-alt .tc-rec-rationale {
+  font-size: 0.78rem;
+  margin-top: 0.25rem;
+  color: rgba(255,255,255,0.62);
+}
+
+/* Tone variants mirror .tc-narrative-*. */
+.tc-rec-positive { border-left-color: #3fb950; background: rgba(63,185,80,0.07); }
+.tc-rec-negative { border-left-color: #f85149; background: rgba(248,81,73,0.07); }
+.tc-rec-warning  { border-left-color: #ff9800; background: rgba(255,152,0,0.07); }
+.tc-rec-info     { border-left-color: #58a6ff; background: rgba(88,166,255,0.07); }
+.tc-rec-neutral  { border-left-color: rgba(255,255,255,0.25); background: rgba(255,255,255,0.03); }
+
+.tc-rec-avoid {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.tc-rec-avoid-item {
+  font-size: 0.82rem;
+  padding: 0.35rem 0.6rem;
+  border-radius: 4px;
+  background: rgba(248,81,73,0.07);
+  border-left: 3px solid rgba(248,81,73,0.5);
+  color: rgba(255,255,255,0.82);
+}
+.tc-rec-avoid-label {
+  font-weight: 600;
+  color: #ff8b85;
+}
+.tc-rec-avoid-reason {
+  color: rgba(255,255,255,0.65);
+  font-size: 0.8rem;
+}
+
+.tc-rec-caveats {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.tc-rec-caveat {
+  font-size: 0.82rem;
+  padding: 0.35rem 0.6rem;
+  border-radius: 4px;
+  background: rgba(255,152,0,0.07);
+  border-left: 3px solid rgba(255,152,0,0.4);
+  color: rgba(255,255,255,0.85);
+  line-height: 1.5;
+}
+
+.tc-rec-empty {
+  padding: 1rem;
+  background: rgba(255,255,255,0.03);
+  border-radius: 6px;
+  color: rgba(255,255,255,0.7);
+  font-size: 0.85rem;
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   Wave 8 — Sizing context block inside Structure tab.  Tone based on
+   regime tier (green/amber/red/halt).
+   ══════════════════════════════════════════════════════════════════ */
+.tc-rec-sizing {
+  padding: 0.75rem 0.9rem;
+  border-radius: 6px;
+  border-left: 4px solid rgba(255,255,255,0.2);
+  background: rgba(255,255,255,0.03);
+}
+.tc-rec-sizing-calm,
+.tc-rec-sizing-green {
+  border-left-color: #3fb950;
+  background: rgba(63,185,80,0.06);
+}
+.tc-rec-sizing-elevated,
+.tc-rec-sizing-amber {
+  border-left-color: #ff9800;
+  background: rgba(255,152,0,0.06);
+}
+.tc-rec-sizing-panic,
+.tc-rec-sizing-red {
+  border-left-color: #f85149;
+  background: rgba(248,81,73,0.06);
+}
+.tc-rec-sizing-halt {
+  border-left-color: #b000b0;
+  background: rgba(176,0,176,0.08);
+  color: rgba(255,180,255,0.9);
+}
+.tc-rec-sizing-line {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.6rem;
+}
+.tc-rec-sizing-label {
+  font-weight: 700;
+  font-size: 0.95rem;
+  color: rgba(255,255,255,0.92);
+}
+.tc-rec-sizing-mult {
+  font-size: 0.8rem;
+  opacity: 0.75;
+  font-variant-numeric: tabular-nums;
+}
+.tc-rec-sizing-checks {
+  list-style: none;
+  padding: 0;
+  margin: 0.6rem 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.tc-rec-sizing-check {
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: rgba(255,255,255,0.8);
+}
+.tc-rec-check-label {
+  font-weight: 600;
+  color: rgba(255,255,255,0.92);
+}
+.tc-rec-check-detail {
+  color: rgba(255,255,255,0.6);
+}
+.tc-rec-check-positive .tc-rec-check-label { color: #6ddc82; }
+.tc-rec-check-warning  .tc-rec-check-label { color: #ffb547; }
+.tc-rec-check-negative .tc-rec-check-label { color: #ff8b85; }
+.tc-rec-check-info     .tc-rec-check-label { color: #85b7ff; }
+
+/* ══════════════════════════════════════════════════════════════════
+   Wave 8 — Action-bar regime pill + expandable checks panel.
+   Replaces the inline VIX / sizing / heat triad with a single status
+   chip users can click to see the underlying checks.
+   ══════════════════════════════════════════════════════════════════ */
+.ab-regime-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+  border: 1px solid transparent;
+  background: rgba(255,255,255,0.06);
+  color: rgba(255,255,255,0.85);
+  transition: filter 0.1s ease-in-out;
+}
+.ab-regime-pill:hover { filter: brightness(1.15); }
+.ab-regime-pill.ab-regime-calm,
+.ab-regime-pill.ab-regime-green {
+  background: rgba(63,185,80,0.12);
+  color: #a5efb7;
+  border-color: rgba(63,185,80,0.35);
+}
+.ab-regime-pill.ab-regime-elevated,
+.ab-regime-pill.ab-regime-amber {
+  background: rgba(255,152,0,0.12);
+  color: #ffce85;
+  border-color: rgba(255,152,0,0.35);
+}
+.ab-regime-pill.ab-regime-panic,
+.ab-regime-pill.ab-regime-red {
+  background: rgba(248,81,73,0.15);
+  color: #ffa9a3;
+  border-color: rgba(248,81,73,0.45);
+}
+.ab-regime-pill.ab-regime-halt {
+  background: rgba(176,0,176,0.18);
+  color: #ffbdff;
+  border-color: rgba(176,0,176,0.55);
+}
+.ab-regime-details {
+  margin-top: 0.3rem;
+  padding: 0.55rem 0.75rem;
+  background: rgba(255,255,255,0.04);
+  border-radius: 6px;
+  display: none;
+}
+.ab-regime-details[data-open="1"] { display: block; }
+.ab-riskregime.open .ab-regime-details { display: block; }
+.ab-regime-details ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.78rem;
+}
+
+/* Wave 8 — Trader Card regime chip.  Hidden in the calm + ×1.00 state
+   (see _regime_chip macro), so these styles only fire when something is
+   worth flagging.  Click-through opens the Structure tab for the full
+   checks list. */
+.tc-regime {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.12rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  border: 1px solid transparent;
+  background: rgba(255,255,255,0.06);
+}
+.tc-regime .tc-regime-mult { opacity: 0.85; font-weight: 500; }
+.tc-regime-calm {
+  background: rgba(47,165,90,0.12);
+  color: #8ddca4;
+  border-color: rgba(47,165,90,0.35);
+}
+.tc-regime-elevated {
+  background: rgba(216,154,0,0.14);
+  color: #ffcb6b;
+  border-color: rgba(216,154,0,0.45);
+}
+.tc-regime-panic {
+  background: rgba(248,81,73,0.15);
+  color: #ffa9a3;
+  border-color: rgba(248,81,73,0.45);
+}
+.tc-regime-halt {
+  background: rgba(176,0,176,0.18);
+  color: #ffbdff;
+  border-color: rgba(176,0,176,0.55);
+}

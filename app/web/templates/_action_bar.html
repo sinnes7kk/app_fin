@@ -9,6 +9,35 @@
     <span class="ab-sub">{{ ab.regime_label }}</span>
   </div>
 
+  {# Wave 8 — Risk-regime pill.  Condenses VIX + term + SPY RSI + heat +
+     concentration + macro calendar into a single coloured chip.  Clicking
+     the pill expands a check-list so the trader can see exactly why the
+     regime is where it is. #}
+  {% if ab.risk_regime_summary %}
+  <div class="ab-item ab-riskregime">
+    <span class="ab-label">Risk Regime</span>
+    <button type="button"
+            class="ab-regime-pill ab-regime-{{ ab.risk_regime_summary.tier }}"
+            data-ab-regime-toggle
+            title="Click for the full checks list.{% if ab.risk_regime_summary.halt_reason %} HALT: {{ ab.risk_regime_summary.halt_reason }}{% endif %}">
+      {{ ab.risk_regime_summary.label }}
+      <span class="ab-sub" style="font-weight:500;opacity:0.8;margin-left:0.35rem">×{{ "%.2f"|format(ab.risk_regime_summary.multiplier) }}</span>
+    </button>
+    {% if ab.risk_regime and ab.risk_regime.checks %}
+    <div class="ab-regime-details" data-ab-regime-panel>
+      <ul>
+        {% for c in ab.risk_regime.checks %}
+        <li class="tc-rec-sizing-check tc-rec-check-{{ c.tone }}">
+          <span class="tc-rec-check-label">{{ c.label }}</span>
+          {% if c.detail %}<span class="tc-rec-check-detail"> — {{ c.detail }}</span>{% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+  </div>
+  {% endif %}
+
   <div class="ab-item ab-spy">
     <span class="ab-label">SPY</span>
     <span class="ab-value {{ 'ab-pos' if (ab.spy_pct_today or 0) >= 0 else 'ab-neg' }}">

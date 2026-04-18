@@ -19,8 +19,12 @@ from flask import Flask, jsonify, render_template, request
 from app.config import (
     DP_TRACKER_LOOKBACK_DAYS,
     DP_TRACKER_MIN_ACTIVE_DAYS,
+    FLOW_TRACKER_AUTO_WIDEN_MIN,
+    FLOW_TRACKER_HORIZON_DEFAULT,
+    FLOW_TRACKER_HORIZONS,
     FLOW_TRACKER_LOOKBACK_DAYS,
     FLOW_TRACKER_MIN_ACTIVE_DAYS,
+    FLOW_TRACKER_MODE_DEFAULT,
     MIN_FINAL_SCORE,
     REGIME_THRESHOLD_BOOST,
 )
@@ -33,6 +37,7 @@ from app.features.decision_context import (
     suggest_expression,
     enrich_signal,
 )
+from app.features.dp_stats import attach_dp_z_tiers
 from app.features.dark_pool_tracker import (
     aggregate_daily_accumulated,
     aggregate_dark_pool_prints,
@@ -296,6 +301,68 @@ def _prem_mcap_label(bps) -> tuple[str, str]:
     return ("Minor", "")
 
 
+def _enrich_flow_tracker_ztier(flow_tracker: list[dict]) -> list[dict]:
+    """Attach rolling z-score tiers from the latest flow_features snapshot.
+
+    Reads ``data/flow_features/flow_features_*.csv`` (one file per pipeline
+    run) and joins ``bullish_zscore_tier`` / ``bearish_zscore_tier`` onto
+    each tracker row keyed by ticker.  Picks the worst (numerically highest)
+    tier on the traded side so the UI chip reflects the weakest baseline
+    behind the score.  Wave 0.5 C2.
+    """
+    if not flow_tracker:
+        return flow_tracker
+
+    try:
+        from app.web.data_access import load_flow_features
+        from app.features.flow_stats import TIER_LABELS
+
+        ff, _name = load_flow_features()
+        if ff is None or ff.empty or "ticker" not in ff.columns:
+            return flow_tracker
+
+        keep_cols = ["ticker"]
+        for c in ("bullish_zscore_tier", "bearish_zscore_tier"):
+            if c in ff.columns:
+                keep_cols.append(c)
+        ff = ff[keep_cols].copy()
+        ff["ticker"] = ff["ticker"].astype(str).str.upper().str.strip()
+        ff = ff.drop_duplicates(subset=["ticker"], keep="last")
+        by_t: dict[str, dict] = {row["ticker"]: row for _, row in ff.iterrows()}
+
+        for ft in flow_tracker:
+            row = by_t.get(str(ft.get("ticker", "")).upper().strip())
+            if row is None:
+                ft["z_tier"] = None
+                ft["z_tier_label"] = None
+                continue
+
+            direction = str(ft.get("direction") or "").upper()
+            tier_int: int | None = None
+            if direction == "BULLISH":
+                val = row.get("bullish_zscore_tier")
+            elif direction == "BEARISH":
+                val = row.get("bearish_zscore_tier")
+            else:
+                # Unknown direction → pick the worst of the two.
+                vals = [row.get("bullish_zscore_tier"), row.get("bearish_zscore_tier")]
+                vals = [v for v in vals if v is not None and not pd.isna(v)]
+                val = max(vals) if vals else None
+
+            if val is not None and not pd.isna(val):
+                try:
+                    tier_int = int(val)
+                except (TypeError, ValueError):
+                    tier_int = None
+
+            ft["z_tier"] = tier_int
+            ft["z_tier_label"] = TIER_LABELS.get(tier_int) if tier_int is not None else None
+    except Exception as e:
+        print(f"  [flow-tracker] z-tier enrichment skipped: {e}")
+
+    return flow_tracker
+
+
 def _enrich_flow_tracker_sentiment(flow_tracker: list[dict]) -> list[dict]:
     """Merge sentiment trend data into each Flow Tracker ticker dict."""
     if not flow_tracker:
@@ -364,6 +431,34 @@ def _enrich_flow_tracker_dp(
         else:
             ft["dp_aligned"] = False
             ft["dp_divergent"] = False
+
+        # Wave 0.5 A8 — dark-pool alignment bonus.  Options flow + dark pool
+        # pointing the same way is institutional conviction you rarely see
+        # without a catalyst; multiply conviction_score by (1 + bonus) capped
+        # at DP_ALIGNMENT_MAX_BONUS and scaled by |bias - 0.5| × notional.
+        from app.config import DP_ALIGNMENT_MAX_BONUS, DP_ALIGNMENT_MIN_NOTIONAL_BPS
+
+        bonus = 0.0
+        if ft.get("dp_aligned"):
+            notional_bps = float(dp.get("notional_mcap_bps") or 0.0)
+            if notional_bps >= DP_ALIGNMENT_MIN_NOTIONAL_BPS:
+                # Strength: notional coverage (saturating at 20 bps) × bias conviction.
+                notional_strength = min(notional_bps / 20.0, 1.0)
+                bias_strength = min(abs(float(dp_bias) - 0.5) / 0.30, 1.0)
+                bonus = DP_ALIGNMENT_MAX_BONUS * notional_strength * bias_strength
+        ft["dp_alignment_bonus"] = round(bonus, 3)
+
+        if bonus > 0 and "conviction_score" in ft:
+            original = float(ft["conviction_score"])
+            boosted = round(original * (1.0 + bonus), 1)
+            ft["conviction_score"] = boosted
+            ft["_dp_boost_delta"] = round(boosted - original, 1)
+            # Re-grade with the boosted score so the UI badge stays coherent.
+            try:
+                from app.features.grade_explainer import conviction_grade
+                ft["conviction_grade"] = conviction_grade(boosted)
+            except Exception:
+                pass
 
     return flow_tracker
 
@@ -543,12 +638,70 @@ def _inject_tooltips(html: str) -> str:
     return html
 
 
-def _df_to_detail_json(df: pd.DataFrame) -> list[dict]:
-    """Convert a DataFrame to a list of dicts suitable for JSON serialization."""
+def _df_to_detail_json(
+    df: pd.DataFrame,
+    *,
+    risk_regime: dict | None = None,
+) -> list[dict]:
+    """Convert a DataFrame to a list of dicts suitable for JSON serialization.
+
+    Wave 6 — every detail row is additionally decorated with
+    ``conviction_stack`` and ``narrative`` so the Trader Card modal's
+    "Why?" tab has prose to render.
+
+    Wave 8 — also attaches ``sizing_context`` to the trade_structure
+    payload so the Structure tab's modal shows the regime checks and
+    HALT caveats identically to the Flow Tracker rows.
+    """
     if df.empty:
         return []
     rounded = _round_floats(df)
-    return rounded.fillna("").to_dict(orient="records")
+    rows = rounded.fillna("").to_dict(orient="records")
+
+    try:
+        from app.features.conviction_stack import compute_conviction_stack
+    except Exception:
+        compute_conviction_stack = None  # type: ignore[assignment]
+    try:
+        from app.features.flow_narrative import build_flow_feature_narrative
+    except Exception:
+        build_flow_feature_narrative = None  # type: ignore[assignment]
+    try:
+        from app.features.trade_structure import recommend_structure
+    except Exception:
+        recommend_structure = None  # type: ignore[assignment]
+    try:
+        from app.web.view_models import attach_sizing_context
+    except Exception:
+        attach_sizing_context = None  # type: ignore[assignment]
+
+    for r in rows:
+        if compute_conviction_stack is not None:
+            try:
+                r["conviction_stack"] = compute_conviction_stack(r)
+            except Exception:
+                r.setdefault("conviction_stack", None)
+        if build_flow_feature_narrative is not None:
+            try:
+                r["narrative"] = build_flow_feature_narrative(r)
+            except Exception:
+                r.setdefault("narrative", [])
+        if recommend_structure is not None:
+            try:
+                r["trade_structure"] = recommend_structure(r)
+            except Exception:
+                r.setdefault("trade_structure", None)
+        if attach_sizing_context is not None and risk_regime is not None:
+            try:
+                r["trade_structure"] = attach_sizing_context(
+                    r.get("trade_structure"), risk_regime
+                )
+            except Exception:
+                pass
+    return rows
+
+
+
 
 
 def _enrich_watchlist_from_rejected(
@@ -1130,6 +1283,33 @@ def _alerts_card_fragments(df: pd.DataFrame) -> list[str]:
             if ev is not None and str(ev).strip()
             else ""
         )
+        # Wave 5 — client-side sort/filter keys.  Strings because
+        # ``_data_card_article`` will attribute-escape them and we
+        # parse them back to numbers in JS.  Timestamp we coerce to
+        # an ISO string for lexical sort parity with datetime ordering.
+        try:
+            _prem_f = float(_row_scalar(row, "premium") or 0) or 0.0
+        except (TypeError, ValueError):
+            _prem_f = 0.0
+        try:
+            _bps_f = float(mcap_bps) if mcap_bps is not None else float("nan")
+        except (TypeError, ValueError):
+            _bps_f = float("nan")
+        try:
+            _dte_f = float(_row_scalar(row, "dte") or 0) or 0.0
+        except (TypeError, ValueError):
+            _dte_f = 0.0
+        _dir = str(row.get("direction") or "").upper().strip()
+        _ot = str(ot or "").upper().strip()
+        filter_attrs = {
+            "uf-ticker": t,
+            "uf-direction": _dir,
+            "uf-option-type": _ot,
+            "uf-premium": f"{_prem_f:.2f}",
+            "uf-bps": "" if _bps_f != _bps_f else f"{_bps_f:.4f}",
+            "uf-event-ts": str(ev or ""),
+            "uf-dte": f"{_dte_f:.0f}",
+        }
         out.append(
             _data_card_article(
                 t,
@@ -1137,6 +1317,8 @@ def _alerts_card_fragments(df: pd.DataFrame) -> list[str]:
                 metrics_html=metrics,
                 extra_html=ev_p,
                 clickable=False,
+                filter_attrs=filter_attrs,
+                extra_card_cls="uf-card",
             )
         )
     return out
@@ -1631,6 +1813,26 @@ def _build_action_bar(
         hr = int(round((a.get("hit_rate") or 0) * 100))
         grade_stats_line = f"{hr}% hit · {a.get('avg_r'):+.1f}R · n={a['count']}"
 
+    # Wave 8 — compute the richer Risk Regime payload (VIX term, SPY RSI,
+    # macro calendar, heat, concentration).  Falls back to the legacy VIX
+    # multiplier when market indicators aren't available so the rest of
+    # the Action Bar keeps rendering unchanged.
+    risk_regime_payload = None
+    try:
+        from app.features.market_indicators import fetch_market_indicators
+        from app.features.risk_regime import compute_risk_regime, summarise_for_ui
+
+        mi = fetch_market_indicators()
+        risk_regime_payload = compute_risk_regime(
+            market_indicators=mi,
+            positions=positions,
+            heat_pct=heat_pct,
+        )
+        risk_regime_summary = summarise_for_ui(risk_regime_payload)
+    except Exception:
+        risk_regime_payload = None
+        risk_regime_summary = None
+
     return {
         "regime_score": rs,
         "regime_cls": regime_cls,
@@ -1647,6 +1849,9 @@ def _build_action_bar(
         "new_a_grades": new_a_grades,
         "grade_stats_line": grade_stats_line,
         "zscore_caveat_line": zscore_caveat_line,
+        # Wave 8 — full regime payload + condensed pill summary.
+        "risk_regime": risk_regime_payload,
+        "risk_regime_summary": risk_regime_summary,
     }
 
 
@@ -1742,12 +1947,206 @@ def _enrich_flow_tracker_delta(
     return rows
 
 
-def _enrich_flow_tracker_decision(rows: list[dict]) -> list[dict]:
+def _build_flow_tracker_hero(rows: list[dict]) -> dict | None:
+    """Compute the Wave 1 "Now What" 3-card hero strip.
+
+    Returns a dict with three entries (``top``, ``sector``, ``setup``) or
+    ``None`` if the tracker is empty.  Each card carries enough info for
+    the UI to render a headline + 1-2 supporting lines and to link back to
+    the detailed Flow Tracker card via anchor.
+
+    The three picks are:
+      * **top**    — highest ``conviction_score`` row (regardless of mode).
+      * **sector** — the ``(sector, direction)`` pair with the most
+                     accumulating rows.  Tie-break on cumulative premium.
+      * **setup**  — most "ready to trade" row: passes the Strong gate,
+                     DP-aligned, price action aligned with flow, IV rank
+                     moderate (≤65, i.e. options not overpriced), no
+                     earnings within 5 days.  Falls back to the top row
+                     when no candidate satisfies all clauses.
+    """
+    if not rows:
+        return None
+
+    # ── Card 1: highest conviction.
+    top = max(rows, key=lambda r: float(r.get("conviction_score", 0) or 0))
+
+    # ── Card 2: hottest sector cluster.
+    from collections import defaultdict
+    sector_groups: dict[tuple[str, str], list[dict]] = defaultdict(list)
+
+    def _sector_key(v) -> str:
+        # NaN/None-safe sector bucket so NaN floats don't create orphan groups.
+        if v is None:
+            return "—"
+        try:
+            import math
+            if isinstance(v, float) and math.isnan(v):
+                return "—"
+        except Exception:
+            pass
+        s = str(v).strip()
+        return s if s and s.lower() != "nan" else "—"
+
+    for r in rows:
+        if r.get("passes_accumulation"):
+            key = (_sector_key(r.get("sector")), str(r.get("direction") or ""))
+            sector_groups[key].append(r)
+    # Drop the "—" bucket; a cluster of unknown-sector rows isn't a signal.
+    sector_groups.pop(("—", "BULLISH"), None)
+    sector_groups.pop(("—", "BEARISH"), None)
+    sector_card = None
+    if sector_groups:
+        best_key, best_rows = max(
+            sector_groups.items(),
+            key=lambda kv: (
+                len(kv[1]),
+                sum(float(x.get("cumulative_premium", 0) or 0) for x in kv[1]),
+            ),
+        )
+        if len(best_rows) >= 2:  # Only meaningful when there's an actual cluster.
+            sector_card = {
+                "sector": best_key[0],
+                "direction": best_key[1],
+                "count": len(best_rows),
+                "tickers": [x["ticker"] for x in sorted(
+                    best_rows,
+                    key=lambda x: float(x.get("conviction_score", 0) or 0),
+                    reverse=True,
+                )[:4]],
+                "total_premium": sum(float(x.get("cumulative_premium", 0) or 0) for x in best_rows),
+            }
+
+    # ── Card 3: cleanest swing setup.
+    def _ready_to_trade(r: dict) -> bool:
+        if not r.get("passes_strong"):
+            return False
+        if not r.get("dp_aligned"):
+            return False
+        ret = r.get("window_return_pct")
+        direction = str(r.get("direction") or "").upper()
+        aligned = False
+        if ret is not None:
+            aligned = (direction == "BULLISH" and ret > 0) or (direction == "BEARISH" and ret < 0)
+        if not aligned:
+            return False
+        iv_rank = r.get("latest_iv_rank")
+        if iv_rank is not None:
+            try:
+                if float(iv_rank) > 65:
+                    return False
+            except (TypeError, ValueError):
+                pass
+        earnings = r.get("earnings") or {}
+        dte = earnings.get("days_until_earnings")
+        if dte is not None:
+            try:
+                if 0 <= float(dte) <= 5:
+                    return False
+            except (TypeError, ValueError):
+                pass
+        return True
+
+    ready = [r for r in rows if _ready_to_trade(r)]
+    setup_row = max(ready, key=lambda r: float(r.get("conviction_score", 0) or 0)) if ready else None
+    setup_fallback = setup_row is None and top is not None
+
+    # Assemble compact per-card payloads keyed by what the template needs.
+    def _clean(v):
+        # NaN-safe stringify so Jinja doesn't render literal "nan".
+        if v is None:
+            return None
+        try:
+            import math
+            if isinstance(v, float) and math.isnan(v):
+                return None
+        except Exception:
+            pass
+        s = str(v).strip()
+        return None if (not s or s.lower() == "nan") else s
+
+    def _compact(r: dict) -> dict:
+        reasons = r.get("grade_reasons") or []
+        top_reason = None
+        for rr in reasons:
+            if rr.get("kind") == "driver":
+                top_reason = rr.get("label")
+                break
+        if top_reason is None and reasons:
+            top_reason = reasons[0].get("label")
+        return {
+            "ticker": r.get("ticker"),
+            "direction": r.get("direction"),
+            "sector": _clean(r.get("sector")) or "—",
+            "conviction_score": r.get("conviction_score"),
+            "conviction_grade": r.get("conviction_grade"),
+            "accumulation_score": r.get("accumulation_score"),
+            "window_return_pct": r.get("window_return_pct"),
+            "dp_aligned": bool(r.get("dp_aligned")),
+            "dp_bias": (r.get("dp") or {}).get("bias") if isinstance(r.get("dp"), dict) else None,
+            "iv_rank": r.get("latest_iv_rank"),
+            "top_reason": _clean(top_reason),
+            "earnings_in": ((r.get("earnings") or {}).get("days_until_earnings")),
+        }
+
+    return {
+        "top": _compact(top) if top else None,
+        "sector": sector_card,
+        "setup": _compact(setup_row) if setup_row else (_compact(top) if setup_fallback and top else None),
+        "setup_is_fallback": bool(setup_fallback),
+    }
+
+
+def _build_flow_tracker(
+    *,
+    lookback_days: int,
+    min_active_days: int,
+    flow: pd.DataFrame,
+    hottest_chains_by_ticker: dict[str, dict],
+    insider_by_ticker: dict[str, dict],
+    risk_regime: dict | None = None,
+) -> list[dict]:
+    """Compute + enrich a Flow Tracker list for a given horizon.
+
+    Wraps the multi-stage enrichment chain (sentiment → DP → chains →
+    insider → earnings → delta → z-tier → decision) so the server can
+    produce separate datasets for each horizon in ``FLOW_TRACKER_HORIZONS``
+    without code duplication.  Wave 0.5 C1 / C2.
+
+    Wave 8 — ``risk_regime`` is threaded through to the decision enricher
+    so every row's ``trade_structure`` payload carries the current sizing
+    context and HALT caveats.
+    """
+    base = compute_multi_day_flow(lookback_days, min_active_days)
+    if not base:
+        return base
+    dp_tracker = compute_multi_day_dp(DP_TRACKER_LOOKBACK_DAYS, DP_TRACKER_MIN_ACTIVE_DAYS)
+    rows = _enrich_flow_tracker_sentiment(base)
+    rows = _enrich_flow_tracker_dp(rows, dp_tracker)
+    rows = _enrich_flow_tracker_chains(rows, hottest_chains_by_ticker)
+    rows = _enrich_flow_tracker_insider(rows, insider_by_ticker)
+    rows = _enrich_flow_tracker_earnings(rows)
+    rows = _enrich_flow_tracker_delta(rows, flow)
+    rows = _enrich_flow_tracker_ztier(rows)
+    rows = _enrich_flow_tracker_decision(rows, risk_regime=risk_regime)
+    return rows
+
+
+def _enrich_flow_tracker_decision(
+    rows: list[dict],
+    *,
+    risk_regime: dict | None = None,
+) -> list[dict]:
     """Attach liquidity tier + trade-expression hint to every Flow Tracker row.
 
     Flow Tracker rows lack entry/stop plans so we can't produce full trader
     cards, but the liquidity + expression badges are still decision-critical.
+
+    Wave 4 also attaches the composite ``conviction_stack`` (0-100) so the
+    card chip replaces the legacy F/D/C/I dot row.
     """
+    from app.features.conviction_stack import compute_conviction_stack
+
     for r in rows:
         ticker = r.get("ticker")
         if not ticker:
@@ -1766,6 +2165,43 @@ def _enrich_flow_tracker_decision(rows: list[dict]) -> list[dict]:
             dte,
             adv_dollar=r["liquidity"].get("adv_dollar"),
         )
+
+        try:
+            r["conviction_stack"] = compute_conviction_stack(r)
+        except Exception:
+            r["conviction_stack"] = None
+
+        # Wave 6 — attach natural-language narrative bullets so the Flow
+        # Tracker modal's "Why?" tab can render without another trip
+        # through the data.  Kept server-side so tests can assert on the
+        # payload shape.
+        try:
+            from app.features.flow_narrative import build_flow_tracker_narrative
+            r["narrative"] = build_flow_tracker_narrative(r)
+        except Exception:
+            r["narrative"] = []
+
+        # Wave 7 — attach structure recommendation so the Flow Tracker
+        # "Structure" tab can render a ranked trade-expression ladder
+        # (primary + alternatives + avoid + caveats) without another
+        # round trip through the pipeline.
+        try:
+            from app.features.trade_structure import recommend_structure
+            r["trade_structure"] = recommend_structure(r)
+        except Exception:
+            r["trade_structure"] = None
+
+        # Wave 8 — decorate the structure payload with the current risk
+        # regime's sizing context so the Flow Tracker's Structure tab can
+        # render the regime checks and any HALT caveat inline.
+        if risk_regime is not None:
+            try:
+                from app.web.view_models import attach_sizing_context
+                r["trade_structure"] = attach_sizing_context(
+                    r.get("trade_structure"), risk_regime
+                )
+            except Exception:
+                pass
     return rows
 
 
@@ -2156,6 +2592,15 @@ def index():
     flow, flow_src = load_flow_features()
     regime = load_market_regime()
 
+    # Wave 0.5 C1 — selected horizon (?horizon=5d|15d).  Invalid keys fall
+    # back to the default; the raw param (if any) is kept so the template
+    # can pre-select the toggle button without re-parsing.
+    _horizon_param = (request.args.get("horizon") or "").strip().lower()
+    if _horizon_param in FLOW_TRACKER_HORIZONS:
+        active_horizon = _horizon_param
+    else:
+        active_horizon = FLOW_TRACKER_HORIZON_DEFAULT
+
     # Filter out trivial rejections that never reached full price scoring.
     _TRIVIAL_PREFIXES = ("weak_bullish_flow", "weak_bearish_flow",
                          "trend_not_aligned", "price_over_extended", "error:",
@@ -2233,8 +2678,19 @@ def index():
 
     alerts_raw = pd.DataFrame()
     alerts_error = ""
+    # Wave 5 — allow the initial server render to honour a deep-linked
+    # ``?opening_only=1`` so bookmarked / shared views stay consistent
+    # with the client-side toggle.
+    _oo_raw = request.args.get("opening_only")
+    alerts_opening_only = (
+        None if _oo_raw is None else str(_oo_raw).strip().lower() in {"1", "true", "yes", "on"}
+    )
     try:
-        alerts_raw = fetch_recent_alert_flow(limit=150, hours_back=24)
+        alerts_raw = fetch_recent_alert_flow(
+            limit=150,
+            hours_back=24,
+            opening_only=alerts_opening_only,
+        )
     except Exception as e:
         alerts_error = str(e)
     alerts = _alerts_subset(alerts_raw)
@@ -2256,6 +2712,32 @@ def index():
         )
 
     # Build top flow intensity summary from pipeline flow features (aggregated by ticker)
+    # Wave 5 — augment each row with:
+    #   • conviction_stack chip (from `app.features.conviction_stack`)
+    #   • dealer_hedge_bias / pin_risk_distance_pct (from signals enrichment)
+    #   • days_until_earnings as a coarse "catalyst" proxy (Wave-3 news chip
+    #     was cancelled; earnings is the cheap, always-available signal).
+    # The signals DataFrame is already loaded a few hundred lines up and
+    # carries dealer + pin + earnings columns via pipeline.save_screener.
+    _tf_ctx_lookup: dict[str, dict] = {}
+    if "signals" in dir() and hasattr(signals, "to_dict"):
+        try:
+            _sig_rows = signals.to_dict(orient="records") if not signals.empty else []
+        except Exception:
+            _sig_rows = []
+        for _sr in _sig_rows:
+            _t = str(_sr.get("ticker") or "").strip().upper()
+            if not _t or _t in _tf_ctx_lookup:
+                continue
+            _tf_ctx_lookup[_t] = {
+                "dealer_hedge_bias": _sr.get("dealer_hedge_bias"),
+                "dealer_hedge_label": _sr.get("dealer_hedge_label"),
+                "pin_risk_strike": _sr.get("pin_risk_strike"),
+                "pin_risk_distance_pct": _sr.get("pin_risk_distance_pct"),
+                "pin_risk_concentration": _sr.get("pin_risk_concentration"),
+                "days_until_earnings": _sr.get("days_until_earnings"),
+            }
+
     top_flow: list[dict] = []
     if not flow.empty:
         _tf = flow.copy()
@@ -2293,6 +2775,40 @@ def index():
                     reasons = build_flow_grade_reasons(r.to_dict(), side=side)
                 except Exception:
                     reasons = []
+
+                _tk = str(r.get("ticker") or "").strip().upper()
+                _ctx = _tf_ctx_lookup.get(_tk, {}) or {}
+
+                # Wave 5 — compose a dict rich enough for the conviction
+                # stack to give a meaningful score even without the full
+                # candidate enrichment (dark_pool / hot_chain live on the
+                # candidate rows, not here, so stack will lean on flow_core
+                # + dealer_regime on top_flow rows; that's expected).
+                _stack_in = {
+                    "direction": "LONG" if is_bull else "SHORT",
+                    "flow_score_scaled": flow_score_10,
+                    "dealer_hedge_bias": _ctx.get("dealer_hedge_bias"),
+                }
+                try:
+                    from app.features.conviction_stack import compute_conviction_stack as _cs
+                    _stack = _cs(_stack_in)
+                except Exception:
+                    _stack = None
+
+                # "Catalyst" = earnings in the next 2 weeks.  News/congress
+                # chips (Wave-3) were cancelled; earnings is what we already
+                # fetch for free.
+                _due = _ctx.get("days_until_earnings")
+                try:
+                    _due_f = float(_due) if _due is not None else None
+                except (TypeError, ValueError):
+                    _due_f = None
+                _catalyst_label = None
+                _catalyst_tone = None
+                if _due_f is not None and 0 <= _due_f <= 14:
+                    _catalyst_label = f"ER {int(_due_f)}d"
+                    _catalyst_tone = "hot" if _due_f <= 5 else "warm"
+
                 top_flow.append({
                     "ticker": r.get("ticker", "?"),
                     "direction": "LONG" if is_bull else "SHORT",
@@ -2307,6 +2823,15 @@ def index():
                     "avg_delta": round(avg_delta_val, 3) if avg_delta_val else 0.0,
                     "delta_source_mix": round(source_mix_val, 3) if source_mix_val is not None else None,
                     "grade_reasons": reasons,
+                    # ── Wave 5 chips ─────────────────────────────────
+                    "conviction_stack": _stack,
+                    "dealer_hedge_bias": _ctx.get("dealer_hedge_bias"),
+                    "dealer_hedge_label": _ctx.get("dealer_hedge_label"),
+                    "pin_risk_distance_pct": _ctx.get("pin_risk_distance_pct"),
+                    "pin_risk_concentration": _ctx.get("pin_risk_concentration"),
+                    "days_until_earnings": _due_f,
+                    "catalyst_label": _catalyst_label,
+                    "catalyst_tone": _catalyst_tone,
                 })
 
     perf = _compute_performance()
@@ -2356,9 +2881,17 @@ def index():
 
     # "Trades to Take Now" — top 5 fresh signals not in book or watchlist.
     _vix_mult = (regime or {}).get("vix_sizing_mult")
+    # Wave 8 — pull the freshly-computed risk_regime payload off the
+    # action bar so Trader Cards layer the regime multiplier on top of
+    # VIX sizing and expose the sizing-context block inside the
+    # Structure tab.  Re-used below to decorate Flow Tracker rows.
+    _risk_regime_for_tracker = (
+        action_bar_ctx.get("risk_regime") if isinstance(action_bar_ctx, dict) else None
+    )
     actionable_now = build_trader_card_rows(
         _actionable_now(signals, positions, watchlist, limit=5),
         vix_sizing_mult=float(_vix_mult) if _vix_mult else None,
+        risk_regime=_risk_regime_for_tracker,
     )
 
     pp = TABLE_PAGE_SIZE
@@ -2382,6 +2915,17 @@ def index():
     _insider_raw = load_insider_recent()
     _insider_by_ticker = classify_insider_activity(_insider_raw) if _insider_raw else {}
 
+    # Wave 1 — compute tracker rows once (needed both for the main list
+    # and for the "Now What" 3-card hero strip at the top of the panel).
+    _flow_tracker_rows = _build_flow_tracker(
+        lookback_days=FLOW_TRACKER_HORIZONS[active_horizon]["lookback_days"],
+        min_active_days=FLOW_TRACKER_HORIZONS[active_horizon]["min_active_days"],
+        flow=flow,
+        hottest_chains_by_ticker=_hottest_chains_by_ticker,
+        insider_by_ticker=_insider_by_ticker,
+        risk_regime=_risk_regime_for_tracker,
+    )
+
     ctx = {
         "rejected_html": _paginate_card_fragments(
             _rejected_card_fragments(rejected_sorted),
@@ -2391,7 +2935,7 @@ def index():
             empty_msg="No near misses.",
         ),
         "rejected_src": rejected_src,
-        "rejected_detail": _df_to_detail_json(rejected_top),
+        "rejected_detail": _df_to_detail_json(rejected_top, risk_regime=_risk_regime_for_tracker),
         "total_rejected_count": total_rejected_count,
         "watchlist_detail": watchlist,
         "bull_html": _paginate_card_fragments(
@@ -2402,7 +2946,7 @@ def index():
             empty_msg="No bullish candidates.",
         ),
         "bull_src": bull_src,
-        "bull_detail": _df_to_detail_json(bull),
+        "bull_detail": _df_to_detail_json(bull, risk_regime=_risk_regime_for_tracker),
         "bear_html": _paginate_card_fragments(
             _candidates_card_fragments(bear, clickable=True),
             page=page_bear,
@@ -2411,7 +2955,7 @@ def index():
             empty_msg="No bearish candidates.",
         ),
         "bear_src": bear_src,
-        "bear_detail": _df_to_detail_json(bear),
+        "bear_detail": _df_to_detail_json(bear, risk_regime=_risk_regime_for_tracker),
         "near_html": _paginate_card_fragments(
             _candidates_card_fragments(
                 near_df,
@@ -2425,7 +2969,7 @@ def index():
             page_param="page_near",
             empty_msg="No candidates near threshold.",
         ),
-        "near_detail": _df_to_detail_json(near_df),
+        "near_detail": _df_to_detail_json(near_df, risk_regime=_risk_regime_for_tracker),
         "near_threshold_long": round(_near_long_min, 1),
         "near_threshold_short": round(_near_short_min, 1),
         "positions_html": _paginate_card_fragments(
@@ -2452,6 +2996,9 @@ def index():
         ),
         "alerts_html": alerts_html,
         "alerts_count": len(alerts),
+        # Wave 5 — reflect the current opening-only state into the template
+        # so the UI toggle can hydrate with the right checked state.
+        "alerts_opening_only": bool(alerts_opening_only) if alerts_opening_only is not None else False,
         "top_flow": top_flow,
         "table_page_size": pp,
         "perf": perf,
@@ -2478,43 +3025,38 @@ def index():
             empty_msg="No agent portfolio positions. Agent portfolio populates once the OpenAI API key is configured and agents run.",
         ),
         "perf_agent": perf_agent,
-        # Multi-day flow tracker enriched with sentiment + dark pool + chains + insider + earnings + delta + decision context
-        "flow_tracker": _enrich_flow_tracker_decision(
-            _enrich_flow_tracker_delta(
-                _enrich_flow_tracker_earnings(
-                    _enrich_flow_tracker_insider(
-                        _enrich_flow_tracker_chains(
-                            _enrich_flow_tracker_dp(
-                                _enrich_flow_tracker_sentiment(
-                                    compute_multi_day_flow(FLOW_TRACKER_LOOKBACK_DAYS, FLOW_TRACKER_MIN_ACTIVE_DAYS)
-                                ),
-                                compute_multi_day_dp(DP_TRACKER_LOOKBACK_DAYS, DP_TRACKER_MIN_ACTIVE_DAYS),
-                            ),
-                            _hottest_chains_by_ticker,
-                        ),
-                        _insider_by_ticker,
-                    )
-                ),
-                flow,
-            )
-        ),
+        # Multi-day flow tracker enriched with sentiment + dark pool + chains + insider + earnings + delta + decision context.
+        # Wave 0.5 C1 — respects ?horizon=5d|15d on the URL.  Server-side
+        # selection keeps the payload small and sidesteps the double-compute
+        # cost of pre-building every horizon on every pageload.
+        "flow_tracker": _flow_tracker_rows,
+        "flow_tracker_active_horizon": active_horizon,
+        "flow_tracker_horizons_config": FLOW_TRACKER_HORIZONS,
+        "flow_tracker_hero": _build_flow_tracker_hero(_flow_tracker_rows),
         # Trader dashboard decision surfaces
         "ab": action_bar_ctx,
         "actionable_now": actionable_now,
         "grade_stats": grade_stats,
         "grade_stats_header": grade_stats_header,
-        "flow_tracker_lookback": FLOW_TRACKER_LOOKBACK_DAYS,
+        "flow_tracker_lookback": FLOW_TRACKER_HORIZONS[active_horizon]["lookback_days"],
+        "flow_tracker_mode_default": FLOW_TRACKER_MODE_DEFAULT,
+        "flow_tracker_auto_widen_min": FLOW_TRACKER_AUTO_WIDEN_MIN,
         # Market-wide dark pool screener (single-day)
         "dark_pool_screener": _build_dark_pool_screener(flow),
         # Daily accumulated dark pool (deduped across all intra-day scans)
         "dp_daily": _build_daily_accumulated_dp(flow),
-        # Multi-day dark pool tracker (enriched with chains + insider)
-        "dp_tracker": _enrich_flow_tracker_insider(
-            _enrich_flow_tracker_chains(
-                compute_multi_day_dp(DP_TRACKER_LOOKBACK_DAYS, DP_TRACKER_MIN_ACTIVE_DAYS),
-                _hottest_chains_by_ticker,
-            ),
-            _insider_by_ticker,
+        # Multi-day dark pool tracker (enriched with chains + insider + z-tier).
+        # Wave 2 — attach_dp_z_tiers decorates each row with a per-ticker 30d
+        # z-tier on today's notional so the UI can flag "genuinely unusual
+        # for THIS name" vs "normal DP activity".
+        "dp_tracker": attach_dp_z_tiers(
+            _enrich_flow_tracker_insider(
+                _enrich_flow_tracker_chains(
+                    compute_multi_day_dp(DP_TRACKER_LOOKBACK_DAYS, DP_TRACKER_MIN_ACTIVE_DAYS),
+                    _hottest_chains_by_ticker,
+                ),
+                _insider_by_ticker,
+            )
         ),
         "dp_tracker_lookback": DP_TRACKER_LOOKBACK_DAYS,
         # Hottest chains screener
@@ -2531,13 +3073,27 @@ def api_alerts():
 
     hours = int(request.args.get("hours", 24))
     limit = min(int(request.args.get("limit", 150)), 300)
+    # Wave 5 — opening-only toggle.  Accepts 1/0, true/false, yes/no.
+    # ``None`` (unset) preserves the existing behaviour dictated by the
+    # module-wide ``FLOW_OPENING_ONLY`` config flag.
+    oo_raw = request.args.get("opening_only")
+    opening_only: bool | None
+    if oo_raw is None:
+        opening_only = None
+    else:
+        opening_only = str(oo_raw).strip().lower() in {"1", "true", "yes", "on"}
     try:
-        df = fetch_recent_alert_flow(limit=limit, hours_back=hours)
+        df = fetch_recent_alert_flow(
+            limit=limit,
+            hours_back=hours,
+            opening_only=opening_only,
+        )
         sub = _alerts_subset(df)
         return jsonify(
             {
                 "ok": True,
                 "count": len(sub),
+                "opening_only": bool(opening_only) if opening_only is not None else None,
                 "rows": sub.fillna("").to_dict(orient="records"),
             }
         )
@@ -2676,10 +3232,8 @@ def api_scan_ticker():
                         "bearish_scaled": _sf(row.get("bearish_score", 0) * 10),
                         "bullish_premium": _sf(row.get("bullish_premium", 0)),
                         "bearish_premium": _sf(row.get("bearish_premium", 0)),
-                        # Retired — populated post-enrichment as 0.0 for back-compat.
-                        "flow_velocity": _sf(row.get("flow_velocity", 0)),
-                        # Replaces flow_velocity. Populated by _enrich_net_prem_ticks
-                        # on signal records; 0.0 on raw feature-table rows.
+                        # Populated by _enrich_net_prem_ticks on signal records;
+                        # 0.0 on raw feature-table rows.
                         "directional_momentum": _sf(row.get("directional_momentum", 0), 4),
                         "directional_momentum_pts": _sf(row.get("directional_momentum_pts", 0), 2),
                         "bullish_flow_intensity": _sf(row.get("bullish_flow_intensity", 0), 4),

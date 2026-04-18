@@ -168,11 +168,12 @@ def test_tracker_reasons_ranks_persistence_first_when_dominant():
     }
     reasons = build_tracker_grade_reasons(row)
     assert reasons
-    # persistence (1.0 * 0.30 = 3.0 pts) beats intensity (0.3 * 0.30 = 0.9 pts)
-    # and consistency (0.5 * 0.20 = 1.0 pts); mass (0.6 * 0.10 = 0.6 pts).
-    # Expected driver order: persistence, consistency, intensity
+    # Under Wave 0.5 A7 weights (persistence=0.25, intensity=0.20,
+    # consistency=0.25, acceleration=0.20, mass=0.05, oi_change=0.05):
+    # persistence = 1.0 * 0.25 * 10 = 2.5 pts — still the top driver since
+    # consistency = 0.5 * 0.25 * 10 = 1.25 and intensity = 0.3 * 0.20 * 10 = 0.6.
     assert reasons[0]["component"] == "persistence"
-    assert reasons[0]["points"] == 3.0
+    assert reasons[0]["points"] == 2.5
 
 
 def test_tracker_reasons_empty_row_returns_empty():

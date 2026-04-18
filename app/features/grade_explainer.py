@@ -212,12 +212,16 @@ def build_flow_grade_reasons(
 # ---------------------------------------------------------------------------
 
 # Mirrors the composite in app.features.flow_tracker.compute_multi_day_flow.
+# Wave 0.5 A7 — weights mirror FLOW_TRACKER_WEIGHTS_ACCUM so reason
+# contributions match the actual scoring path.  `oi_change` is the new 0.05
+# component reclaimed from mass; other weights unchanged from Wave 0.
 _TRACKER_WEIGHTS: dict[str, float] = {
-    "persistence": 0.30,
-    "intensity":   0.30,
-    "consistency": 0.20,
-    "acceleration": 0.10,
-    "mass":        0.10,
+    "persistence":  0.25,
+    "intensity":    0.20,
+    "consistency":  0.25,
+    "acceleration": 0.20,
+    "mass":         0.05,
+    "oi_change":    0.05,
 }
 
 _TRACKER_LABELS: dict[str, str] = {
@@ -226,6 +230,7 @@ _TRACKER_LABELS: dict[str, str] = {
     "consistency":  "Directional consistency",
     "acceleration": "Acceleration",
     "mass":         "Premium mass",
+    "oi_change":    "Open-interest build",
 }
 
 
@@ -239,7 +244,11 @@ def build_tracker_grade_reasons(
 
     Expects the row to carry the intermediate normalized inputs used by
     ``compute_multi_day_flow`` (``persistence_ratio``, ``_intensity_norm``,
-    ``_consistency_norm``, ``_accel_norm``, ``_mass_norm``).
+    ``_consistency_norm``, ``_accel_norm``, ``_mass_norm``,
+    ``_oi_change_norm``).  Also consumes optional structural inputs
+    (``sweep_share``, ``multileg_share``, ``dominant_dte_bucket``,
+    ``window_return_pct``, ``direction``) to surface Wave 0.5 context
+    reasons when they materially alter conviction.
     """
     components: dict[str, float | None] = {
         "persistence":  _coerce_ratio(row.get("persistence_ratio")),
@@ -247,6 +256,7 @@ def build_tracker_grade_reasons(
         "consistency":  _coerce_ratio(row.get("_consistency_norm")),
         "acceleration": _coerce_ratio(row.get("_accel_norm")),
         "mass":         _coerce_ratio(row.get("_mass_norm")),
+        "oi_change":    _coerce_ratio(row.get("_oi_change_norm")),
     }
 
     contribs: list[tuple[str, float]] = []
@@ -295,7 +305,71 @@ def build_tracker_grade_reasons(
                     "component": comp,
                 })
 
-    return drivers + drags
+    # ------------------------------------------------------------------
+    # Wave 0.5 — structural context reasons (non-component).  These don't
+    # affect the 0-10 score but colour the narrative: structure quality
+    # (sweep/multileg), DTE bucket, window-return alignment.  Only added
+    # when meaningfully above/below the noise floor.
+    # ------------------------------------------------------------------
+    context: list[dict[str, Any]] = []
+
+    # Context reasons share the {label, points, kind, component} shape so
+    # templates iterating over grade_reasons stay uniform.  points=0.0 means
+    # "no direct score contribution — context only".
+    def _ctx(label: str, kind: str, component: str) -> dict[str, Any]:
+        return {"label": label, "points": 0.0, "kind": kind, "component": component}
+
+    sweep_share = _coerce_ratio(row.get("sweep_share"))
+    if sweep_share is not None:
+        if sweep_share >= 0.50:
+            context.append(_ctx(
+                f"Sweep-heavy ({sweep_share*100:.0f}% of trades)",
+                "context-driver", "sweep_share",
+            ))
+        elif sweep_share <= 0.05 and sweep_share > 0:
+            context.append(_ctx(
+                "Few sweeps (flow may be positioning, not urgent)",
+                "context-drag", "sweep_share",
+            ))
+
+    multileg = _coerce_ratio(row.get("multileg_share"))
+    if multileg is not None and multileg >= 0.30:
+        context.append(_ctx(
+            f"Spread-heavy ({multileg*100:.0f}% multileg) — structured bets",
+            "context-drag", "multileg_share",
+        ))
+
+    dte = str(row.get("dominant_dte_bucket") or "")
+    if dte == "0-7":
+        context.append(_ctx(
+            "Weekly (0-7d) flow — lottery / hedging-prone",
+            "context-drag", "dte_bucket",
+        ))
+    elif dte in ("31-90", "91+"):
+        context.append(_ctx(
+            f"{dte}d flow — structural commitment",
+            "context-driver", "dte_bucket",
+        ))
+
+    try:
+        ret = float(row.get("window_return_pct") or 0.0)
+    except (TypeError, ValueError):
+        ret = 0.0
+    direction = str(row.get("direction") or "").upper()
+    if abs(ret) >= 1.0 and direction in ("BULLISH", "BEARISH"):
+        aligned = (direction == "BULLISH" and ret > 0) or (direction == "BEARISH" and ret < 0)
+        if aligned:
+            context.append(_ctx(
+                f"Price up {ret:+.1f}% confirms flow" if direction == "BULLISH" else f"Price down {ret:+.1f}% confirms flow",
+                "context-driver", "window_return",
+            ))
+        else:
+            context.append(_ctx(
+                f"Price {ret:+.1f}% fighting flow — chase risk",
+                "context-drag", "window_return",
+            ))
+
+    return drivers + drags + context
 
 
 def _coerce_ratio(val: Any) -> float | None:
