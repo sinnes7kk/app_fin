@@ -1659,3 +1659,335 @@ dl.detail-grid dd {
   .search-scores-grid,
   .search-details-grid { grid-template-columns: 1fr; }
 }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   TRADER DASHBOARD OVERHAUL
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* ── Global Action Bar ── */
+.action-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem 1.1rem;
+  align-items: center;
+  padding: 0.55rem 0.9rem;
+  margin: 0 0 1rem 0;
+  background: linear-gradient(180deg, rgba(56,139,253,0.07), rgba(255,255,255,0.01));
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-size: 0.78rem;
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  backdrop-filter: blur(6px);
+}
+.ab-item {
+  display: flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  white-space: nowrap;
+}
+.ab-label {
+  color: var(--muted);
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.ab-value {
+  font-weight: 700;
+  font-size: 0.9rem;
+}
+.ab-sub {
+  color: var(--muted);
+  font-size: 0.7rem;
+}
+.ab-pos { color: var(--good); }
+.ab-neg { color: var(--bad); }
+.ab-warn { color: var(--warn); }
+.ab-mute { color: var(--muted); }
+.ab-bull { color: var(--good); }
+.ab-bear { color: var(--bad); }
+.ab-neutral { color: var(--warn); }
+
+/* ── Overview tweaks ── */
+.regime-compact .regime-components { display: none; }
+.section-h {
+  font-size: 1rem;
+  opacity: 0.92;
+  margin: 1.6rem 0 0.5rem;
+}
+.overview-details {
+  margin-top: 1.5rem;
+}
+.overview-details > summary {
+  cursor: pointer;
+  font-size: 0.85rem;
+  color: var(--muted);
+  padding: 0.4rem 0;
+}
+.overview-details > summary:hover { color: var(--text); }
+
+.actionable-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 0.8rem;
+  margin-bottom: 1.2rem;
+}
+
+/* ── Trader Card (canonical) ── */
+.trader-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.7rem 0.85rem 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  font-size: 0.8rem;
+  position: relative;
+  transition: border-color 0.15s;
+}
+.trader-card:hover { border-color: rgba(88,166,255,0.4); }
+.trader-card.tc-long { border-left: 3px solid var(--good); }
+.trader-card.tc-short { border-left: 3px solid var(--bad); }
+.tc-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.tc-title {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+.tc-ticker {
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+.tc-dir {
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 0.15rem 0.4rem;
+  border-radius: 3px;
+}
+.tc-dir.tc-long { background: rgba(63,185,80,0.18); color: var(--good); }
+.tc-dir.tc-short { background: rgba(248,81,73,0.18); color: var(--bad); }
+.tc-grade {
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 0.15rem 0.45rem;
+  border-radius: 3px;
+  letter-spacing: 0.03em;
+}
+.tc-grade-a { background: rgba(63,185,80,0.22); color: var(--good); }
+.tc-grade-b { background: rgba(255,152,0,0.2); color: #ffa726; }
+.tc-grade-c { background: rgba(255,255,255,0.07); color: rgba(255,255,255,0.55); }
+
+.tc-badges {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex-wrap: wrap;
+}
+.tc-confluence {
+  display: inline-flex;
+  gap: 3px;
+  padding: 0.1rem 0.35rem;
+  background: rgba(255,255,255,0.04);
+  border-radius: 4px;
+}
+.tc-dot {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  font-size: 0.6rem;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(255,255,255,0.4);
+  background: rgba(255,255,255,0.05);
+}
+.tc-dot.on { color: var(--good); background: rgba(63,185,80,0.2); }
+.tc-catalyst-hot { background: rgba(248,81,73,0.2); color: var(--bad); padding: 0.1rem 0.35rem; border-radius: 3px; font-size: 0.65rem; font-weight: 600; }
+.tc-catalyst-warm { background: rgba(255,152,0,0.18); color: #ffa726; padding: 0.1rem 0.35rem; border-radius: 3px; font-size: 0.65rem; font-weight: 600; }
+
+.tc-liq { padding: 0.1rem 0.4rem; border-radius: 3px; font-size: 0.65rem; font-weight: 600; letter-spacing: 0.04em; }
+.tc-liq-deep    { background: rgba(63,185,80,0.18); color: var(--good); }
+.tc-liq-healthy { background: rgba(88,166,255,0.15); color: #58a6ff; }
+.tc-liq-thin    { background: rgba(255,152,0,0.18); color: #ffa726; }
+.tc-liq-bad     { background: rgba(248,81,73,0.2); color: var(--bad); }
+.tc-liq-unknown { background: rgba(255,255,255,0.06); color: var(--muted); }
+
+.tc-plan {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.25rem 0.5rem;
+  padding: 0.45rem 0.55rem;
+  background: rgba(255,255,255,0.03);
+  border-radius: 6px;
+  margin: 0;
+}
+.tc-plan dt {
+  font-size: 0.62rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.tc-plan dd {
+  font-size: 0.85rem;
+  font-weight: 600;
+  margin: 0 0 0.1rem 0;
+  font-variant-numeric: tabular-nums;
+}
+.tc-mute { color: var(--muted); font-weight: 400; font-size: 0.7rem; margin-left: 0.2rem; }
+
+.tc-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  font-size: 0.72rem;
+}
+.tc-row-context { color: var(--muted); }
+.tc-expression {
+  padding: 0.1rem 0.45rem;
+  border-radius: 3px;
+  background: rgba(138,92,246,0.18);
+  color: #c4b5fd;
+  font-weight: 600;
+  font-size: 0.66rem;
+  letter-spacing: 0.03em;
+}
+.tc-iv {
+  padding: 0.08rem 0.35rem;
+  border-radius: 3px;
+  background: rgba(255,255,255,0.05);
+  color: var(--text);
+  font-size: 0.66rem;
+  font-weight: 600;
+}
+.tc-sess {
+  padding: 0.08rem 0.35rem;
+  border-radius: 3px;
+  font-size: 0.66rem;
+  font-weight: 600;
+}
+.tc-sess-strong { background: rgba(63,185,80,0.15); color: var(--good); }
+.tc-sess-weak   { background: rgba(248,81,73,0.18); color: var(--bad); }
+.tc-sess-flat   { background: rgba(255,255,255,0.05); color: var(--muted); }
+.tc-rs { font-size: 0.66rem; font-family: var(--mono, ui-monospace, Menlo); }
+.tc-pos { color: var(--good); }
+.tc-neg { color: var(--bad); }
+.tc-r-sep { color: var(--muted); margin: 0 0.2rem; }
+.tc-row-market {
+  font-size: 0.72rem;
+  padding-top: 0.25rem;
+  border-top: 1px dashed rgba(255,255,255,0.06);
+}
+.tc-row-size {
+  font-size: 0.72rem;
+  padding: 0.25rem 0;
+  border-top: 1px dashed rgba(255,255,255,0.06);
+  border-bottom: 1px dashed rgba(255,255,255,0.06);
+  color: var(--text);
+}
+.tc-size-shares { font-weight: 600; }
+.tc-size-notional { color: var(--muted); }
+.tc-size-risk { color: #fbbf24; font-weight: 600; }
+.tc-size-heat { color: #f87171; font-weight: 600; }
+.tc-label {
+  font-size: 0.6rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  margin-right: 0.3rem;
+}
+.tc-pattern {
+  font-size: 0.68rem;
+  color: var(--muted);
+  margin: 0;
+}
+
+/* ── Flow Tracker — grade stats + insight strip ── */
+.grade-stats-header {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  margin: 0.3rem 0 1rem;
+  padding: 0.5rem 0.75rem;
+  background: rgba(63,185,80,0.08);
+  border-left: 3px solid var(--good);
+  border-radius: 4px;
+  font-size: 0.82rem;
+}
+.gsh-label {
+  color: var(--good);
+  font-weight: 700;
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.gsh-value { color: var(--text); font-weight: 500; }
+
+.ft-insight {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.5rem;
+  align-items: center;
+  padding: 0.3rem 0.1rem 0;
+  font-size: 0.72rem;
+  margin-top: 0.2rem;
+  border-top: 1px dashed rgba(255,255,255,0.06);
+}
+.ft-tstat {
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 0.66rem;
+}
+.ft-hedging {
+  padding: 0.1rem 0.45rem;
+  border-radius: 3px;
+  background: rgba(248,81,73,0.15);
+  color: var(--bad);
+  font-size: 0.65rem;
+  font-weight: 600;
+}
+.ft-social {
+  margin-top: 0.4rem;
+  font-size: 0.72rem;
+}
+.ft-social > summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 0.68rem;
+  padding: 0.2rem 0;
+}
+.ft-social > summary:hover { color: var(--text); }
+
+/* ── Positions R-at-market + heat + stop-proximity tinting ── */
+.pos-r-market {
+  font-size: 0.7rem;
+  font-weight: 700;
+  font-family: ui-monospace, Menlo, monospace;
+  padding: 0.1rem 0.4rem;
+  border-radius: 3px;
+  background: rgba(255,255,255,0.04);
+}
+.pos-pnl-pos { color: var(--good); }
+.pos-pnl-neg { color: var(--bad); }
+.pos-heat {
+  font-size: 0.65rem;
+  padding: 0.1rem 0.35rem;
+  border-radius: 3px;
+  background: rgba(255,255,255,0.05);
+  color: var(--muted);
+  font-weight: 600;
+}
+.data-card.stop-warn { border-left: 3px solid var(--warn); }
+.data-card.stop-danger { border-left: 3px solid var(--bad); box-shadow: inset 2px 0 0 rgba(248,81,73,0.15); }
+.data-card.stop-ok {}

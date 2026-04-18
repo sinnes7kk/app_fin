@@ -1,0 +1,52 @@
+{# Global decision bar pinned to the top of every panel. #}
+
+{% macro action_bar(ab) %}
+{% if ab %}
+<div class="action-bar" role="status" aria-label="Trading session context">
+  <div class="ab-item ab-regime">
+    <span class="ab-label">Regime</span>
+    <span class="ab-value {{ ab.regime_cls }}">{{ "%.2f"|format(ab.regime_score) }}</span>
+    <span class="ab-sub">{{ ab.regime_label }}</span>
+  </div>
+
+  <div class="ab-item ab-spy">
+    <span class="ab-label">SPY</span>
+    <span class="ab-value {{ 'ab-pos' if (ab.spy_pct_today or 0) >= 0 else 'ab-neg' }}">
+      {{ "%+.2f"|format(ab.spy_pct_today or 0) }}%
+    </span>
+    {% if ab.spy_trend %}<span class="ab-sub">{{ ab.spy_trend }}</span>{% endif %}
+  </div>
+
+  {% if ab.vix %}
+  <div class="ab-item ab-vix" title="VIX level; sizing multiplier reduces position size in high-vol regimes">
+    <span class="ab-label">VIX</span>
+    <span class="ab-value">{{ "%.1f"|format(ab.vix) }}</span>
+    {% if ab.vix_sizing_mult %}<span class="ab-sub">×{{ "%.2f"|format(ab.vix_sizing_mult) }} size</span>{% endif %}
+  </div>
+  {% endif %}
+
+  <div class="ab-item ab-heat" title="Cumulative portfolio heat = sum of open-position risk as % of equity">
+    <span class="ab-label">Heat</span>
+    <span class="ab-value {{ ab.heat_cls }}">{{ "%.1f"|format(ab.heat_pct) }}%</span>
+    <span class="ab-sub">{{ ab.open_positions }}/{{ ab.max_positions }} slots</span>
+  </div>
+
+  <div class="ab-item ab-slots">
+    <span class="ab-label">Open Slots</span>
+    <span class="ab-value {{ 'ab-pos' if ab.open_slots > 0 else 'ab-mute' }}">{{ ab.open_slots }}</span>
+  </div>
+
+  <div class="ab-item ab-newa" title="Grade-A setups from this scan that are not already in your book or watchlist">
+    <span class="ab-label">New A-Grades</span>
+    <span class="ab-value {{ 'ab-pos' if ab.new_a_grades > 0 else 'ab-mute' }}">{{ ab.new_a_grades }}</span>
+  </div>
+
+  {% if ab.grade_stats_line %}
+  <div class="ab-item ab-grade" title="Trailing backtest of the Flow Tracker grade on historical snapshots">
+    <span class="ab-label">A-Grade Edge</span>
+    <span class="ab-value">{{ ab.grade_stats_line }}</span>
+  </div>
+  {% endif %}
+</div>
+{% endif %}
+{% endmacro %}

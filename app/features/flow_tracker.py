@@ -273,49 +273,54 @@ def compute_multi_day_flow(
 
         persistence_ratio = round(active_days / total_days, 2)
 
-        # Flow trend: compare second half vs first half of the window
-        mid = len(active_dates) // 2
-        p2_total = 0.0
-        p1_total = 0.0
-        if mid > 0:
-            first_half = grp[grp["snapshot_date"].isin(active_dates[:mid])]
-            second_half = grp[grp["snapshot_date"].isin(active_dates[mid:])]
-            p1_total = first_half["bullish_premium"].sum() + first_half["bearish_premium"].sum()
-            p2_total = second_half["bullish_premium"].sum() + second_half["bearish_premium"].sum()
-            if p1_total > 0:
-                ratio = p2_total / p1_total
-                if ratio > 1.3:
+        # Build per-day premium series for regression / concentration metrics
+        daily_totals: list[tuple[int, float, float, float]] = []  # (day_idx, bull, bear, total)
+        for idx, d in enumerate(active_dates):
+            day_rows = grp[grp["snapshot_date"] == d]
+            db = float(day_rows["bullish_premium"].sum())
+            dbe = float(day_rows["bearish_premium"].sum())
+            daily_totals.append((idx, db, dbe, db + dbe))
+
+        # --- Acceleration via log-linear regression ---
+        # Regress log1p(daily_total) on day index, compute a t-statistic for the slope.
+        # Maps smoothly to 0-1 via clip((t + 1) / 3, 0, 1). Robust to sparse/unequal days.
+        accel_t_stat = 0.0
+        trend = "steady"
+        if active_days >= 2:
+            day_idx_arr = np.array([t[0] for t in daily_totals], dtype=float)
+            day_tot_arr = np.array([t[3] for t in daily_totals], dtype=float)
+            y = np.log1p(day_tot_arr)
+            x = day_idx_arr
+            x_mean = x.mean()
+            y_mean = y.mean()
+            xv = x - x_mean
+            yv = y - y_mean
+            ss_xx = float((xv * xv).sum())
+            if ss_xx > 0:
+                slope = float((xv * yv).sum() / ss_xx)
+                y_pred = y_mean + slope * xv
+                residuals = y - y_pred
+                dof = max(active_days - 2, 1)
+                s_err = float(np.sqrt((residuals * residuals).sum() / dof))
+                se_slope = s_err / np.sqrt(ss_xx) if ss_xx > 0 else 0.0
+                if se_slope > 1e-9:
+                    accel_t_stat = slope / se_slope
+                else:
+                    accel_t_stat = 0.0 if slope == 0 else (5.0 if slope > 0 else -5.0)
+                if accel_t_stat > 1.0:
                     trend = "accelerating"
-                elif ratio < 0.7:
+                elif accel_t_stat < -1.0:
                     trend = "fading"
                 else:
                     trend = "steady"
-            else:
-                trend = "accelerating" if p2_total > 0 else "steady"
-        else:
-            trend = "steady"
+        accel_raw = float(np.clip((accel_t_stat + 1.0) / 3.0, 0.0, 1.0))
 
-        # Per-day bias consistency: fraction of active days with clear directional lean
-        consistent_days = 0
-        for d in active_dates:
-            day_rows = grp[grp["snapshot_date"] == d]
-            db = day_rows["bullish_premium"].sum()
-            dbe = day_rows["bearish_premium"].sum()
-            dt = db + dbe
-            if dt > 0:
-                day_bull_pct = db / dt
-                if day_bull_pct > 0.55 or day_bull_pct < 0.45:
-                    consistent_days += 1
-        consistency_raw = consistent_days / active_days if active_days > 0 else 0.0
-
-        # Acceleration raw (0–1 clamped sigmoid-like mapping)
-        if p1_total > 0:
-            accel_ratio = p2_total / p1_total
-        elif p2_total > 0:
-            accel_ratio = 2.0
-        else:
-            accel_ratio = 1.0
-        accel_raw = min(max((accel_ratio - 0.5) / 1.5, 0.0), 1.0)
+        # --- Premium-weighted directional concentration ---
+        # consistency = |Σ(bull - bear)| / Σ(bull + bear) across active days.
+        # Naturally down-weights thin days; 1.0 = one-sided, 0.0 = perfectly mixed.
+        net_signed = sum(b - be for _, b, be, _ in daily_totals)
+        gross = sum(t for _, _, _, t in daily_totals)
+        consistency_raw = abs(net_signed) / gross if gross > 0 else 0.0
 
         # Daily snapshots for sparkline
         daily_snaps: list[dict] = []
@@ -358,6 +363,7 @@ def compute_multi_day_flow(
             "daily_snapshots": daily_snaps,
             "_consistency_raw": consistency_raw,
             "_accel_raw": accel_raw,
+            "_accel_t_stat": accel_t_stat,
             "_cum_total": cum_total,
         })
 
@@ -365,17 +371,23 @@ def compute_multi_day_flow(
         return []
 
     # --- Layer 3: Composite conviction score (0–10 scale) ---
-    # Normalise intensity and premium-mass across the cohort
-    bps_vals = np.array([r["prem_mcap_bps"] for r in raw_results])
-    bps_max = bps_vals.max() if bps_vals.max() > 0 else 1.0
-
+    # Mass is still cohort-relative (captures "big vs small in today's flow") but
+    # intensity uses ABSOLUTE thresholds so grades don't drift with regime.
     prem_vals = np.array([r["_cum_total"] for r in raw_results])
     log_prem = np.log1p(prem_vals)
     log_max = log_prem.max() if log_prem.max() > 0 else 1.0
 
+    # Absolute intensity scale: 1 bps → 0, 30 bps → 1 (log-spaced).
+    _INTENSITY_FLOOR = np.log1p(1.0)
+    _INTENSITY_CEIL = np.log1p(30.0)
+
     for i, r in enumerate(raw_results):
         persistence_norm = r["persistence_ratio"]
-        intensity_norm = r["prem_mcap_bps"] / bps_max
+        log_bps = np.log1p(max(r["prem_mcap_bps"], 0.0))
+        intensity_norm = float(np.clip(
+            (log_bps - _INTENSITY_FLOOR) / (_INTENSITY_CEIL - _INTENSITY_FLOOR),
+            0.0, 1.0,
+        ))
         consistency_norm = r["_consistency_raw"]
         accel_norm = r["_accel_raw"]
         mass_norm = log_prem[i] / log_max
@@ -388,12 +400,28 @@ def compute_multi_day_flow(
             + 0.10 * mass_norm
         ) * 10.0
 
+        # --- P/C penalty for hedging patterns ---
+        # BULLISH direction with elevated P/C (>0.9) or BEARISH with very low P/C (<0.5)
+        # is usually protective hedging, not directional bets. Apply 15% haircut.
+        pc = r.get("latest_put_call_ratio") or 0.0
+        hedging_risk = False
+        if pc > 0:
+            if r["direction"] == "BULLISH" and pc > 0.9:
+                hedging_risk = True
+            elif r["direction"] == "BEARISH" and pc < 0.5:
+                hedging_risk = True
+        if hedging_risk:
+            score *= 0.85
+
         r["conviction_score"] = round(score, 1)
         r["conviction_grade"] = _conviction_grade(score)
+        r["accel_t_stat"] = round(r["_accel_t_stat"], 2)
+        r["hedging_risk"] = hedging_risk
 
         # Clean up internal keys
         del r["_consistency_raw"]
         del r["_accel_raw"]
+        del r["_accel_t_stat"]
         del r["_cum_total"]
 
     raw_results.sort(key=lambda x: x["conviction_score"], reverse=True)

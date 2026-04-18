@@ -9,6 +9,10 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
+from app.features.decision_context import (
+    clear_decision_cache,
+    enrich_signals as enrich_decision_context,
+)
 from app.features.flow_features import build_flow_feature_table, rank_flow_candidates
 from app.features.flow_persistence import apply_persistence_bonus, compute_persistence
 from app.features.flow_trajectory import apply_trajectory_bonus, compute_intraday_trajectory
@@ -1350,6 +1354,7 @@ def run_flow_to_price_pipeline(
 
     clear_context_cache()
     clear_price_cache()
+    clear_decision_cache()
     reset_api_stats()
     _SPY_RETURN_CACHE.clear()
     market_regime = fetch_market_regime()
@@ -1586,6 +1591,10 @@ def run_flow_to_price_pipeline(
     final_results = _enrich_earnings(final_results)
     final_results = _enrich_insider(final_results)
 
+    # Decision-context enrichment (liquidity, session, RS, expression, R-at-market).
+    # Runs last so it has access to every prior field (iv_rank, earnings, entry/stop).
+    final_results = enrich_decision_context(final_results)
+
     # V3 agent shadow: all 5 agents + orchestrator (logged, does NOT modify scores)
     _run_options_agent_shadow(final_results)
     _run_sr_quality_agent_shadow(final_results)
@@ -1620,6 +1629,13 @@ def run_flow_to_price_pipeline(
             print(f"  saved {name} -> {path}")
         if not feature_table.empty:
             _log_flow_stats(feature_table)
+
+        try:
+            from app.analytics.grade_backtest import refresh_grade_stats
+            refresh_grade_stats()
+            print("  [grade-backtest] refreshed data/grade_stats.json")
+        except Exception as e:
+            print(f"  [grade-backtest] skipped: {e}")
 
     print_api_summary()
 

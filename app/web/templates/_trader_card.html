@@ -1,0 +1,204 @@
+{#
+  Trader-card macros — the canonical decision surfaces.
+
+  Two variants:
+   - trader_card(row)           — full plan card (Candidates, Actionable Now, Watchlist promotions)
+   - flow_tracker_insight(ft)   — compact decision strip appended to Flow Tracker cards
+
+  Both expect a dict enriched by app.features.decision_context, i.e. may contain:
+     liquidity {adv_dollar, liquidity_tier}, session, rs, trade_expression,
+     r_at_market {r_from_entry, r_to_stop}, spot_price
+  Missing fields are rendered as "—".
+#}
+
+{% macro _grade_badge(grade, score) %}
+  {% if grade == 'A' %}
+  <span class="tc-grade tc-grade-a" title="Conviction grade A (score ≥ 7.5)">A · {{ "%.1f"|format(score) }}</span>
+  {% elif grade == 'B' %}
+  <span class="tc-grade tc-grade-b" title="Conviction grade B (5.0 ≤ score < 7.5)">B · {{ "%.1f"|format(score) }}</span>
+  {% elif grade == 'C' %}
+  <span class="tc-grade tc-grade-c" title="Conviction grade C">C · {{ "%.1f"|format(score) }}</span>
+  {% else %}
+  <span class="tc-grade tc-grade-c">{{ "%.1f"|format(score) }}</span>
+  {% endif %}
+{% endmacro %}
+
+{% macro _confluence_dots(row) %}
+  {% set flow_on = (row.flow_score_scaled or 0) >= 5 %}
+  {% set dp_on = row.dark_pool and (row.dark_pool.notional_mcap_bps or 0) > 1 %}
+  {% set chain_on = row.hot_chain or row.top_chain %}
+  {% set insider_on = row.insider and row.insider.net_direction in ('buying','selling') %}
+  <span class="tc-confluence" title="Confluence sources confirming the thesis">
+    <span class="tc-dot {{ 'on' if flow_on else 'off' }}" title="Options flow">F</span>
+    <span class="tc-dot {{ 'on' if dp_on else 'off' }}" title="Dark pool">D</span>
+    <span class="tc-dot {{ 'on' if chain_on else 'off' }}" title="Hot chain">C</span>
+    <span class="tc-dot {{ 'on' if insider_on else 'off' }}" title="Insider activity">I</span>
+  </span>
+{% endmacro %}
+
+{% macro _earn_badge(row) %}
+  {% set e = row.earnings or {} %}
+  {% set d = e.days_until_earnings %}
+  {% if d is not none %}
+    {% if d <= 5 %}<span class="tc-catalyst tc-catalyst-hot" title="Earnings on {{ e.next_earnings_date }}">ER in {{ d }}d</span>
+    {% elif d <= 10 %}<span class="tc-catalyst tc-catalyst-warm" title="Earnings on {{ e.next_earnings_date }}">ER in {{ d }}d</span>
+    {% endif %}
+  {% endif %}
+{% endmacro %}
+
+{% macro _liq_badge(liq) %}
+  {% set t = liq.liquidity_tier if liq else 'UNKNOWN' %}
+  {% set cls = {'DEEP':'tc-liq-deep','HEALTHY':'tc-liq-healthy','THIN':'tc-liq-thin','ILLIQUID':'tc-liq-bad'}.get(t, 'tc-liq-unknown') %}
+  {% set tip -%}
+    {%- if liq and liq.adv_dollar -%}
+      ADV ${{ "{:,.0f}".format(liq.adv_dollar / 1e6) }}M
+    {%- else -%}
+      ADV unavailable
+    {%- endif -%}
+  {%- endset %}
+  <span class="tc-liq {{ cls }}" title="{{ tip }}">{{ t }}</span>
+{% endmacro %}
+
+{% macro _expression_badge(exp) %}
+  {% if exp and exp.expression %}
+  {% set label = {
+    'STOCK':'Stock',
+    'LONG_CALL':'Long call',
+    'LONG_PUT':'Long put',
+    'DEBIT_SPREAD':'Debit spread',
+    'RISK_REVERSAL':'Risk reversal'
+  }.get(exp.expression, exp.expression) %}
+  <span class="tc-expression" title="{{ exp.rationale }}">{{ label }}</span>
+  {% endif %}
+{% endmacro %}
+
+{% macro _session_chip(session) %}
+  {% if session and session.session_available %}
+    {% set tone = session.session_tone or 'FLAT' %}
+    {% set cls = {'STRENGTH':'tc-sess-strong','WEAKNESS':'tc-sess-weak','FLAT':'tc-sess-flat'}.get(tone,'tc-sess-flat') %}
+    <span class="tc-sess {{ cls }}" title="vs prior close {{ session.px_vs_prior_close_pct }}%, vs open {{ session.px_vs_open_pct }}%">
+      {{ "%+.1f"|format(session.px_vs_prior_close_pct) }}%
+    </span>
+  {% endif %}
+{% endmacro %}
+
+{% macro _rs_chip(rs) %}
+  {% if rs %}
+    {% set rs5 = rs.rs_5d_pct %}
+    {% set rs20 = rs.rs_20d_pct %}
+    {% if rs5 is not none or rs20 is not none %}
+    <span class="tc-rs" title="Relative strength vs SPY">
+      {% if rs5 is not none %}<span class="{{ 'tc-pos' if rs5 > 0 else 'tc-neg' }}">5d {{ "%+.1f"|format(rs5) }}%</span>{% endif %}
+      {% if rs20 is not none %}<span class="{{ 'tc-pos' if rs20 > 0 else 'tc-neg' }}" style="margin-left:0.4rem">20d {{ "%+.1f"|format(rs20) }}%</span>{% endif %}
+    </span>
+    {% endif %}
+  {% endif %}
+{% endmacro %}
+
+{% macro _r_at_market(row) %}
+  {% set rm = row.r_at_market or {} %}
+  {% if rm.r_available %}
+    <span class="tc-r" title="Unrealized R from entry / R remaining to stop">
+      <span class="{{ 'tc-pos' if rm.r_from_entry >= 0 else 'tc-neg' }}">{{ "%+.2f"|format(rm.r_from_entry) }}R</span>
+      <span class="tc-r-sep">·</span>
+      <span>{{ "%.2f"|format(rm.r_to_stop) }}R to stop</span>
+    </span>
+  {% endif %}
+{% endmacro %}
+
+{# =========================================================================
+   trader_card(row) — the canonical decision card
+   Expects: ticker, direction, final_score (optional), grade (optional),
+   entry_price, stop_price, target_1, target_2, rr_ratio, shares,
+   plus enriched fields (liquidity, session, rs, trade_expression, r_at_market,
+   earnings, iv_rank, pattern, etc.)
+   ========================================================================= #}
+{% macro trader_card(row, grade=None) %}
+{% set dir_cls = 'tc-long' if row.direction == 'LONG' else 'tc-short' %}
+{% set eff_grade = grade or row.conviction_grade %}
+{% set eff_score = row.conviction_score if row.conviction_score is not none else (row.final_score or 0) %}
+<article class="trader-card {{ dir_cls }}" data-ticker="{{ row.ticker }}">
+  <header class="tc-head">
+    <div class="tc-title">
+      <span class="tc-ticker">{{ row.ticker }}</span>
+      <span class="tc-dir {{ dir_cls }}">{{ row.direction or '—' }}</span>
+      {% if eff_grade %}{{ _grade_badge(eff_grade, eff_score) }}{% endif %}
+      {% if row.final_score is not none and not row.conviction_grade %}
+        <span class="tc-grade tc-grade-c" title="Final conviction 0-10">{{ "%.1f"|format(row.final_score) }}</span>
+      {% endif %}
+    </div>
+    <div class="tc-badges">
+      {{ _confluence_dots(row) }}
+      {{ _earn_badge(row) }}
+      {{ _liq_badge(row.liquidity or {}) }}
+    </div>
+  </header>
+
+  {% if row.entry_price %}
+  <dl class="tc-plan">
+    <dt>Entry</dt><dd>{{ "%.2f"|format(row.entry_price) }}</dd>
+    <dt>Stop</dt><dd>{{ "%.2f"|format(row.stop_price) }}
+      {%- if row.stop_price and row.entry_price -%}
+        <span class="tc-mute"> ({{ "%+.1f"|format((row.stop_price - row.entry_price) / row.entry_price * 100) }}%)</span>
+      {%- endif -%}
+    </dd>
+    <dt>T1</dt><dd>{% if row.target_1 %}{{ "%.2f"|format(row.target_1) }}<span class="tc-mute"> ({{ "%+.1f"|format((row.target_1 - row.entry_price) / row.entry_price * 100) }}%)</span>{% else %}—{% endif %}</dd>
+    <dt>T2</dt><dd>{% if row.target_2 %}{{ "%.2f"|format(row.target_2) }}<span class="tc-mute"> ({{ "%+.1f"|format((row.target_2 - row.entry_price) / row.entry_price * 100) }}%)</span>{% else %}—{% endif %}</dd>
+    <dt>R:R</dt><dd>{{ "%.1f"|format(row.rr_ratio or 0) }}</dd>
+  </dl>
+  {% endif %}
+
+  {% if row.size_shares %}
+  <div class="tc-row tc-row-size" title="Projected size at current VIX multiplier, from SIZING_TIERS">
+    <span class="tc-label">Size</span>
+    <span class="tc-size-shares">{{ row.size_shares }} sh</span>
+    <span class="tc-mute">·</span>
+    <span class="tc-size-notional">${{ "{:,.1f}".format(row.notional_dollar / 1000) }}k</span>
+    <span class="tc-mute">·</span>
+    <span class="tc-size-risk">risk ${{ "{:,.0f}".format(row.risk_dollar) }}</span>
+    <span class="tc-mute">·</span>
+    <span class="tc-size-heat">{{ "%.2f"|format(row.heat_pct) }}% heat</span>
+  </div>
+  {% endif %}
+
+  <div class="tc-row tc-row-context">
+    {{ _expression_badge(row.trade_expression or {}) }}
+    {% if row.iv_rank is not none %}<span class="tc-iv" title="Implied volatility rank (0-100)">IVR {{ row.iv_rank | int }}</span>{% endif %}
+    {{ _session_chip(row.session or {}) }}
+    {{ _rs_chip(row.rs or {}) }}
+  </div>
+
+  {% if row.r_at_market and row.r_at_market.r_available %}
+  <div class="tc-row tc-row-market">
+    <span class="tc-label">Live</span>
+    {{ _r_at_market(row) }}
+    {% if row.spot_price %}<span class="tc-mute">@ {{ "%.2f"|format(row.spot_price) }}</span>{% endif %}
+  </div>
+  {% endif %}
+
+  {% if row.pattern and row.pattern not in ('unknown','','nan') %}
+  <p class="tc-pattern">{{ row.pattern }}</p>
+  {% endif %}
+</article>
+{% endmacro %}
+
+
+{# =========================================================================
+   flow_tracker_insight(ft) — compact decision strip appended to Flow Tracker cards.
+   Adds trade expression, liquidity tier, and t-stat context to each tracker row.
+   ========================================================================= #}
+{% macro flow_tracker_insight(ft) %}
+<div class="ft-insight">
+  {{ _liq_badge(ft.liquidity or {}) }}
+  {{ _expression_badge(ft.trade_expression or {}) }}
+  {% if ft.accel_t_stat is not none %}
+    {% set t = ft.accel_t_stat %}
+    <span class="ft-tstat {% if t > 1 %}tc-pos{% elif t < -1 %}tc-neg{% else %}tc-mute{% endif %}" title="Acceleration t-statistic from daily premium regression (|t|>1 = meaningful trend)">
+      t={{ "%+.2f"|format(t) }}
+    </span>
+  {% endif %}
+  {% if ft.hedging_risk %}
+    <span class="ft-hedging" title="Directional flow pattern looks like hedging (P/C skew), conviction haircut applied">Hedging Risk</span>
+  {% endif %}
+</div>
+{% endmacro %}

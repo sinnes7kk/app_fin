@@ -1,3 +1,5 @@
+{% from '_trader_card.html' import trader_card, flow_tracker_insight %}
+{% from '_action_bar.html' import action_bar %}
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -15,68 +17,60 @@
 
     <nav>
       <div class="nav-section">
-        <span class="nav-section-label">Market</span>
+        <span class="nav-section-label">Decide</span>
         <button class="nav-item active" data-tab="overview">
           <span class="nav-icon">&#9670;</span> Overview
         </button>
-      </div>
-
-      <div class="nav-section">
-        <span class="nav-section-label">Signals</span>
         <button class="nav-item" data-tab="candidates">
           <span class="nav-icon">&#9650;</span> Candidates
+          {% if actionable_now %}<span class="nav-badge">{{ actionable_now | length }}</span>{% endif %}
         </button>
-        <button class="nav-item" data-tab="nearmisses">
-          <span class="nav-icon">&#9675;</span> Near Misses
-          {% if total_rejected_count %}<span class="nav-badge">{{ total_rejected_count }}</span>{% endif %}
+        <button class="nav-item" data-tab="watchlist">
+          <span class="nav-icon">&#9733;</span> Watchlist
+          {% if watchlist %}<span class="nav-badge">{{ watchlist | length }}</span>{% endif %}
         </button>
       </div>
 
       <div class="nav-section">
-        <span class="nav-section-label">Portfolio</span>
+        <span class="nav-section-label">Execute</span>
         <button class="nav-item" data-tab="positions">
           <span class="nav-icon">&#9632;</span> Positions
           {% if positions_detail %}<span class="nav-badge">{{ positions_detail | length }}</span>{% endif %}
         </button>
-        <button class="nav-item" data-tab="watchlist">
-          <span class="nav-icon">&#9733;</span> Watchlist
-        </button>
         <button class="nav-item" data-tab="risk">
           <span class="nav-icon">&#9888;</span> Risk
         </button>
-        <button class="nav-item" data-tab="agent-portfolio">
-          <span class="nav-icon">&#9881;</span> Agent Portfolio
-          {% if positions_agent %}<span class="nav-badge">{{ positions_agent | length }}</span>{% endif %}
-        </button>
       </div>
 
       <div class="nav-section">
-        <span class="nav-section-label">Flow</span>
-        <button class="nav-item" data-tab="unusual-flow">
-          <span class="nav-icon">&#9889;</span> Unusual Flow
-          {% if alerts_count %}<span class="nav-badge">{{ alerts_count }}</span>{% endif %}
-        </button>
+        <span class="nav-section-label">Context</span>
         <button class="nav-item" data-tab="flow-tracker">
           <span class="nav-icon">&#9850;</span> Flow Tracker
-          {% if flow_tracker %}<span class="nav-badge">{{ flow_tracker | length }}</span>{% endif %}
+        </button>
+        <button class="nav-item" data-tab="unusual-flow">
+          <span class="nav-icon">&#9889;</span> Unusual Flow
         </button>
         <button class="nav-item" data-tab="dark-pool">
           <span class="nav-icon">&#9679;</span> Dark Pool
-          {% if dark_pool_screener and dark_pool_screener.by_ticker %}<span class="nav-badge">{{ dark_pool_screener.by_ticker | length }}</span>{% endif %}
         </button>
         <button class="nav-item" data-tab="hottest-chains">
           <span class="nav-icon">&#9733;</span> Hot Chains
-          {% if hottest_chains and hottest_chains.by_ticker %}<span class="nav-badge">{{ hottest_chains.by_ticker | length }}</span>{% endif %}
+        </button>
+        <button class="nav-item" data-tab="nearmisses">
+          <span class="nav-icon">&#9675;</span> Near Misses
         </button>
       </div>
 
       <div class="nav-section">
-        <span class="nav-section-label">History</span>
+        <span class="nav-section-label">Review</span>
         <button class="nav-item" data-tab="trades">
           <span class="nav-icon">&#9776;</span> Trade Log
         </button>
         <button class="nav-item" data-tab="performance">
           <span class="nav-icon">&#9670;</span> Performance
+        </button>
+        <button class="nav-item" data-tab="agent-portfolio">
+          <span class="nav-icon">&#9881;</span> Agent Shadow
         </button>
         <button class="nav-item" data-tab="search">
           <span class="nav-icon">&#128269;</span> Search
@@ -92,6 +86,7 @@
 
   <div class="main-wrap">
   <main>
+    {{ action_bar(ab) }}
     {% macro sort_select(param_name, current) %}
     <select class="sort-select" data-sort-param="{{ param_name }}" aria-label="Sort by">
       <option value="" {% if not current %}selected{% endif %}>Sort: default</option>
@@ -186,41 +181,53 @@
       </div>
 
       {% if regime %}
-      <div class="regime-strip">
-        {% set rs = regime.regime_score | default(0.5) %}
+      {% set rs = regime.regime_score | default(0.5) %}
+      {% set regime_detail = 'SPY ' ~ ("%.2f"|format(regime._spy_alignment | default(0.5))) ~ ' · VIX ' ~ ("%.2f"|format(regime._vix_component | default(0.5))) ~ ' · Rvol ' ~ ("%.2f"|format(regime._rvol_component | default(0.5))) ~ ' · Tide ' ~ ("%.2f"|format(regime._tide_component | default(0.5))) %}
+      <div class="regime-strip regime-compact" title="Regime inputs — {{ regime_detail }}">
         {% set rs_class = "regime-bullish" if rs >= 0.65 else ("regime-bearish" if rs <= 0.35 else "regime-neutral") %}
         <span class="regime-item"><strong>Regime</strong> <span class="regime-badge {{ rs_class }}">{{ "%.2f"|format(rs) }}</span></span>
-        <span class="regime-item"><strong>SPY</strong> {{ regime.spy_trend | default("—") }}{% if regime.spy_close %} {{ "%.1f"|format(regime.spy_close) }}{% endif %}</span>
-        {% if regime.vix_close %}<span class="regime-item"><strong>VIX</strong> {{ "%.1f"|format(regime.vix_close) }}{% if regime.vix_sizing_mult %} &times;{{ "%.2f"|format(regime.vix_sizing_mult) }} size{% endif %}</span>{% endif %}
-        <span class="regime-item"><strong>Threshold</strong> Long &ge; {{ near_threshold_long }}, Short &ge; {{ near_threshold_short }}</span>
-        <span class="regime-item regime-components">spy={{ "%.2f"|format(regime._spy_alignment | default(0.5)) }} vix={{ "%.2f"|format(regime._vix_component | default(0.5)) }} rvol={{ "%.2f"|format(regime._rvol_component | default(0.5)) }} tide={{ "%.2f"|format(regime._tide_component | default(0.5)) }}</span>
+        <span class="regime-item"><strong>Thresholds</strong> Long &ge; {{ near_threshold_long }} · Short &ge; {{ near_threshold_short }}</span>
       </div>
       {% endif %}
 
+      <h2 class="section-h">Trades to Take Now</h2>
+      <p class="tab-intro">Top final-score setups from this scan not yet in your book or watchlist. Everything you need to decide — plan, R, IVR, liquidity, session tone, relative strength — on one card.</p>
+      {% if actionable_now %}
+      <div class="actionable-grid">
+        {% for row in actionable_now %}
+          {{ trader_card(row) }}
+        {% endfor %}
+      </div>
+      {% else %}
+      <p class="empty">No A-grade setups. Standing down is a position.</p>
+      {% endif %}
+
       {% if perf.equity_curve %}
-      <h2>Equity Curve</h2>
+      <h2 class="section-h">Equity Curve</h2>
       <div class="chart-wrap">
         <canvas id="equity-chart" height="200"></canvas>
       </div>
       {% endif %}
 
-      <h2>Recent Activity</h2>
-      {% if activity %}
-      <ul class="activity-feed">
-        {% for ev in activity %}
-        <li class="activity-item">
-          <span class="activity-icon {{ ev.type }}">{{ "&#9650;" if ev.type == "entry" else "&#9660;" }}</span>
-          <div class="activity-text">
-            <strong>{{ ev.ticker }}</strong> <span class="badge badge-{{ 'long' if ev.direction == 'LONG' else 'short' }}">{{ ev.direction }}</span>
-            <div class="activity-detail">{{ ev.detail }}</div>
-          </div>
-          <span class="activity-date">{{ ev.date[:16] if ev.date else "" }}</span>
-        </li>
-        {% endfor %}
-      </ul>
-      {% else %}
-      <p class="empty">No recent activity.</p>
-      {% endif %}
+      <details class="overview-details">
+        <summary>Recent Activity</summary>
+        {% if activity %}
+        <ul class="activity-feed">
+          {% for ev in activity %}
+          <li class="activity-item">
+            <span class="activity-icon {{ ev.type }}">{{ "&#9650;" if ev.type == "entry" else "&#9660;" }}</span>
+            <div class="activity-text">
+              <strong>{{ ev.ticker }}</strong> <span class="badge badge-{{ 'long' if ev.direction == 'LONG' else 'short' }}">{{ ev.direction }}</span>
+              <div class="activity-detail">{{ ev.detail }}</div>
+            </div>
+            <span class="activity-date">{{ ev.date[:16] if ev.date else "" }}</span>
+          </li>
+          {% endfor %}
+        </ul>
+        {% else %}
+        <p class="empty">No recent activity.</p>
+        {% endif %}
+      </details>
     </section>
 
     <!-- ═══════ CANDIDATES ═══════ -->
@@ -458,7 +465,6 @@
           <dl class="card-metrics">
             <dt>Intensity</dt><dd>{{ "%.2f"|format(tf.bps) }} bps</dd>
             <dt>Unusual prem</dt><dd>{{ "${:,.0f}".format(tf.premium) if tf.premium else "—" }}{% if tf.count %} ({{ tf.count }} trades){% endif %}</dd>
-            <dt>Flow score</dt><dd>{{ "%.1f"|format(tf.flow_score * 10) }}/10</dd>
           </dl>
         </article>
         {% endfor %}
@@ -474,7 +480,14 @@
     <!-- ═══════ FLOW TRACKER ═══════ -->
     <section id="panel-flow-tracker" class="panel" role="tabpanel">
       <h1 class="panel-title">Flow Tracker</h1>
-      <p class="tab-intro">Tickers with <strong>repeat unusual options activity</strong> over the last {{ flow_tracker_lookback }} trading days. Filtered for equities only (no ETFs), minimum $250K cumulative premium and $500M+ market cap. Ranked by composite <strong>conviction score</strong> blending persistence, intensity, consistency, acceleration, and premium mass.</p>
+      <p class="tab-intro">Tickers with <strong>repeat unusual options activity</strong> over the last {{ flow_tracker_lookback }} trading days. Ranked by a composite conviction score: persistence, absolute intensity, premium-weighted directional consistency, log-regression acceleration, and cumulative mass — with a 15% haircut applied when the P/C ratio looks like hedging.</p>
+
+      {% if grade_stats_header %}
+      <div class="grade-stats-header" title="Forward-return backtest of historical Flow Tracker grades (excess vs SPY, R-multiple assumes {{ '%.0f%%'|format((grade_stats.assumed_stop_pct or 0.02) * 100) }} stop).">
+        <span class="gsh-label">Grade-A Backtest</span>
+        <span class="gsh-value">{{ grade_stats_header }}</span>
+      </div>
+      {% endif %}
 
       {% if flow_tracker %}
       <div class="perf-grid" style="margin-bottom:1.2rem">
@@ -688,35 +701,31 @@
             <dd style="font-size:0.7rem;opacity:0.8">{{ ft.insider.notable_sellers | join(', ') }}</dd>
             {% endif %}
             {% endif %}
-            {% if ft.sentiment and (ft.sentiment.st_messages or ft.sentiment.rd_mentions) %}
-            <dt>StockTwits</dt>
-            <dd>
-              {{ ft.sentiment.st_messages }} msgs
-              {% if ft.sentiment.st_mention_trend == "growing" %}
-                <span style="color:#3fb950">&#x25B2;</span>
-              {% elif ft.sentiment.st_mention_trend == "declining" %}
-                <span style="color:#f85149">&#x25BC;</span>
-              {% elif ft.sentiment.st_mention_trend == "new" %}
-                <span style="color:#ff9800">NEW</span>
-              {% else %}
-                <span style="opacity:0.4">&#x2500;</span>
-              {% endif %}
-            </dd>
-            <dt>Reddit</dt>
-            <dd>
-              {{ ft.sentiment.rd_mentions }} mentions
-              {% if ft.sentiment.rd_mention_trend == "growing" %}
-                <span style="color:#3fb950">&#x25B2;</span>
-              {% elif ft.sentiment.rd_mention_trend == "declining" %}
-                <span style="color:#f85149">&#x25BC;</span>
-              {% elif ft.sentiment.rd_mention_trend == "new" %}
-                <span style="color:#ff9800">NEW</span>
-              {% else %}
-                <span style="opacity:0.4">&#x2500;</span>
-              {% endif %}
-            </dd>
-            {% endif %}
           </dl>
+          {{ flow_tracker_insight(ft) }}
+          {% if ft.sentiment and (ft.sentiment.st_messages or ft.sentiment.rd_mentions) %}
+          <details class="ft-social">
+            <summary>Social mentions ({{ ft.sentiment.st_messages }} ST · {{ ft.sentiment.rd_mentions }} Reddit)</summary>
+            <dl class="card-metrics">
+              <dt>StockTwits</dt>
+              <dd>
+                {{ ft.sentiment.st_messages }} msgs
+                {% if ft.sentiment.st_mention_trend == "growing" %}<span style="color:#3fb950">&#x25B2;</span>
+                {% elif ft.sentiment.st_mention_trend == "declining" %}<span style="color:#f85149">&#x25BC;</span>
+                {% elif ft.sentiment.st_mention_trend == "new" %}<span style="color:#ff9800">NEW</span>
+                {% else %}<span style="opacity:0.4">&#x2500;</span>{% endif %}
+              </dd>
+              <dt>Reddit</dt>
+              <dd>
+                {{ ft.sentiment.rd_mentions }} mentions
+                {% if ft.sentiment.rd_mention_trend == "growing" %}<span style="color:#3fb950">&#x25B2;</span>
+                {% elif ft.sentiment.rd_mention_trend == "declining" %}<span style="color:#f85149">&#x25BC;</span>
+                {% elif ft.sentiment.rd_mention_trend == "new" %}<span style="color:#ff9800">NEW</span>
+                {% else %}<span style="opacity:0.4">&#x2500;</span>{% endif %}
+              </dd>
+            </dl>
+          </details>
+          {% endif %}
           <div class="ft-sparkline-row">
             <div class="ft-sparkline" title="Daily premium">
               {% set max_prem = ft.daily_snapshots | map(attribute='premium') | max %}
@@ -798,12 +807,19 @@
         {% endif %}
       </div>
 
-      <div class="dp-view-toggle" style="margin-bottom:1rem;display:flex;gap:0.5rem">
-        <button class="btn btn-sm dp-view-btn active" data-view="by-ticker">By Notional</button>
-        <button class="btn btn-sm dp-view-btn" data-view="by-mcap">By Mcap Bps</button>
-        <button class="btn btn-sm dp-view-btn" data-view="top-prints">Top Prints ($1M+)</button>
-        <button class="btn btn-sm dp-view-btn" data-view="daily-accumulated">Daily Accumulated</button>
+      <div class="dp-view-toggle" style="margin-bottom:1rem;display:flex;gap:0.5rem;align-items:center">
+        <div class="dp-size-intensity" role="group" aria-label="Size vs Intensity toggle" style="display:inline-flex;border:1px solid var(--border);border-radius:4px;overflow:hidden">
+          <button class="btn btn-sm dp-view-btn active" data-view="by-ticker" title="Absolute dark-pool notional">Size</button>
+          <button class="btn btn-sm dp-view-btn" data-view="by-mcap" title="Dark-pool notional relative to market cap (bps)">Intensity</button>
+        </div>
         <button class="btn btn-sm dp-view-btn" data-view="multiday">Multi-Day</button>
+        <button class="btn btn-sm dp-view-btn" data-view="top-prints">Top Prints ($1M+)</button>
+        <details style="display:inline-block;margin-left:auto">
+          <summary style="cursor:pointer;color:var(--muted);font-size:0.8rem">More views</summary>
+          <div style="display:flex;gap:0.5rem;margin-top:0.5rem">
+            <button class="btn btn-sm dp-view-btn" data-view="daily-accumulated">Daily Accumulated</button>
+          </div>
+        </details>
       </div>
 
       <!-- Aggregated by ticker (notional) -->

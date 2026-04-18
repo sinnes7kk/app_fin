@@ -24,6 +24,15 @@ from app.config import (
     MIN_FINAL_SCORE,
     REGIME_THRESHOLD_BOOST,
 )
+from app.analytics.grade_backtest import format_header as _grade_stats_header, load_grade_stats
+from app.features.decision_context import (
+    compute_liquidity,
+    compute_r_at_market,
+    compute_session_context,
+    compute_rs,
+    suggest_expression,
+    enrich_signal,
+)
 from app.features.dark_pool_tracker import (
     aggregate_daily_accumulated,
     aggregate_dark_pool_prints,
@@ -34,6 +43,7 @@ from app.features.flow_tracker import compute_multi_day_flow
 from app.features.hottest_chains import aggregate_chains_by_ticker
 from app.features.insider_tracker import classify_insider_activity
 from app.features.sentiment_tracker import compute_sentiment_trend
+from app.web.view_models import build_trader_card_rows
 from app.web.data_access import (
     load_dark_pool_recent,
     load_equity_curve,
@@ -745,16 +755,18 @@ def _data_card_article(
     clickable: bool = False,
     direction: str = "",
     filter_attrs: dict[str, str] | None = None,
+    extra_card_cls: str = "",
 ) -> str:
     tcls = "data-card-ticker ticker-link" if clickable else "data-card-ticker"
     icls = " data-card--interactive" if clickable else ""
+    extra_cls = f" {extra_card_cls}" if extra_card_cls else ""
     dir_attr = f' data-direction="{html_escape(str(direction))}"' if direction else ""
     extra_attrs = ""
     if filter_attrs:
         for k, v in filter_attrs.items():
             extra_attrs += f' data-{k}="{html_escape(str(v))}"'
     return (
-        f'<article class="data-card{icls}" data-ticker="{html_escape(str(ticker))}"{dir_attr}{extra_attrs}>'
+        f'<article class="data-card{icls}{extra_cls}" data-ticker="{html_escape(str(ticker))}"{dir_attr}{extra_attrs}>'
         f'<header class="data-card-head"><span class="{tcls}">{html_escape(str(ticker))}</span>'
         f"{head_badges_html}</header>"
         f'<div class="data-card-body">{metrics_html}{extra_html}</div></article>'
@@ -847,8 +859,20 @@ def _signals_card_fragments(df: pd.DataFrame, *, clickable: bool = True) -> list
     return out
 
 
-def _candidates_card_fragments(df: pd.DataFrame, *, clickable: bool = True) -> list[str]:
-    """Render validated candidate cards: 3 scores + pattern + status."""
+def _candidates_card_fragments(
+    df: pd.DataFrame,
+    *,
+    clickable: bool = True,
+    is_near_miss: bool = False,
+    near_threshold_long: float | None = None,
+    near_threshold_short: float | None = None,
+) -> list[str]:
+    """Render validated candidate cards: 3 scores + pattern + status.
+
+    When ``is_near_miss`` is True (plan §3), we swap the IV Rank metric for
+    an explicit ``Δ to gate`` (distance to the promotion threshold) — that's
+    the decision-critical number on Near Misses, IV rank rarely is.
+    """
     if df.empty:
         return []
     view = _round_floats(df.copy())
@@ -880,8 +904,27 @@ def _candidates_card_fragments(df: pd.DataFrame, *, clickable: bool = True) -> l
             ("Price", _conviction_span(_row_scalar(row, "price_score"))),
             ("Options", _conviction_span(_row_scalar(row, "options_context_score"))),
             ("Final", _conviction_span(_row_scalar(row, "final_score"))),
-            ("IV Rank", _fmt_iv_rank(_row_scalar(row, "iv_rank"))),
         ]
+        if is_near_miss:
+            fs = _row_scalar(row, "final_score")
+            dir_ = str(row.get("direction", "")).upper()
+            threshold = near_threshold_long if dir_ == "LONG" else near_threshold_short
+            if fs is not None and threshold is not None:
+                try:
+                    delta = float(fs) - float(threshold)
+                    cls = "bad" if delta < 0 else "good"
+                    pairs.append(
+                        (
+                            "Δ to gate",
+                            f'<span class="{cls}">{delta:+.2f}</span>',
+                        )
+                    )
+                except (TypeError, ValueError):
+                    pairs.append(("Δ to gate", "—"))
+            else:
+                pairs.append(("Δ to gate", "—"))
+        else:
+            pairs.append(("IV Rank", _fmt_iv_rank(_row_scalar(row, "iv_rank"))))
         metrics = _card_metrics_dl(pairs)
         pat = _row_scalar(row, "pattern")
         pat_p = (
@@ -1003,7 +1046,6 @@ def _trades_card_fragments(df: pd.DataFrame) -> list[str]:
             ("P&amp;L", pnl_s),
             ("R", _fmt_card_num(_row_scalar(row, "r_multiple"), 2)),
             ("Days", _fmt_card_num(_row_scalar(row, "days_held"), 0)),
-            ("Final score", _conviction_span(_row_scalar(row, "final_score"))),
         ]
         metrics = _card_metrics_dl(pairs)
         er = _row_scalar(row, "exit_reason")
@@ -1117,7 +1159,16 @@ def _watchlist_card_fragments(rows: list[dict]) -> list[str]:
         rr = r.get("reject_reason")
         ex = ""
         if rr:
-            ex += f'<p class="data-card-thesis">{html_escape(str(rr))}</p>'
+            rr_full = str(rr)
+            # Show only the top keyword (first comma- or pipe-separated token)
+            # with full text in tooltip. Plan §3: "truncate to the top
+            # rejection keyword + a full-text tooltip".
+            primary = rr_full.split(",")[0].split("|")[0].split("(")[0].strip()
+            primary = primary or rr_full[:40]
+            ex += (
+                f'<p class="data-card-thesis" title="{html_escape(rr_full)}">'
+                f'{html_escape(primary)}</p>'
+            )
         out.append(
             _data_card_article(
                 t,
@@ -1154,7 +1205,24 @@ def _positions_card_fragments(rows: list[dict]) -> list[str]:
         if hs and str(hs).strip():
             cls = {"STRONG": "good", "NEUTRAL": "neutral", "WEAK": "warn", "FAILING": "bad"}.get(str(hs), "neutral")
             health_badge = f'<span class="health-badge health-{cls}">{html_escape(str(hs))}</span>'
-        head = f'<span class="data-card-badges">{direc}{health_badge}</span>'
+
+        rm = r.get("r_at_market") or {}
+        r_market_badge = ""
+        if rm.get("r_available"):
+            r_ent = rm.get("r_from_entry", 0.0)
+            r_stp = rm.get("r_to_stop", 0.0)
+            cls = "pos-pnl-pos" if r_ent >= 0 else "pos-pnl-neg"
+            r_market_badge = (
+                f'<span class="pos-r-market {cls}" title="R-multiple from entry · remaining R to stop">'
+                f'{r_ent:+.2f}R · {r_stp:.2f}R to stop</span>'
+            )
+
+        heat_badge = ""
+        heat_pct = r.get("heat_contribution_pct")
+        if heat_pct is not None and heat_pct > 0:
+            heat_badge = f'<span class="pos-heat" title="Risk as % of total open notional">{heat_pct:.1f}% heat</span>'
+
+        head = f'<span class="data-card-badges">{direc}{health_badge}{r_market_badge}{heat_badge}</span>'
         pairs: list[tuple[str, str]] = [
             ("Health", _conviction_span(r.get("health"))),
             ("Unreal R", _fmt_card_num(r.get("unrealized_r"), 2)),
@@ -1203,6 +1271,7 @@ def _positions_card_fragments(rows: list[dict]) -> list[str]:
         if opened:
             pretty = _format_opened_ts(opened)
             od = f'<p class="data-card-meta">Opened {pretty}</p>'
+        proximity_cls = r.get("stop_proximity_cls") or ""
         out.append(
             _data_card_article(
                 t,
@@ -1211,6 +1280,7 @@ def _positions_card_fragments(rows: list[dict]) -> list[str]:
                 extra_html=ladder + od,
                 clickable=True,
                 direction=str(r.get("direction", "")),
+                extra_card_cls=proximity_cls,
             )
         )
     return out
@@ -1452,6 +1522,221 @@ def _build_risk(positions: list[dict]) -> dict:
         "rows": rows,
         "health_dist": dict(health_dist),
     }
+
+
+# ---------------------------------------------------------------------------
+# Trader dashboard helpers: action bar, actionable-now, flow-tracker enrichment
+# ---------------------------------------------------------------------------
+
+MAX_OPEN_POSITIONS = 6
+# Default per-position risk assumption if caller doesn't supply one.
+# Matches DEFAULT_RISK_PER_TRADE_PCT used downstream (~0.5-1% per trade).
+DEFAULT_POSITION_RISK_PCT = 0.01
+
+
+def _build_action_bar(
+    positions: list[dict],
+    regime: dict | None,
+    signals_df: pd.DataFrame,
+    watchlist: list[dict],
+    grade_stats: dict | None,
+) -> dict:
+    """Top-of-page decision strip: regime, SPY, VIX, heat, open slots, new A-grades."""
+    rs = (regime or {}).get("regime_score", 0.5)
+    regime_cls = "ab-bull" if rs >= 0.65 else ("ab-bear" if rs <= 0.35 else "ab-neutral")
+    regime_label = "Bull-leaning" if rs >= 0.65 else ("Bear-leaning" if rs <= 0.35 else "Neutral")
+
+    spy_close = (regime or {}).get("spy_close")
+    spy_prev = (regime or {}).get("spy_prev_close") or (regime or {}).get("spy_close_prev")
+    spy_pct = None
+    if spy_close and spy_prev:
+        try:
+            spy_pct = ((float(spy_close) - float(spy_prev)) / float(spy_prev)) * 100
+        except (TypeError, ValueError, ZeroDivisionError):
+            spy_pct = None
+    if spy_pct is None:
+        spy_pct = (regime or {}).get("spy_pct_today") or 0.0
+
+    vix_close = (regime or {}).get("vix_close")
+    vix_mult = (regime or {}).get("vix_sizing_mult")
+
+    # Portfolio heat: sum of |entry - stop| * shares / equity.
+    # Proxy equity from open-position notional when no explicit equity is known.
+    total_notional = 0.0
+    total_risk = 0.0
+    for p in positions:
+        try:
+            ep = float(p.get("entry_price") or 0)
+            stop = float(p.get("active_stop") or p.get("stop_price") or 0)
+            sh = float(p.get("shares") or 0)
+        except (TypeError, ValueError):
+            continue
+        if ep <= 0 or sh <= 0:
+            continue
+        total_notional += ep * sh
+        if stop > 0:
+            total_risk += abs(ep - stop) * sh
+
+    heat_pct = (total_risk / total_notional * 100.0) if total_notional > 0 else 0.0
+    # Rough sanity cap for display
+    heat_pct = min(heat_pct, 99.9)
+    heat_cls = "ab-neg" if heat_pct >= 4.0 else ("ab-warn" if heat_pct >= 2.5 else "ab-pos")
+
+    open_count = len(positions)
+    open_slots = max(0, MAX_OPEN_POSITIONS - open_count)
+
+    # New A-grades = grade-A signals not in positions or watchlist.
+    in_book = {str(p.get("ticker", "")).upper() for p in positions}
+    in_book |= {str(w.get("ticker", "")).upper() for w in watchlist}
+    new_a_grades = 0
+    if not signals_df.empty and "final_score" in signals_df.columns:
+        _fs = pd.to_numeric(signals_df["final_score"], errors="coerce")
+        mask = _fs >= 7.5
+        if mask.any():
+            tickers = signals_df.loc[mask, "ticker"].astype(str).str.upper().tolist()
+            new_a_grades = sum(1 for t in tickers if t not in in_book)
+
+    grade_stats_line = None
+    if grade_stats and (grade_stats.get("stats") or {}).get("A", {}).get("count"):
+        a = grade_stats["stats"]["A"]
+        hr = int(round((a.get("hit_rate") or 0) * 100))
+        grade_stats_line = f"{hr}% hit · {a.get('avg_r'):+.1f}R · n={a['count']}"
+
+    return {
+        "regime_score": rs,
+        "regime_cls": regime_cls,
+        "regime_label": regime_label,
+        "spy_pct_today": round(spy_pct, 2) if spy_pct is not None else 0.0,
+        "spy_trend": (regime or {}).get("spy_trend"),
+        "vix": float(vix_close) if vix_close else None,
+        "vix_sizing_mult": float(vix_mult) if vix_mult else None,
+        "heat_pct": round(heat_pct, 2),
+        "heat_cls": heat_cls,
+        "open_positions": open_count,
+        "max_positions": MAX_OPEN_POSITIONS,
+        "open_slots": open_slots,
+        "new_a_grades": new_a_grades,
+        "grade_stats_line": grade_stats_line,
+    }
+
+
+def _actionable_now(
+    signals_df: pd.DataFrame,
+    positions: list[dict],
+    watchlist: list[dict],
+    limit: int = 5,
+) -> list[dict]:
+    """Top N final-score signals not already in book or watchlist.
+
+    These are what a trader should consider taking _now_. Returns dicts that
+    the `trader_card` macro can render directly.
+    """
+    if signals_df.empty:
+        return []
+
+    in_book = {str(p.get("ticker", "")).upper() for p in positions}
+    in_book |= {str(w.get("ticker", "")).upper() for w in watchlist}
+
+    df = signals_df.copy()
+    if "final_score" in df.columns:
+        df["_fs"] = pd.to_numeric(df["final_score"], errors="coerce").fillna(0)
+        df = df.sort_values("_fs", ascending=False)
+
+    out: list[dict] = []
+    for _, row in df.iterrows():
+        ticker = str(row.get("ticker", "")).upper()
+        if not ticker or ticker in in_book:
+            continue
+        fs = float(row.get("final_score") or 0)
+        if fs < 6.5:
+            continue
+
+        item = {k: row.get(k) for k in row.index if pd.notna(row.get(k))}
+        out.append(item)
+        if len(out) >= limit:
+            break
+
+    return out
+
+
+def _enrich_flow_tracker_decision(rows: list[dict]) -> list[dict]:
+    """Attach liquidity tier + trade-expression hint to every Flow Tracker row.
+
+    Flow Tracker rows lack entry/stop plans so we can't produce full trader
+    cards, but the liquidity + expression badges are still decision-critical.
+    """
+    for r in rows:
+        ticker = r.get("ticker")
+        if not ticker:
+            continue
+        try:
+            r["liquidity"] = compute_liquidity(ticker, mcap=r.get("marketcap"))
+        except Exception:
+            r["liquidity"] = {"adv_dollar": None, "liquidity_tier": "UNKNOWN"}
+
+        direction = "LONG" if r.get("direction") == "BULLISH" else "SHORT"
+        earn = (r.get("earnings") or {})
+        dte = earn.get("days_until_earnings")
+        r["trade_expression"] = suggest_expression(
+            direction,
+            r.get("latest_iv_rank"),
+            dte,
+            adv_dollar=r["liquidity"].get("adv_dollar"),
+        )
+    return rows
+
+
+def _enrich_positions_live(positions: list[dict], total_notional_hint: float | None = None) -> list[dict]:
+    """Add R-at-market and heat-contribution to each open position.
+
+    Called pre-render so templates can use `p.r_at_market`, `p.heat_contribution_pct`,
+    and `p.stop_proximity_cls` without recomputing.
+    """
+    if not positions:
+        return positions
+
+    total_notional = total_notional_hint or 0.0
+    if total_notional <= 0:
+        for p in positions:
+            try:
+                total_notional += float(p.get("entry_price") or 0) * float(p.get("shares") or 0)
+            except (TypeError, ValueError):
+                continue
+    if total_notional <= 0:
+        total_notional = 1.0  # avoid div0; heat_pct will just be unusable
+
+    for p in positions:
+        direction = p.get("direction", "")
+        entry = p.get("entry_price")
+        stop = p.get("active_stop") or p.get("stop_price")
+        spot = p.get("last_price") or entry
+        p["r_at_market"] = compute_r_at_market(direction, entry, stop, spot)
+
+        try:
+            ep = float(entry or 0)
+            sp = float(stop or 0)
+            sh = float(p.get("shares") or 0)
+            if ep > 0 and sp > 0 and sh > 0:
+                risk_dollar = abs(ep - sp) * sh
+                p["heat_contribution_pct"] = round(risk_dollar / total_notional * 100, 2)
+            else:
+                p["heat_contribution_pct"] = 0.0
+        except (TypeError, ValueError):
+            p["heat_contribution_pct"] = 0.0
+
+        # Stop proximity classification for card border tinting.
+        rm = p.get("r_at_market", {})
+        r_to_stop = rm.get("r_to_stop")
+        if r_to_stop is None:
+            p["stop_proximity_cls"] = "stop-ok"
+        elif r_to_stop < 0.25:
+            p["stop_proximity_cls"] = "stop-danger"
+        elif r_to_stop < 0.75:
+            p["stop_proximity_cls"] = "stop-warn"
+        else:
+            p["stop_proximity_cls"] = "stop-ok"
+
+    return positions
 
 
 def _recent_activity(positions: list[dict], trades_df: pd.DataFrame, limit: int = 8) -> list[dict]:
@@ -1952,6 +2237,24 @@ def index():
     risk_data = _build_risk(positions)
     activity = _recent_activity(positions, load_trade_log_tail(20))
 
+    # Enrich live positions with R-at-market and heat-contribution.
+    positions = _enrich_positions_live(positions)
+    positions_agent = _enrich_positions_live(positions_agent)
+
+    # Grade-backtest header for Flow Tracker + action bar.
+    grade_stats = load_grade_stats()
+    grade_stats_header = _grade_stats_header(grade_stats)
+
+    # Top-of-page action bar (uses signals DataFrame — signals already loaded above).
+    action_bar_ctx = _build_action_bar(positions, regime, signals, watchlist, grade_stats)
+
+    # "Trades to Take Now" — top 5 fresh signals not in book or watchlist.
+    _vix_mult = (regime or {}).get("vix_sizing_mult")
+    actionable_now = build_trader_card_rows(
+        _actionable_now(signals, positions, watchlist, limit=5),
+        vix_sizing_mult=float(_vix_mult) if _vix_mult else None,
+    )
+
     pp = TABLE_PAGE_SIZE
     page_bull = _int_query("page_bull")
     page_bear = _int_query("page_bear")
@@ -2004,7 +2307,13 @@ def index():
         "bear_src": bear_src,
         "bear_detail": _df_to_detail_json(bear),
         "near_html": _paginate_card_fragments(
-            _candidates_card_fragments(near_df, clickable=True),
+            _candidates_card_fragments(
+                near_df,
+                clickable=True,
+                is_near_miss=True,
+                near_threshold_long=_near_long_min,
+                near_threshold_short=_near_short_min,
+            ),
             page=page_near,
             per_page=pp,
             page_param="page_near",
@@ -2063,21 +2372,28 @@ def index():
             empty_msg="No agent portfolio positions. Agent portfolio populates once the OpenAI API key is configured and agents run.",
         ),
         "perf_agent": perf_agent,
-        # Multi-day flow tracker enriched with sentiment + dark pool + chains + insider + earnings
-        "flow_tracker": _enrich_flow_tracker_earnings(
-            _enrich_flow_tracker_insider(
-                _enrich_flow_tracker_chains(
-                    _enrich_flow_tracker_dp(
-                        _enrich_flow_tracker_sentiment(
-                            compute_multi_day_flow(FLOW_TRACKER_LOOKBACK_DAYS, FLOW_TRACKER_MIN_ACTIVE_DAYS)
+        # Multi-day flow tracker enriched with sentiment + dark pool + chains + insider + earnings + decision context
+        "flow_tracker": _enrich_flow_tracker_decision(
+            _enrich_flow_tracker_earnings(
+                _enrich_flow_tracker_insider(
+                    _enrich_flow_tracker_chains(
+                        _enrich_flow_tracker_dp(
+                            _enrich_flow_tracker_sentiment(
+                                compute_multi_day_flow(FLOW_TRACKER_LOOKBACK_DAYS, FLOW_TRACKER_MIN_ACTIVE_DAYS)
+                            ),
+                            compute_multi_day_dp(DP_TRACKER_LOOKBACK_DAYS, DP_TRACKER_MIN_ACTIVE_DAYS),
                         ),
-                        compute_multi_day_dp(DP_TRACKER_LOOKBACK_DAYS, DP_TRACKER_MIN_ACTIVE_DAYS),
+                        _hottest_chains_by_ticker,
                     ),
-                    _hottest_chains_by_ticker,
-                ),
-                _insider_by_ticker,
+                    _insider_by_ticker,
+                )
             )
         ),
+        # Trader dashboard decision surfaces
+        "ab": action_bar_ctx,
+        "actionable_now": actionable_now,
+        "grade_stats": grade_stats,
+        "grade_stats_header": grade_stats_header,
         "flow_tracker_lookback": FLOW_TRACKER_LOOKBACK_DAYS,
         # Market-wide dark pool screener (single-day)
         "dark_pool_screener": _build_dark_pool_screener(flow),
