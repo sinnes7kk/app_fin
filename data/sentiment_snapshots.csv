@@ -70,8 +70,8 @@ snapshot_date,ticker,st_messages,st_bullish,st_bearish,st_sentiment,rd_mentions,
 2026-04-18,DAVE,0,0,0,0.5,0,0,0,—,neutral
 2026-04-18,PCT,0,0,0,0.5,0,0,0,—,neutral
 2026-04-18,CORZ,0,0,0,0.5,0,0,0,—,neutral
-2026-04-18,PTON,0,0,0,0.5,0,0,0,—,neutral
 2026-04-18,CAR,0,0,0,0.5,0,0,0,—,neutral
+2026-04-18,PTON,0,0,0,0.5,0,0,0,—,neutral
 2026-04-18,CRWD,0,0,0,0.5,0,0,0,—,neutral
 2026-04-18,SOUN,0,0,0,0.5,0,0,0,—,neutral
 2026-04-18,COIN,0,0,0,0.5,0,0,0,—,neutral
@@ -79,8 +79,9 @@ snapshot_date,ticker,st_messages,st_bullish,st_bearish,st_sentiment,rd_mentions,
 2026-04-18,MP,0,0,0,0.5,0,0,0,—,neutral
 2026-04-18,OKLO,0,0,0,0.5,0,0,0,—,neutral
 2026-04-18,U,0,0,0,0.5,0,0,0,—,neutral
-2026-04-18,KDK,0,0,0,0.5,0,0,0,—,neutral
 2026-04-18,BULL,0,0,0,0.5,0,0,0,—,neutral
+2026-04-18,KDK,0,0,0,0.5,0,0,0,—,neutral
+2026-04-18,CMPX,0,0,0,0.5,0,0,0,—,neutral
 2026-04-18,EL,0,0,0,0.5,0,0,0,—,neutral
 2026-04-18,NFLX,0,0,0,0.5,0,0,0,—,neutral
 2026-04-18,OGN,0,0,0,0.5,0,0,0,—,neutral
@@ -88,5 +89,4 @@ snapshot_date,ticker,st_messages,st_bullish,st_bearish,st_sentiment,rd_mentions,
 2026-04-18,ASTS,0,0,0,0.5,0,0,0,—,neutral
 2026-04-18,PDD,0,0,0,0.5,0,0,0,—,neutral
 2026-04-18,SMCI,0,0,0,0.5,0,0,0,—,neutral
-2026-04-18,LULU,0,0,0,0.5,0,0,0,—,neutral
-2026-04-18,SCHW,0,0,0,0.5,0,0,0,—,neutral
+2026-04-18,GME,0,0,0,0.5,0,0,0,—,neutral
