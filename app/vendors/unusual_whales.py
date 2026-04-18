@@ -579,7 +579,88 @@ def fetch_stock_screener(
         data = resp.json().get("data", [])
     except Exception:
         return []
+
+    # UW's /screener/stocks returns raw inputs (prev_call_oi, avg_30_day_*_volume,
+    # etc.) but NOT the derived ratios the rest of the pipeline expects.  Compute
+    # them here so downstream consumers (flow_tracker snapshots, Trader Card UI)
+    # see populated values instead of blanks / 0.0x.
+    for row in data:
+        try:
+            _enrich_screener_derivations(row)
+        except Exception:
+            # Fail-soft — leave raw row as-is; consumers will treat missing
+            # values as None via the normal coercion helpers.
+            pass
     return data
+
+
+def _enrich_screener_derivations(row: dict) -> None:
+    """Derive ``*_oi_change_perc`` / ``perc_*_day_total`` / ``volume`` in-place.
+
+    UW's /screener/stocks response changed (or never exposed) the ratio fields
+    that downstream code keys on.  Rather than teach every consumer to do the
+    math, we normalise the shape here so the snapshot CSV and UI stay backward
+    compatible.  Only fills fields when the underlying raw inputs are present
+    and non-zero; otherwise leaves them as ``None``.
+    """
+    def _num(v):
+        try:
+            if v is None:
+                return None
+            f = float(v)
+            if f != f:  # NaN
+                return None
+            return f
+        except (TypeError, ValueError):
+            return None
+
+    call_oi = _num(row.get("call_open_interest"))
+    put_oi = _num(row.get("put_open_interest"))
+    total_oi = _num(row.get("total_open_interest"))
+    prev_call_oi = _num(row.get("prev_call_oi"))
+    prev_put_oi = _num(row.get("prev_put_oi"))
+
+    if row.get("call_oi_change_perc") in (None, "") and prev_call_oi and call_oi is not None:
+        row["call_oi_change_perc"] = (call_oi - prev_call_oi) / prev_call_oi * 100.0
+    if row.get("put_oi_change_perc") in (None, "") and prev_put_oi and put_oi is not None:
+        row["put_oi_change_perc"] = (put_oi - prev_put_oi) / prev_put_oi * 100.0
+    if row.get("total_oi_change_perc") in (None, ""):
+        prev_total = None
+        if prev_call_oi is not None and prev_put_oi is not None:
+            prev_total = prev_call_oi + prev_put_oi
+        if prev_total and total_oi is not None:
+            row["total_oi_change_perc"] = (total_oi - prev_total) / prev_total * 100.0
+        elif prev_total and call_oi is not None and put_oi is not None:
+            row["total_oi_change_perc"] = ((call_oi + put_oi) - prev_total) / prev_total * 100.0
+
+    call_vol = _num(row.get("call_volume"))
+    put_vol = _num(row.get("put_volume"))
+    total_opt_vol = None
+    if call_vol is not None or put_vol is not None:
+        total_opt_vol = (call_vol or 0.0) + (put_vol or 0.0)
+
+    if row.get("volume") in (None, "") and total_opt_vol is not None:
+        row["volume"] = total_opt_vol
+
+    if row.get("perc_30_day_total") in (None, ""):
+        avg_c = _num(row.get("avg_30_day_call_volume"))
+        avg_p = _num(row.get("avg_30_day_put_volume"))
+        denom = (avg_c or 0.0) + (avg_p or 0.0)
+        if denom > 0 and total_opt_vol is not None:
+            row["perc_30_day_total"] = total_opt_vol / denom
+
+    if row.get("perc_3_day_total") in (None, ""):
+        avg_c3 = _num(row.get("avg_3_day_call_volume"))
+        avg_p3 = _num(row.get("avg_3_day_put_volume"))
+        denom3 = (avg_c3 or 0.0) + (avg_p3 or 0.0)
+        if denom3 > 0 and total_opt_vol is not None:
+            row["perc_3_day_total"] = total_opt_vol / denom3
+
+    if row.get("net_premium") in (None, ""):
+        bull = _num(row.get("bullish_premium"))
+        bear = _num(row.get("bearish_premium"))
+        if bull is not None or bear is not None:
+            row["net_premium"] = (bull or 0.0) - (bear or 0.0)
 
 
 def fetch_uw_alerts(limit: int = 500, hours_back: int = 48) -> list[str]:
