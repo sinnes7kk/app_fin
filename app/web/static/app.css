@@ -1784,9 +1784,105 @@ dl.detail-grid dd {
   border-radius: 3px;
   letter-spacing: 0.03em;
 }
-.tc-grade-a { background: rgba(63,185,80,0.22); color: var(--good); }
-.tc-grade-b { background: rgba(255,152,0,0.2); color: #ffa726; }
-.tc-grade-c { background: rgba(255,255,255,0.07); color: rgba(255,255,255,0.55); }
+.tc-grade-aplus  { background: rgba(63,185,80,0.32);  color: #5fd872; }
+.tc-grade-a      { background: rgba(63,185,80,0.22);  color: var(--good); }
+.tc-grade-aminus { background: rgba(63,185,80,0.14);  color: #4fc26a; }
+.tc-grade-bplus  { background: rgba(255,180,80,0.22); color: #ffc266; }
+.tc-grade-b      { background: rgba(255,152,0,0.2);   color: #ffa726; }
+.tc-grade-bminus { background: rgba(255,120,0,0.18);  color: #ff8f42; }
+.tc-grade-c      { background: rgba(255,255,255,0.07); color: rgba(255,255,255,0.55); }
+
+/* Δ-weighted average delta chip on the trader-card meta row */
+.tc-delta-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  padding: 0.12rem 0.42rem;
+  border-radius: 3px;
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  margin-left: 0.35rem;
+  border: 1px solid transparent;
+}
+.tc-delta-chip-uw    { background: rgba(88,166,255,0.15); color: #9ec1ff; border-color: rgba(88,166,255,0.30); }
+.tc-delta-chip-proxy { background: rgba(255,200,120,0.10); color: rgba(255,200,120,0.85); border-color: rgba(255,200,120,0.28); }
+.tc-delta-chip-mixed { background: rgba(255,255,255,0.06); color: rgba(255,255,255,0.65); border-color: rgba(255,255,255,0.18); }
+.tc-delta-chip .tc-delta-src {
+  font-size: 0.58rem;
+  opacity: 0.8;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 700;
+}
+
+/* "Why this grade" bullet list on trader cards */
+.tc-grade-reasons {
+  list-style: none;
+  padding: 0.2rem 0.55rem 0.3rem;
+  margin: 0.25rem 0 0 0;
+  background: rgba(255,255,255,0.025);
+  border-radius: 5px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  font-size: 0.7rem;
+  line-height: 1.35;
+}
+.tc-grade-reasons li {
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+  color: var(--text);
+}
+.tc-grade-reasons .tc-reason-label { flex: 1; color: rgba(230,237,243,0.85); }
+.tc-grade-reasons .tc-reason-points { font-variant-numeric: tabular-nums; font-weight: 600; }
+.tc-grade-reasons .tc-reason-driver .tc-reason-points { color: var(--good); }
+.tc-grade-reasons .tc-reason-drag   .tc-reason-points { color: #ffb453; }
+.tc-grade-reasons .tc-reason-drag   .tc-reason-label  { color: rgba(255,200,120,0.78); }
+
+/* Inline "Why" summary used in the Flow Tracker + Top Flow Intensity tables */
+.ft-why-inline {
+  color: rgba(230,237,243,0.78);
+  font-size: 0.72rem;
+  letter-spacing: 0.01em;
+}
+.ft-why-inline .ft-why-drag { color: rgba(255,180,80,0.85); }
+
+/* Avg |Δ| cell/metric shown next to conviction in tables */
+.ft-avg-delta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-variant-numeric: tabular-nums;
+}
+.ft-avg-delta .ft-avg-delta-src {
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 0.05rem 0.3rem;
+  border-radius: 2px;
+  border: 1px solid transparent;
+}
+.ft-avg-delta-src.src-uw    { background: rgba(88,166,255,0.15); color: #9ec1ff; border-color: rgba(88,166,255,0.30); }
+.ft-avg-delta-src.src-proxy { background: rgba(255,200,120,0.10); color: rgba(255,200,120,0.85); border-color: rgba(255,200,120,0.28); }
+
+.tc-ztier {
+  display: inline-block;
+  padding: 2px 6px;
+  margin-left: 0.35rem;
+  border-radius: 3px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  vertical-align: middle;
+  border: 1px solid transparent;
+}
+.tc-ztier-full   { background: rgba(63,185,80,0.12);  color: var(--good); border-color: rgba(63,185,80,0.35); }
+.tc-ztier-shrunk { background: rgba(120,160,220,0.10); color: #9ec1ff; border-color: rgba(120,160,220,0.30); }
+.tc-ztier-peer   { background: rgba(255,255,255,0.05); color: rgba(255,200,120,0.80); border-color: rgba(255,200,120,0.25); }
+.tc-ztier-abs    { background: rgba(255,255,255,0.04); color: rgba(255,120,120,0.70); border-color: rgba(255,120,120,0.25); }
 
 .tc-badges {
   display: flex;

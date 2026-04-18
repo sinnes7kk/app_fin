@@ -21,6 +21,54 @@ from app.config import (
 
 DATA_DIR = Path(__file__).resolve().parents[2] / "data"
 SNAPSHOTS_PATH = DATA_DIR / "screener_snapshots.csv"
+STATS_META_PATH = DATA_DIR / "flow_stats_meta.json"
+
+
+def _load_stats_meta() -> dict:
+    """Read ``data/flow_stats_meta.json`` (ticker → first_observed_date).
+
+    Returns an empty dict if the file is missing or malformed.
+    """
+    import json
+    if not STATS_META_PATH.exists():
+        return {}
+    try:
+        with open(STATS_META_PATH, "r") as f:
+            data = json.load(f)
+            if isinstance(data, dict):
+                return data
+    except Exception:
+        pass
+    return {}
+
+
+def _save_stats_meta(meta: dict) -> None:
+    import json
+    STATS_META_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with open(STATS_META_PATH, "w") as f:
+        json.dump(meta, f, indent=2, sort_keys=True)
+
+
+def update_stats_meta(tickers) -> None:
+    """Record ``first_observed_date`` for any ticker seen for the first time.
+
+    Used by ``flow_stats`` to distinguish genuine short-history tickers (new
+    IPOs / new screener entries) from tickers with gap days in their series.
+    """
+    if not tickers:
+        return
+    today_str = str(date.today())
+    meta = _load_stats_meta()
+    changed = False
+    for t in tickers:
+        t = (str(t) or "").upper().strip()
+        if not t:
+            continue
+        if t not in meta:
+            meta[t] = today_str
+            changed = True
+    if changed:
+        _save_stats_meta(meta)
 
 SNAPSHOT_COLS = [
     "snapshot_date",
@@ -90,6 +138,11 @@ def save_screener_snapshot(screener_data: list[dict]) -> None:
         writer = csv.DictWriter(f, fieldnames=SNAPSHOT_COLS, extrasaction="ignore")
         writer.writeheader()
         writer.writerows(all_rows)
+
+    try:
+        update_stats_meta(r["ticker"] for r in new_rows)
+    except Exception as e:
+        print(f"  [flow-tracker] stats-meta update failed: {e}")
 
     print(f"  [flow-tracker] saved {len(new_rows)} screener rows for {today_str} "
           f"({len(existing)} historical rows retained)")
@@ -174,16 +227,24 @@ def save_flow_feature_snapshot(feature_table: pd.DataFrame) -> None:
         writer.writeheader()
         writer.writerows(all_rows)
 
+    try:
+        update_stats_meta(r["ticker"] for r in new_rows)
+    except Exception as e:
+        print(f"  [flow-tracker] stats-meta update failed: {e}")
+
     print(f"  [flow-tracker] merged {len(new_rows)} flow-feature tickers "
           f"(skipped {len(existing_today)} already from screener)")
 
 
 def _conviction_grade(score: float) -> str:
-    if score >= 7.5:
-        return "A"
-    if score >= 5.0:
-        return "B"
-    return "C"
+    """Thin re-export of ``grade_explainer.conviction_grade``.
+
+    Kept as a module-level name so existing imports
+    (``from app.features.flow_tracker import _conviction_grade``) keep
+    working. Implements the 7-tier ladder (A+/A/A-/B+/B/B-/C).
+    """
+    from app.features.grade_explainer import conviction_grade
+    return conviction_grade(score)
 
 
 def compute_multi_day_flow(
@@ -418,11 +479,24 @@ def compute_multi_day_flow(
         r["accel_t_stat"] = round(r["_accel_t_stat"], 2)
         r["hedging_risk"] = hedging_risk
 
-        # Clean up internal keys
+        r["_intensity_norm"] = intensity_norm
+        r["_consistency_norm"] = consistency_norm
+        r["_accel_norm"] = accel_norm
+        r["_mass_norm"] = mass_norm
+        try:
+            from app.features.grade_explainer import build_tracker_grade_reasons
+            r["grade_reasons"] = build_tracker_grade_reasons(r)
+        except Exception:
+            r["grade_reasons"] = []
+
         del r["_consistency_raw"]
         del r["_accel_raw"]
         del r["_accel_t_stat"]
         del r["_cum_total"]
+        del r["_intensity_norm"]
+        del r["_consistency_norm"]
+        del r["_accel_norm"]
+        del r["_mass_norm"]
 
     raw_results.sort(key=lambda x: x["conviction_score"], reverse=True)
 

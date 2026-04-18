@@ -12,14 +12,79 @@
 #}
 
 {% macro _grade_badge(grade, score) %}
-  {% if grade == 'A' %}
-  <span class="tc-grade tc-grade-a" title="Conviction grade A (score ≥ 7.5)">A · {{ "%.1f"|format(score) }}</span>
+  {% if grade == 'A+' %}
+  <span class="tc-grade tc-grade-aplus" title="Conviction grade A+ (score ≥ 8.5)">A+ · {{ "%.1f"|format(score) }}</span>
+  {% elif grade == 'A' %}
+  <span class="tc-grade tc-grade-a" title="Conviction grade A (7.5 ≤ score < 8.5)">A · {{ "%.1f"|format(score) }}</span>
+  {% elif grade == 'A-' %}
+  <span class="tc-grade tc-grade-aminus" title="Conviction grade A- (6.75 ≤ score < 7.5)">A- · {{ "%.1f"|format(score) }}</span>
+  {% elif grade == 'B+' %}
+  <span class="tc-grade tc-grade-bplus" title="Conviction grade B+ (6.0 ≤ score < 6.75)">B+ · {{ "%.1f"|format(score) }}</span>
   {% elif grade == 'B' %}
-  <span class="tc-grade tc-grade-b" title="Conviction grade B (5.0 ≤ score < 7.5)">B · {{ "%.1f"|format(score) }}</span>
+  <span class="tc-grade tc-grade-b" title="Conviction grade B (5.0 ≤ score < 6.0)">B · {{ "%.1f"|format(score) }}</span>
+  {% elif grade == 'B-' %}
+  <span class="tc-grade tc-grade-bminus" title="Conviction grade B- (4.0 ≤ score < 5.0)">B- · {{ "%.1f"|format(score) }}</span>
   {% elif grade == 'C' %}
-  <span class="tc-grade tc-grade-c" title="Conviction grade C">C · {{ "%.1f"|format(score) }}</span>
+  <span class="tc-grade tc-grade-c" title="Conviction grade C (score < 4.0)">C · {{ "%.1f"|format(score) }}</span>
   {% else %}
   <span class="tc-grade tc-grade-c">{{ "%.1f"|format(score) }}</span>
+  {% endif %}
+{% endmacro %}
+
+{% macro _delta_chip(row) %}
+  {# Premium-weighted average |Δ| chip. Source badge: UW (green), proxy (amber),
+     or mixed when the row has both. Hidden when no delta enrichment ran. #}
+  {% set ad = row.avg_delta %}
+  {% set sm = row.delta_source_mix %}
+  {% if ad is not none and ad > 0 %}
+    {% if sm is none %}
+      {% set cls = 'tc-delta-chip-mixed' %}{% set src = '' %}
+    {% elif sm >= 0.85 %}
+      {% set cls = 'tc-delta-chip-uw' %}{% set src = 'UW' %}
+    {% elif sm <= 0.15 %}
+      {% set cls = 'tc-delta-chip-proxy' %}{% set src = 'PRX' %}
+    {% else %}
+      {% set cls = 'tc-delta-chip-mixed' %}{% set src = 'MIX' %}
+    {% endif %}
+    <span class="tc-delta-chip {{ cls }}" title="Premium-weighted average |Δ| across qualifying flow for this side ({{ '%.0f'|format((sm or 0) * 100) }}% UW-sourced)">
+      Δ {{ "%.2f"|format(ad) }}{% if src %}<span class="tc-delta-src">{{ src }}</span>{% endif %}
+    </span>
+  {% endif %}
+{% endmacro %}
+
+{% macro _grade_reasons_list(reasons) %}
+  {% if reasons %}
+  <ul class="tc-grade-reasons" title="Why this grade — top drivers and biggest drag based on component scores">
+    {% for r in reasons %}
+    <li class="tc-reason-{{ r.kind }}">
+      <span class="tc-reason-label">{{ r.label }}</span>
+      <span class="tc-reason-points">
+        {% if r.kind == 'drag' %}↓ {{ "%.2f"|format(r.points) }}{% else %}+{{ "%.2f"|format(r.points) }}{% endif %}
+      </span>
+    </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+{% endmacro %}
+
+{% macro _ztier_chip(row) %}
+  {% set tier = row.flow_confidence_tier %}
+  {% set label = row.flow_confidence_label %}
+  {% if tier and label %}
+    {% if tier == 1 %}
+      {% set cls = 'tc-ztier tc-ztier-full' %}
+      {% set tip = '30-day per-ticker z-score baseline (full confidence)' %}
+    {% elif tier == 2 %}
+      {% set cls = 'tc-ztier tc-ztier-shrunk' %}
+      {% set tip = 'Per-ticker z-score with shrinkage toward cross-section (5-19 days of history)' %}
+    {% elif tier == 3 %}
+      {% set cls = 'tc-ztier tc-ztier-peer' %}
+      {% set tip = 'Cross-sectional peer z-score (ticker has < 5 days of own history)' %}
+    {% else %}
+      {% set cls = 'tc-ztier tc-ztier-abs' %}
+      {% set tip = 'Absolute-threshold scoring (no z-score baseline available)' %}
+    {% endif %}
+    <span class="{{ cls }}" title="{{ tip }}">{{ label }}</span>
   {% endif %}
 {% endmacro %}
 
@@ -126,6 +191,8 @@
       {% if row.final_score is not none and not row.conviction_grade %}
         <span class="tc-grade tc-grade-c" title="Final conviction 0-10">{{ "%.1f"|format(row.final_score) }}</span>
       {% endif %}
+      {{ _ztier_chip(row) }}
+      {{ _delta_chip(row) }}
     </div>
     <div class="tc-badges">
       {{ _confluence_dots(row) }}
@@ -133,6 +200,8 @@
       {{ _liq_badge(row.liquidity or {}) }}
     </div>
   </header>
+
+  {{ _grade_reasons_list(row.grade_reasons) }}
 
   {% if row.entry_price %}
   <dl class="tc-plan">

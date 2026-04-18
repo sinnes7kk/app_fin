@@ -12,6 +12,37 @@ from dataclasses import dataclass, field, asdict
 from typing import Any
 
 from app.config import PORTFOLIO_CAPITAL, SIZING_TIERS
+from app.features.flow_stats import TIER_ABS, TIER_LABELS
+from app.features.grade_explainer import build_flow_grade_reasons
+
+
+def _derive_flow_confidence_tier(row: dict[str, Any]) -> tuple[int | None, str | None]:
+    """Return ``(tier_int, label)`` for the worst component tier on the row.
+
+    Looks at both directional summary columns (``bullish_zscore_tier`` and
+    ``bearish_zscore_tier``) and picks the worst (numerically highest) for
+    the traded side if direction is known, otherwise across both.
+    """
+    direction = (row.get("direction") or "").upper()
+
+    candidates: list[int] = []
+    if direction == "LONG" and row.get("bullish_zscore_tier") is not None:
+        candidates.append(int(row["bullish_zscore_tier"]))
+    elif direction == "SHORT" and row.get("bearish_zscore_tier") is not None:
+        candidates.append(int(row["bearish_zscore_tier"]))
+    else:
+        for k in ("bullish_zscore_tier", "bearish_zscore_tier"):
+            if row.get(k) is not None:
+                try:
+                    candidates.append(int(row[k]))
+                except (TypeError, ValueError):
+                    continue
+
+    if not candidates:
+        return None, None
+
+    worst = max(candidates)
+    return worst, TIER_LABELS.get(worst)
 
 
 def _risk_pct_for_score(score: float | None) -> float:
@@ -51,6 +82,11 @@ class TraderCardView:
     heat_pct: float | None = None
     vix_sizing_mult: float | None = None
     capital: float = PORTFOLIO_CAPITAL
+    flow_confidence_tier: int | None = None
+    flow_confidence_label: str | None = None
+    avg_delta: float | None = None
+    delta_source_mix: float | None = None
+    grade_reasons: list[dict[str, Any]] = field(default_factory=list)
 
     @classmethod
     def from_row(
@@ -95,6 +131,29 @@ class TraderCardView:
         except (TypeError, ValueError):
             pass
 
+        tier_int, tier_label = _derive_flow_confidence_tier(row)
+
+        side = "bullish" if direction == "LONG" else ("bearish" if direction == "SHORT" else None)
+        avg_delta: float | None = None
+        delta_src_mix: float | None = None
+        if side is not None:
+            try:
+                ad = row.get(f"{side}_avg_delta")
+                if ad is not None and float(ad) > 0:
+                    avg_delta = float(ad)
+                sm = row.get(f"{side}_delta_source_mix")
+                if sm is not None:
+                    delta_src_mix = float(sm)
+            except (TypeError, ValueError):
+                pass
+
+        reasons = row.get("grade_reasons")
+        if not reasons and side is not None:
+            try:
+                reasons = build_flow_grade_reasons(row, side=side)
+            except Exception:
+                reasons = []
+
         return cls(
             row=dict(row),
             size_shares=size_shares,
@@ -103,6 +162,11 @@ class TraderCardView:
             heat_pct=heat_pct,
             vix_sizing_mult=vix_sizing_mult,
             capital=capital,
+            flow_confidence_tier=tier_int,
+            flow_confidence_label=tier_label,
+            avg_delta=avg_delta,
+            delta_source_mix=delta_src_mix,
+            grade_reasons=reasons or [],
         )
 
     def to_template(self) -> dict[str, Any]:
@@ -117,6 +181,11 @@ class TraderCardView:
         out["risk_dollar"] = self.risk_dollar
         out["heat_pct"] = self.heat_pct
         out["vix_sizing_mult"] = self.vix_sizing_mult
+        out["flow_confidence_tier"] = self.flow_confidence_tier
+        out["flow_confidence_label"] = self.flow_confidence_label
+        out["avg_delta"] = self.avg_delta
+        out["delta_source_mix"] = self.delta_source_mix
+        out["grade_reasons"] = self.grade_reasons
         return out
 
 

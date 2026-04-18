@@ -459,12 +459,45 @@
             <strong class="data-card-ticker">{{ tf.ticker }}</strong>
             <span class="data-card-badges">
               {% if tf.direction == "LONG" %}<span class="badge badge-long">LONG</span>{% else %}<span class="badge badge-short">SHORT</span>{% endif %}
+              {% if tf.conviction_grade %}
+                {% set _gcls = {
+                  'A+': 'tc-grade-aplus', 'A': 'tc-grade-a', 'A-': 'tc-grade-aminus',
+                  'B+': 'tc-grade-bplus', 'B': 'tc-grade-b', 'B-': 'tc-grade-bminus', 'C': 'tc-grade-c'
+                }.get(tf.conviction_grade, 'tc-grade-c') %}
+                <span class="badge tc-grade {{ _gcls }}" style="margin-left:0.3rem" title="Flow-score grade ({{ '%.1f'|format(tf.flow_score_10) }}/10)">{{ tf.conviction_grade }} · {{ "%.1f"|format(tf.flow_score_10) }}</span>
+              {% endif %}
               {% if tf.label_cls %}<span class="{{ tf.label_cls }}" style="font-weight:600;margin-left:0.3rem">{{ tf.label }}</span>{% else %}<span style="margin-left:0.3rem;opacity:0.7">{{ tf.label }}</span>{% endif %}
             </span>
           </header>
           <dl class="card-metrics">
             <dt>Intensity</dt><dd>{{ "%.2f"|format(tf.bps) }} bps</dd>
             <dt>Unusual prem</dt><dd>{{ "${:,.0f}".format(tf.premium) if tf.premium else "—" }}{% if tf.count %} ({{ tf.count }} trades){% endif %}</dd>
+            {% if tf.avg_delta and tf.avg_delta > 0 %}
+            <dt>Avg |Δ|</dt>
+            <dd>
+              <span class="ft-avg-delta" title="Premium-weighted average |Δ| for the dominant side. UW share = {{ '%.0f'|format((tf.delta_source_mix or 0) * 100) }}%.">
+                {{ "%.2f"|format(tf.avg_delta) }}
+                {% if tf.delta_source_mix is not none and tf.delta_source_mix >= 0.85 %}
+                  <span class="ft-avg-delta-src src-uw">UW {{ "%.0f"|format(tf.delta_source_mix * 100) }}%</span>
+                {% elif tf.delta_source_mix is not none and tf.delta_source_mix <= 0.15 %}
+                  <span class="ft-avg-delta-src src-proxy">PRX</span>
+                {% elif tf.delta_source_mix is not none %}
+                  <span class="ft-avg-delta-src src-proxy">MIX {{ "%.0f"|format(tf.delta_source_mix * 100) }}%</span>
+                {% endif %}
+              </span>
+            </dd>
+            {% endif %}
+            {% if tf.grade_reasons %}
+            {% set _why_tip_full %}{% for r in tf.grade_reasons %}{% if r.kind == 'drag' %}↓{% else %}+{% endif %} {{ r.label }}: {{ "%.2f"|format(r.points) }} pts{% if not loop.last %}&#10;{% endif %}{% endfor %}{% endset %}
+            <dt>Why</dt>
+            <dd>
+              <span class="ft-why-inline" title="{{ _why_tip_full }}">
+                {% for r in tf.grade_reasons[:3] %}
+                  {% if r.kind == 'drag' %}<span class="ft-why-drag">{{ r.label }} (drag)</span>{% else %}{{ r.label }}{% endif %}{% if not loop.last %} · {% endif %}
+                {% endfor %}
+              </span>
+            </dd>
+            {% endif %}
           </dl>
         </article>
         {% endfor %}
@@ -521,12 +554,21 @@
           <header class="data-card-header data-card-head">
             <strong class="data-card-ticker">{{ ft.ticker }}</strong>
             <span class="data-card-badges">
-              {% if ft.conviction_grade == 'A' %}
-                <span class="badge" style="background:rgba(63,185,80,0.2);color:#3fb950;font-weight:700;letter-spacing:0.03em">{{ ft.conviction_score }}/10 A</span>
-              {% elif ft.conviction_grade == 'B' %}
-                <span class="badge" style="background:rgba(255,152,0,0.18);color:#ff9800;font-weight:700;letter-spacing:0.03em">{{ ft.conviction_score }}/10 B</span>
+              {% set _g = ft.conviction_grade %}
+              {% if _g == 'A+' %}
+                <span class="badge tc-grade tc-grade-aplus" style="font-weight:700;letter-spacing:0.03em" title="Conviction grade A+ (score ≥ 8.5)">{{ ft.conviction_score }}/10 A+</span>
+              {% elif _g == 'A' %}
+                <span class="badge tc-grade tc-grade-a" style="font-weight:700;letter-spacing:0.03em" title="Conviction grade A (7.5 ≤ score < 8.5)">{{ ft.conviction_score }}/10 A</span>
+              {% elif _g == 'A-' %}
+                <span class="badge tc-grade tc-grade-aminus" style="font-weight:700;letter-spacing:0.03em" title="Conviction grade A- (6.75 ≤ score < 7.5)">{{ ft.conviction_score }}/10 A-</span>
+              {% elif _g == 'B+' %}
+                <span class="badge tc-grade tc-grade-bplus" style="font-weight:700;letter-spacing:0.03em" title="Conviction grade B+ (6.0 ≤ score < 6.75)">{{ ft.conviction_score }}/10 B+</span>
+              {% elif _g == 'B' %}
+                <span class="badge tc-grade tc-grade-b" style="font-weight:700;letter-spacing:0.03em" title="Conviction grade B (5.0 ≤ score < 6.0)">{{ ft.conviction_score }}/10 B</span>
+              {% elif _g == 'B-' %}
+                <span class="badge tc-grade tc-grade-bminus" style="font-weight:700;letter-spacing:0.03em" title="Conviction grade B- (4.0 ≤ score < 5.0)">{{ ft.conviction_score }}/10 B-</span>
               {% else %}
-                <span class="badge" style="background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.5);font-weight:700;letter-spacing:0.03em">{{ ft.conviction_score }}/10 C</span>
+                <span class="badge tc-grade tc-grade-c" style="font-weight:700;letter-spacing:0.03em" title="Conviction grade C (score < 4.0)">{{ ft.conviction_score }}/10 C</span>
               {% endif %}
               <span class="badge" style="opacity:0.7;font-size:0.7rem">{{ ft.sector }}</span>
               {% if ft.direction == "BULLISH" %}
@@ -614,6 +656,33 @@
             <dt>IV Rank</dt><dd>{{ ft.latest_iv_rank }}</dd>
             <dt>P/C Ratio</dt><dd>{{ ft.latest_put_call_ratio }}</dd>
             <dt>Price</dt><dd>${{ "%.2f"|format(ft.latest_close) }}</dd>
+            {% if ft.avg_delta is not none and ft.avg_delta > 0 %}
+            <dt>Avg |Δ|</dt>
+            <dd>
+              <span class="ft-avg-delta" title="Premium-weighted average |Δ| for this ticker's dominant side. UW share = {{ '%.0f'|format((ft.delta_source_mix or 0) * 100) }}%.">
+                {{ "%.2f"|format(ft.avg_delta) }}
+                {% if ft.delta_source_mix is not none and ft.delta_source_mix >= 0.85 %}
+                  <span class="ft-avg-delta-src src-uw">UW {{ "%.0f"|format(ft.delta_source_mix * 100) }}%</span>
+                {% elif ft.delta_source_mix is not none and ft.delta_source_mix <= 0.15 %}
+                  <span class="ft-avg-delta-src src-proxy">PRX</span>
+                {% elif ft.delta_source_mix is not none %}
+                  <span class="ft-avg-delta-src src-proxy">MIX {{ "%.0f"|format(ft.delta_source_mix * 100) }}%</span>
+                {% endif %}
+              </span>
+            </dd>
+            {% endif %}
+            {% if ft.grade_reasons %}
+            {% set _why_tip = ft.grade_reasons | map(attribute='label') | list | join(' · ') %}
+            {% set _why_tip_full %}{% for r in ft.grade_reasons %}{% if r.kind == 'drag' %}↓{% else %}+{% endif %} {{ r.label }}: {{ "%.2f"|format(r.points) }} pts{% if not loop.last %}&#10;{% endif %}{% endfor %}{% endset %}
+            <dt>Why</dt>
+            <dd>
+              <span class="ft-why-inline" title="{{ _why_tip_full }}">
+                {% for r in ft.grade_reasons[:3] %}
+                  {% if r.kind == 'drag' %}<span class="ft-why-drag">{{ r.label }} (drag)</span>{% else %}{{ r.label }}{% endif %}{% if not loop.last %} · {% endif %}
+                {% endfor %}
+              </span>
+            </dd>
+            {% endif %}
             {% if ft.dp %}
             <div class="card-metrics-separator"></div>
             <dt>DP Bias</dt>
@@ -1663,7 +1732,9 @@
       factors.push({ label: "sweep activity", pass: _num(m[dir + "_sweep_count"]) > 0 });
       factors.push({ label: "repeat flow", pass: _num(m.repeat_flow_count) >= 3 });
       factors.push({ label: "DTE quality", pass: _num(m.dte_score) >= 0.7 });
-      factors.push({ label: "flow velocity", pass: _num(m.flow_velocity) > 1.0 });
+      var dm = _num(m.delta_momentum);
+      var dirMom = isLong ? Math.max(0, dm) : Math.max(0, -dm);
+      factors.push({ label: "directional momentum", pass: dirMom > 0.2 });
       var imb = _num(m.flow_imbalance_ratio);
       factors.push({ label: "imbalance ratio", pass: isLong ? imb > 2.0 : imb < 0.5 });
       return factors;
@@ -1824,15 +1895,17 @@
 
     function _buildFlowComponentTable(m) {
       var dir = _dirPrefix(m);
+      var isLong = dir === "bullish";
       var l1p = Math.log1p;
+      // Weights sum to 1.0 (rebalanced after flow_velocity was retired; its
+      // 0.13 share was redistributed * 1/0.87 across the remaining 7 components).
       var components = [
-        { name: "Flow intensity", w: 0.25, weight: "25%", val: _num(m[dir + "_flow_intensity"]) * 10000, fmtFn: function(v){ return v.toFixed(2) + " bps"; }, thresh: [0.6, 0.15], scoreFn: function(v){ return _clipScale(l1p(v), l1p(0.01), l1p(1.0)); }, desc: "Directional options premium as basis points of market cap" },
-        { name: "Premium / trade", w: 0.15, weight: "15%", val: _num(m[dir + "_ppt_bps"]), fmtFn: function(v){ return v.toFixed(3) + " bps"; }, thresh: [0.3, 0.03], scoreFn: function(v){ return _clipScale(l1p(v), l1p(0.005), l1p(0.5)); }, desc: "Avg per-trade premium as basis points of market cap" },
-        { name: "Vol / OI ratio", w: 0.15, weight: "15%", val: _num(m[dir + "_vol_oi"]), fmtFn: fmt, thresh: [2.0, 1.0], scoreFn: function(v){ return _clipScale(v, 0.5, 3.0); }, desc: "Today\u2019s volume vs open interest" },
-        { name: "Flow velocity", w: 0.13, weight: "13%", val: _num(m.flow_velocity), fmtFn: fmt, thresh: [2.0, 1.0], scoreFn: function(v){ return _clipScale(v, 0.0, 3.0); }, desc: "Rate of premium acceleration" },
-        { name: "Repeat flow count", w: 0.12, weight: "12%", val: _num(m.repeat_flow_count), fmtFn: fmt, thresh: [5, 3], scoreFn: function(v){ return _clipScale(v, 1.0, 10.0); }, desc: "Separate trades in same direction" },
-        { name: "Sweep count", w: 0.10, weight: "10%", val: _num(m[dir + "_sweep_count"]), fmtFn: fmt, thresh: [5, 1], scoreFn: function(v){ return _clipScale(v, 0.0, 8.0); }, desc: "Multi-exchange sweeps" },
-        { name: "DTE quality", w: 0.05, weight: "5%", val: _num(m.dte_score), fmtFn: fmt, thresh: [0.8, 0.5], scoreFn: function(v){ return _clipScale(v, 0.3, 1.0); }, desc: "Expiration profile quality" },
+        { name: "Flow intensity", w: 0.29, weight: "29%", val: _num(m[dir + "_flow_intensity"]) * 10000, fmtFn: function(v){ return v.toFixed(2) + " bps"; }, thresh: [0.6, 0.15], scoreFn: function(v){ return _clipScale(l1p(v), l1p(0.01), l1p(1.0)); }, desc: "Directional options premium as basis points of market cap" },
+        { name: "Premium / trade", w: 0.17, weight: "17%", val: _num(m[dir + "_ppt_bps"]), fmtFn: function(v){ return v.toFixed(3) + " bps"; }, thresh: [0.3, 0.03], scoreFn: function(v){ return _clipScale(l1p(v), l1p(0.005), l1p(0.5)); }, desc: "Avg per-trade premium as basis points of market cap" },
+        { name: "Vol / OI ratio", w: 0.17, weight: "17%", val: _num(m[dir + "_vol_oi"]), fmtFn: fmt, thresh: [2.0, 1.0], scoreFn: function(v){ return _clipScale(v, 0.5, 3.0); }, desc: "Today\u2019s volume vs open interest" },
+        { name: "Repeat flow count", w: 0.14, weight: "14%", val: _num(m.repeat_flow_count), fmtFn: fmt, thresh: [5, 3], scoreFn: function(v){ return _clipScale(v, 1.0, 10.0); }, desc: "Separate trades in same direction" },
+        { name: "Sweep count", w: 0.12, weight: "12%", val: _num(m[dir + "_sweep_count"]), fmtFn: fmt, thresh: [5, 1], scoreFn: function(v){ return _clipScale(v, 0.0, 8.0); }, desc: "Multi-exchange sweeps" },
+        { name: "DTE quality", w: 0.06, weight: "6%", val: _num(m.dte_score), fmtFn: fmt, thresh: [0.8, 0.5], scoreFn: function(v){ return _clipScale(v, 0.3, 1.0); }, desc: "Expiration profile quality" },
         { name: "Breadth", w: 0.05, weight: "5%", val: _num(m[dir + "_breadth"]), fmtFn: fmt, thresh: [0.5, 0.2], scoreFn: function(v){ return _clipScale(v, 0.1, 0.8); }, desc: "Strike diversity" }
       ];
       var allZero = components.every(function(c) { return c.val === 0; });
@@ -1848,9 +1921,49 @@
         var pts = c.w * norm * 10;
         computedTotal += pts;
         var maxPts = c.w * 10;
-        html += "<tr><td>" + escHtml(c.name) + (c.desc ? '<br><span class="flow-desc">' + escHtml(c.desc) + '</span>' : '') + "</td><td>" + c.weight + "</td><td>" + c.fmtFn(c.val) + '</td><td class="flow-score-cell">' + pts.toFixed(2) + " / " + maxPts.toFixed(1) + "</td><td>" + _flowRating(c.val, c.thresh) + "</td></tr>";
+
+        // For the flow-intensity row, inline a delta-weighted shadow chip so
+        // the user can see the |delta|-scaled intensity alongside the
+        // raw-premium one. When USE_DELTA_WEIGHTED_FLOW=True on the server,
+        // this delta value is what actually feeds the score (the displayed
+        // raw intensity stays for reference but isn't the scored value).
+        var valCell = c.fmtFn(c.val);
+        if (c.name === "Flow intensity") {
+          var deltaIntBps = _num(m[dir + "_delta_intensity"]) * 10000;
+          if (deltaIntBps > 0 || _present(m[dir + "_delta_intensity"])) {
+            valCell += '<br><span class="flow-desc" title="Σ(premium × |delta|) / marketcap — shadow metric used when USE_DELTA_WEIGHTED_FLOW is on.">Δ-weighted: ' + deltaIntBps.toFixed(2) + ' bps</span>';
+          }
+        }
+
+        html += "<tr><td>" + escHtml(c.name) + (c.desc ? '<br><span class="flow-desc">' + escHtml(c.desc) + '</span>' : '') + "</td><td>" + c.weight + "</td><td>" + valCell + '</td><td class="flow-score-cell">' + pts.toFixed(2) + " / " + maxPts.toFixed(1) + "</td><td>" + _flowRating(c.val, c.thresh) + "</td></tr>";
       }
       html += '<tr class="flow-total-row"><td colspan="3"><strong>Total</strong></td><td class="flow-score-cell"><strong>' + computedTotal.toFixed(2) + ' / 10</strong></td><td></td></tr>';
+
+      // Avg |delta| — premium-weighted directional conviction per side.
+      // Informational only (not weighted into the score) so we render it as
+      // a non-scored row at the bottom of the component table.
+      var avgDelta = _num(m[dir + "_avg_delta"]);
+      if (avgDelta > 0 || _present(m[dir + "_avg_delta"])) {
+        var srcMix = _num(m[dir + "_delta_source_mix"]);
+        var srcLabel = srcMix > 0.5
+          ? '<span class="rating rating-strong">UW ' + Math.round(srcMix * 100) + '%</span>'
+          : srcMix > 0
+          ? '<span class="rating rating-moderate">UW ' + Math.round(srcMix * 100) + '%</span>'
+          : '<span class="rating rating-weak">proxy</span>';
+        html += '<tr class="flow-bonus-row"><td>Avg |delta|<br><span class="flow-desc">Premium-weighted average option delta — higher means flow is in the money / higher conviction</span></td><td>info</td><td>' + avgDelta.toFixed(2) + '</td><td class="flow-score-cell">&mdash;</td><td>' + srcLabel + '</td></tr>';
+      }
+
+      // Directional momentum — post-score bonus added to final_score (not
+      // counted toward the 10-pt flow total above). Replaces retired flow_velocity.
+      var dm = _num(m.delta_momentum);
+      var dmFactor = isLong ? Math.max(0, dm) : Math.max(0, -dm);
+      var dmPtsRaw = _present(m.directional_momentum_pts) ? _num(m.directional_momentum_pts) : dmFactor * 1.3;
+      var dmSigned = (dm >= 0 ? "+" : "") + dm.toFixed(2);
+      var dmRating = dmFactor > 0.5 ? '<span class="rating rating-strong">strong</span>'
+                   : dmFactor > 0.2 ? '<span class="rating rating-moderate">moderate</span>'
+                                    : '<span class="rating rating-weak">weak</span>';
+      html += '<tr class="flow-bonus-row"><td>' + escHtml("Directional momentum") + '<br><span class="flow-desc">' + escHtml("Final-score bonus from UW net-prem-ticks delta_momentum (directional, bounded)") + '</span></td><td>+bonus</td><td>' + dmSigned + '</td><td class="flow-score-cell">' + dmPtsRaw.toFixed(2) + ' / 1.3</td><td>' + dmRating + '</td></tr>';
+
       html += "</tbody></table></div>";
       return html;
     }
@@ -2739,7 +2852,11 @@
           fh += '<tr><td>Put vol vs 30d avg</td><td>' + (opts.put_volume_vs_30d_avg != null ? Number(opts.put_volume_vs_30d_avg).toFixed(1) + 'x' : "\u2014") + '</td></tr>';
           fh += '<tr><td>Bullish score</td><td>' + fmtScore(fl.bullish_scaled) + ' / 10</td></tr>';
           fh += '<tr><td>Bearish score</td><td>' + fmtScore(fl.bearish_scaled) + ' / 10</td></tr>';
-          fh += '<tr><td>Flow velocity</td><td>' + fmtScore(fl.flow_velocity) + '</td></tr>';
+          var _npt = d.net_premium || {};
+          var _dm = _npt.available ? _npt.delta_momentum : null;
+          var _dmLabel = (_dm == null) ? "\u2014"
+                        : ((Number(_dm) >= 0 ? "+" : "") + Number(_dm).toFixed(2));
+          fh += '<tr><td>Directional momentum</td><td>' + _dmLabel + '</td></tr>';
           fh += '<tr><td>Imbalance ratio</td><td>' + fmtScore(fl.flow_imbalance_ratio) + '</td></tr>';
           fh += '<tr><td>Bull repeat count</td><td>' + (fl.bullish_repeat_count || 0) + '</td></tr>';
           fh += '<tr><td>Bear repeat count</td><td>' + (fl.bearish_repeat_count || 0) + '</td></tr>';

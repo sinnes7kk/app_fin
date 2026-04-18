@@ -13,7 +13,8 @@ from app.features.decision_context import (
     clear_decision_cache,
     enrich_signals as enrich_decision_context,
 )
-from app.features.flow_features import build_flow_feature_table, rank_flow_candidates
+from app.features.flow_features import build_flow_feature_table, rank_flow_candidates, rescore_with_z
+from app.features.flow_stats import load_history as load_flow_history
 from app.features.flow_persistence import apply_persistence_bonus, compute_persistence
 from app.features.flow_trajectory import apply_trajectory_bonus, compute_intraday_trajectory
 from app.features.market_regime import fetch_market_regime
@@ -22,13 +23,17 @@ from app.features.price_features import clean_ohlcv, clear_price_cache, compute_
 from app.signals.scoring import quick_reject_check, score_long_setup, score_short_setup
 from app.config import (
     COUNTER_TREND_PREMIUM,
+    DELTA_MIN_PROXY_COVERAGE,
     MIN_FINAL_SCORE,
     REGIME_THRESHOLD_BOOST,
     RS_LONG_MIN,
     RS_LOOKBACK_DAYS,
     RS_SHORT_MAX,
+    USE_DELTA_WEIGHTED_FLOW,
+    USE_ZSCORE_FLOW,
     WALL_PROXIMITY_REJECT_ATR,
     WALL_PROXIMITY_REJECT_PCT,
+    ZSCORE_LOOKBACK_DAYS,
 )
 from app.signals.trade_plan import (
     MIN_RR,
@@ -312,6 +317,21 @@ _FLOW_COMPONENT_KEYS = [
     "bullish_vol_oi", "bearish_vol_oi",
     "bullish_sweep_count", "bearish_sweep_count",
     "bullish_breadth", "bearish_breadth",
+    # Z-score tier columns (optional; present when USE_ZSCORE_FLOW or shadow mode)
+    "bullish_zscore_tier", "bearish_zscore_tier",
+    "bullish_score_z_shadow", "bearish_score_z_shadow",
+    "bullish_flow_intensity_tier", "bearish_flow_intensity_tier",
+    "bullish_premium_per_trade_tier", "bearish_premium_per_trade_tier",
+    "bullish_vol_oi_tier", "bearish_vol_oi_tier",
+    "bullish_repeat_tier", "bearish_repeat_tier",
+    "bullish_sweep_tier", "bearish_sweep_tier",
+    "bullish_breadth_tier", "bearish_breadth_tier",
+    "bullish_dte_tier", "bearish_dte_tier",
+    # Delta-weighted flow columns (always populated post-enrichment, used
+    # live when USE_DELTA_WEIGHTED_FLOW is True, otherwise shadow-logged)
+    "bullish_delta_intensity", "bearish_delta_intensity",
+    "bullish_avg_delta", "bearish_avg_delta",
+    "bullish_delta_source_mix", "bearish_delta_source_mix",
 ]
 
 def _attach_flow_components(target: dict, row) -> None:
@@ -734,36 +754,52 @@ def _enrich_agg_options(results: list[dict]) -> list[dict]:
     return results
 
 
-NET_PREM_WEIGHT = 0.08
+# Split from the former combined NET_PREM_WEIGHT=0.08 so directional momentum
+# can carry a meaningful weight (replacing the retired flow_velocity component
+# of the flow score).
+NET_PREM_ALIGNMENT_WEIGHT = 0.056       # was 0.7 * 0.08
+DIRECTIONAL_MOMENTUM_WEIGHT = 0.13      # was 0.3 * 0.08 = 0.024; bumped to replace retired flow_velocity
+NET_PREM_WEIGHT = NET_PREM_ALIGNMENT_WEIGHT + DIRECTIONAL_MOMENTUM_WEIGHT  # back-compat alias
 DARK_POOL_WEIGHT = 0.05
 
 
 def _enrich_net_prem_ticks(results: list[dict]) -> list[dict]:
     """Enrich final signals with intraday net premium tick data.
 
-    Adds a small bonus when intraday premium flow confirms the trade thesis.
+    Applies two independent bonuses to ``final_score``:
+
+    * **Alignment bonus** — rewards intraday call/put premium pointing the
+      same way as our thesis.
+    * **Directional momentum bonus** — rewards acceleration of signed net
+      delta in our thesis direction. This replaces the retired
+      ``flow_velocity`` component of the flow score (same max impact).
     """
     for r in results:
         npt = fetch_net_prem_ticks(r["ticker"])
         if npt is None:
             r["intraday_premium_direction"] = None
             r["delta_momentum"] = None
+            r["directional_momentum"] = 0.0
+            r["directional_momentum_pts"] = 0.0
             continue
 
         r["intraday_premium_direction"] = npt["intraday_premium_direction"]
         r["delta_momentum"] = npt["delta_momentum"]
         r["net_delta"] = npt["net_delta"]
 
-        # Alignment: is intraday premium flowing in the direction of our thesis?
         prem_dir = npt["intraday_premium_direction"]
-        if r["direction"] == "LONG":
-            alignment = prem_dir
-        else:
-            alignment = 1.0 - prem_dir
+        is_long = r["direction"] == "LONG"
+        alignment = prem_dir if is_long else 1.0 - prem_dir
 
-        delta_factor = max(0.0, npt["delta_momentum"]) if r["direction"] == "LONG" else max(0.0, -npt["delta_momentum"])
-        bonus = NET_PREM_WEIGHT * (0.7 * alignment + 0.3 * delta_factor)
-        r["final_score"] = round(r["final_score"] + bonus, 4)
+        dm = npt["delta_momentum"] or 0.0
+        dm_factor = max(0.0, dm) if is_long else max(0.0, -dm)
+
+        alignment_bonus = NET_PREM_ALIGNMENT_WEIGHT * alignment
+        dm_bonus = DIRECTIONAL_MOMENTUM_WEIGHT * dm_factor
+
+        r["directional_momentum"] = round(dm_factor, 4)
+        r["directional_momentum_pts"] = round(dm_bonus * 10, 2)
+        r["final_score"] = round(r["final_score"] + alignment_bonus + dm_bonus, 4)
 
     return results
 
@@ -1518,6 +1554,71 @@ def run_flow_to_price_pipeline(
         normalized.to_csv(raw_flow_dir / f"raw_flow_{_run_stamp()}.csv", index=False)
 
     feature_table = build_flow_feature_table(normalized, min_premium=min_premium)
+
+    # Shadow-logging summary for the delta-weighted flow pipeline. Runs every
+    # scan regardless of USE_DELTA_WEIGHTED_FLOW so we can audit distributions
+    # during the rollout window. Columns are populated by add_delta_weights +
+    # aggregate_flow_by_ticker. If the aggregation produced no qualifying
+    # tickers we silently skip — no signal means no intensity to report.
+    try:
+        if not feature_table.empty and "bullish_delta_intensity" in feature_table.columns:
+            bulls = feature_table[feature_table["bullish_premium_raw"] > 0]
+            bears = feature_table[feature_table["bearish_premium_raw"] > 0]
+            avg_bull = float(bulls["bullish_avg_delta"].mean()) if not bulls.empty else 0.0
+            avg_bear = float(bears["bearish_avg_delta"].mean()) if not bears.empty else 0.0
+            if not bulls.empty and bulls["bullish_premium_raw"].sum() > 0:
+                uw_cov_bull = float(
+                    (bulls["bullish_delta_source_mix"] * bulls["bullish_premium_raw"]).sum()
+                    / bulls["bullish_premium_raw"].sum()
+                )
+            else:
+                uw_cov_bull = 0.0
+            if not bears.empty and bears["bearish_premium_raw"].sum() > 0:
+                uw_cov_bear = float(
+                    (bears["bearish_delta_source_mix"] * bears["bearish_premium_raw"]).sum()
+                    / bears["bearish_premium_raw"].sum()
+                )
+            else:
+                uw_cov_bear = 0.0
+            mode = "ACTIVE" if USE_DELTA_WEIGHTED_FLOW else "shadow"
+            print(
+                f"  [flow-scoring] delta-weighted ({mode}): "
+                f"avg |delta| bull/bear = {avg_bull:.2f}/{avg_bear:.2f}, "
+                f"UW coverage bull/bear = {uw_cov_bull*100:.0f}%/{uw_cov_bear*100:.0f}%"
+            )
+            if uw_cov_bull + uw_cov_bear > 0 and min(uw_cov_bull, uw_cov_bear) < (1.0 - DELTA_MIN_PROXY_COVERAGE):
+                print(
+                    f"  [flow-scoring] WARN delta proxy coverage exceeds "
+                    f"{int(DELTA_MIN_PROXY_COVERAGE*100)}% — intensity values should be treated with caution."
+                )
+    except Exception as _e:
+        print(f"  [flow-scoring] delta-weighted summary failed (non-fatal): {_e}")
+
+    # Optional z-score rescoring against rolling history (4-tier fallback ladder
+    # for tickers with insufficient history). Gated on config.USE_ZSCORE_FLOW;
+    # default is False so behaviour is unchanged until explicit cutover.
+    # Shadow mode: when False, we still compute and log z-scored output for
+    # comparison but don't use it for ranking.
+    try:
+        if USE_ZSCORE_FLOW and not feature_table.empty:
+            history = load_flow_history(lookback_days=ZSCORE_LOOKBACK_DAYS)
+            feature_table = rescore_with_z(feature_table, history)
+            tier_counts = feature_table["bullish_zscore_tier"].value_counts().sort_index().to_dict()
+            print(f"  [flow-scoring] z-score active. bullish tier distribution: {tier_counts}")
+        elif not feature_table.empty:
+            # Shadow log: compute z-scored scores into a side channel for diff review
+            history = load_flow_history(lookback_days=ZSCORE_LOOKBACK_DAYS)
+            if not history.empty:
+                shadow = rescore_with_z(feature_table.copy(), history)
+                tier_counts = shadow["bullish_zscore_tier"].value_counts().sort_index().to_dict()
+                print(f"  [flow-scoring] z-score shadow mode. bullish tier distribution: {tier_counts}")
+                # Attach shadow scores to the live feature_table for snapshotting
+                feature_table["bullish_score_z_shadow"] = shadow["bullish_score"]
+                feature_table["bearish_score_z_shadow"] = shadow["bearish_score"]
+                feature_table["bullish_zscore_tier"] = shadow["bullish_zscore_tier"]
+                feature_table["bearish_zscore_tier"] = shadow["bearish_zscore_tier"]
+    except Exception as e:
+        print(f"  [flow-scoring] z-score rescoring failed (continuing with absolute path): {e}")
 
     # Merge flow-feature tickers into screener snapshots so the Flow Tracker
     # sees all tickers with unusual flow, not just those from the UW screener.

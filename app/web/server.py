@@ -1596,6 +1596,35 @@ def _build_action_bar(
             tickers = signals_df.loc[mask, "ticker"].astype(str).str.upper().tolist()
             new_a_grades = sum(1 for t in tickers if t not in in_book)
 
+    # Z-score confidence breakdown: count how many A-grades rest on peer
+    # baselines (Tier 3) or absolute fallback (Tier 4). Trader should size
+    # these more cautiously.
+    peer_a_count = 0
+    total_a_count = 0
+    if not signals_df.empty and "final_score" in signals_df.columns:
+        _fs = pd.to_numeric(signals_df["final_score"], errors="coerce")
+        a_mask = _fs >= 7.5
+        total_a_count = int(a_mask.sum())
+        if total_a_count and ("bullish_zscore_tier" in signals_df.columns or "bearish_zscore_tier" in signals_df.columns):
+            a_rows = signals_df.loc[a_mask]
+            for _, r in a_rows.iterrows():
+                direction = str(r.get("direction", "")).upper()
+                if direction == "LONG":
+                    tier = r.get("bullish_zscore_tier")
+                elif direction == "SHORT":
+                    tier = r.get("bearish_zscore_tier")
+                else:
+                    continue
+                try:
+                    if int(tier) >= 3:
+                        peer_a_count += 1
+                except (TypeError, ValueError):
+                    continue
+
+    zscore_caveat_line = None
+    if peer_a_count and total_a_count:
+        zscore_caveat_line = f"{peer_a_count} of {total_a_count} A-grades use peer or absolute baseline"
+
     grade_stats_line = None
     if grade_stats and (grade_stats.get("stats") or {}).get("A", {}).get("count"):
         a = grade_stats["stats"]["A"]
@@ -1617,6 +1646,7 @@ def _build_action_bar(
         "open_slots": open_slots,
         "new_a_grades": new_a_grades,
         "grade_stats_line": grade_stats_line,
+        "zscore_caveat_line": zscore_caveat_line,
     }
 
 
@@ -1657,6 +1687,59 @@ def _actionable_now(
             break
 
     return out
+
+
+def _enrich_flow_tracker_delta(
+    rows: list[dict],
+    flow_feature_df: pd.DataFrame,
+) -> list[dict]:
+    """Attach ``avg_delta`` + ``delta_source_mix`` from the latest flow-feature
+    table to every Flow Tracker row.  Safe no-op when the feature table is
+    empty or the ticker isn't present (e.g. tracker row survived gap days).
+    """
+    if not rows or flow_feature_df is None or flow_feature_df.empty:
+        for r in rows:
+            r.setdefault("avg_delta", None)
+            r.setdefault("delta_source_mix", None)
+        return rows
+
+    need_cols = {
+        "ticker",
+        "bullish_avg_delta", "bearish_avg_delta",
+        "bullish_delta_source_mix", "bearish_delta_source_mix",
+    }
+    have_cols = need_cols.intersection(flow_feature_df.columns)
+    if "ticker" not in have_cols:
+        for r in rows:
+            r.setdefault("avg_delta", None)
+            r.setdefault("delta_source_mix", None)
+        return rows
+
+    lookup: dict[str, dict] = {}
+    for _, frow in flow_feature_df.iterrows():
+        t = str(frow.get("ticker") or "").upper().strip()
+        if not t:
+            continue
+        lookup[t] = {
+            "bullish_avg_delta":         pd.to_numeric(frow.get("bullish_avg_delta"), errors="coerce"),
+            "bearish_avg_delta":         pd.to_numeric(frow.get("bearish_avg_delta"), errors="coerce"),
+            "bullish_delta_source_mix":  pd.to_numeric(frow.get("bullish_delta_source_mix"), errors="coerce"),
+            "bearish_delta_source_mix":  pd.to_numeric(frow.get("bearish_delta_source_mix"), errors="coerce"),
+        }
+
+    for r in rows:
+        ticker = str(r.get("ticker") or "").upper().strip()
+        entry = lookup.get(ticker)
+        if not entry:
+            r["avg_delta"] = None
+            r["delta_source_mix"] = None
+            continue
+        side = "bullish" if r.get("direction") == "BULLISH" else "bearish"
+        ad = entry.get(f"{side}_avg_delta")
+        sm = entry.get(f"{side}_delta_source_mix")
+        r["avg_delta"] = float(ad) if ad is not None and not pd.isna(ad) else None
+        r["delta_source_mix"] = float(sm) if sm is not None and not pd.isna(sm) else None
+    return rows
 
 
 def _enrich_flow_tracker_decision(rows: list[dict]) -> list[dict]:
@@ -2184,6 +2267,7 @@ def index():
         if "bullish_flow_intensity" in _tf.columns and "bearish_flow_intensity" in _tf.columns:
             _tf["_peak"] = _tf[["bullish_flow_intensity", "bearish_flow_intensity"]].max(axis=1)
             _tf = _tf[_tf["_peak"] > 0].sort_values("_peak", ascending=False).head(15)
+            from app.features.grade_explainer import build_flow_grade_reasons, conviction_grade
             for _, r in _tf.iterrows():
                 bull_int = float(r.get("bullish_flow_intensity", 0) or 0)
                 bear_int = float(r.get("bearish_flow_intensity", 0) or 0)
@@ -2192,6 +2276,23 @@ def index():
                 label, label_cls = _prem_mcap_label(bps)
                 prem = float(r.get("bullish_premium_raw" if is_bull else "bearish_premium_raw", 0) or 0)
                 count = int(r.get("bullish_count" if is_bull else "bearish_count", 0) or 0)
+                side = "bullish" if is_bull else "bearish"
+                flow_score = float(r.get(f"{side}_score", 0) or 0)
+                flow_score_10 = flow_score * 10.0
+                avg_delta_raw = r.get(f"{side}_avg_delta")
+                try:
+                    avg_delta_val = float(avg_delta_raw) if avg_delta_raw is not None and not pd.isna(avg_delta_raw) else 0.0
+                except (TypeError, ValueError):
+                    avg_delta_val = 0.0
+                source_mix_raw = r.get(f"{side}_delta_source_mix")
+                try:
+                    source_mix_val = float(source_mix_raw) if source_mix_raw is not None and not pd.isna(source_mix_raw) else None
+                except (TypeError, ValueError):
+                    source_mix_val = None
+                try:
+                    reasons = build_flow_grade_reasons(r.to_dict(), side=side)
+                except Exception:
+                    reasons = []
                 top_flow.append({
                     "ticker": r.get("ticker", "?"),
                     "direction": "LONG" if is_bull else "SHORT",
@@ -2200,7 +2301,12 @@ def index():
                     "label_cls": label_cls,
                     "premium": prem,
                     "count": count,
-                    "flow_score": float(r.get("bullish_score" if is_bull else "bearish_score", 0) or 0),
+                    "flow_score": flow_score,
+                    "flow_score_10": round(flow_score_10, 2),
+                    "conviction_grade": conviction_grade(flow_score_10),
+                    "avg_delta": round(avg_delta_val, 3) if avg_delta_val else 0.0,
+                    "delta_source_mix": round(source_mix_val, 3) if source_mix_val is not None else None,
+                    "grade_reasons": reasons,
                 })
 
     perf = _compute_performance()
@@ -2372,21 +2478,24 @@ def index():
             empty_msg="No agent portfolio positions. Agent portfolio populates once the OpenAI API key is configured and agents run.",
         ),
         "perf_agent": perf_agent,
-        # Multi-day flow tracker enriched with sentiment + dark pool + chains + insider + earnings + decision context
+        # Multi-day flow tracker enriched with sentiment + dark pool + chains + insider + earnings + delta + decision context
         "flow_tracker": _enrich_flow_tracker_decision(
-            _enrich_flow_tracker_earnings(
-                _enrich_flow_tracker_insider(
-                    _enrich_flow_tracker_chains(
-                        _enrich_flow_tracker_dp(
-                            _enrich_flow_tracker_sentiment(
-                                compute_multi_day_flow(FLOW_TRACKER_LOOKBACK_DAYS, FLOW_TRACKER_MIN_ACTIVE_DAYS)
+            _enrich_flow_tracker_delta(
+                _enrich_flow_tracker_earnings(
+                    _enrich_flow_tracker_insider(
+                        _enrich_flow_tracker_chains(
+                            _enrich_flow_tracker_dp(
+                                _enrich_flow_tracker_sentiment(
+                                    compute_multi_day_flow(FLOW_TRACKER_LOOKBACK_DAYS, FLOW_TRACKER_MIN_ACTIVE_DAYS)
+                                ),
+                                compute_multi_day_dp(DP_TRACKER_LOOKBACK_DAYS, DP_TRACKER_MIN_ACTIVE_DAYS),
                             ),
-                            compute_multi_day_dp(DP_TRACKER_LOOKBACK_DAYS, DP_TRACKER_MIN_ACTIVE_DAYS),
+                            _hottest_chains_by_ticker,
                         ),
-                        _hottest_chains_by_ticker,
-                    ),
-                    _insider_by_ticker,
-                )
+                        _insider_by_ticker,
+                    )
+                ),
+                flow,
             )
         ),
         # Trader dashboard decision surfaces
@@ -2538,8 +2647,27 @@ def api_scan_ticker():
                 feature_table = build_flow_feature_table(
                     norm, min_premium=25_000, min_dte=1, max_dte=365,
                 )
+
+                # Attach z-score tier info (informational; doesn't change scoring
+                # here because ticker-detail is a single-ticker scan).
+                try:
+                    from app.features.flow_features import rescore_with_z
+                    from app.features.flow_stats import load_history as _load_flow_history
+                    from app.config import ZSCORE_LOOKBACK_DAYS as _ZLOOKBACK
+                    _hist = _load_flow_history(lookback_days=_ZLOOKBACK)
+                    if not _hist.empty and not feature_table.empty:
+                        feature_table = rescore_with_z(feature_table, _hist)
+                except Exception:
+                    pass
+
                 if not feature_table.empty and ticker in feature_table["ticker"].values:
                     row = feature_table[feature_table["ticker"] == ticker].iloc[0]
+                    from app.features.grade_explainer import (
+                        build_flow_grade_reasons as _bgr,
+                        conviction_grade as _cgrade,
+                    )
+                    _bull_reasons = _bgr(row.to_dict(), side="bullish")
+                    _bear_reasons = _bgr(row.to_dict(), side="bearish")
                     flow_data = {
                         "available": True,
                         "bullish_raw": _sf(row.get("bullish_score", 0), 4),
@@ -2548,9 +2676,21 @@ def api_scan_ticker():
                         "bearish_scaled": _sf(row.get("bearish_score", 0) * 10),
                         "bullish_premium": _sf(row.get("bullish_premium", 0)),
                         "bearish_premium": _sf(row.get("bearish_premium", 0)),
+                        # Retired — populated post-enrichment as 0.0 for back-compat.
                         "flow_velocity": _sf(row.get("flow_velocity", 0)),
+                        # Replaces flow_velocity. Populated by _enrich_net_prem_ticks
+                        # on signal records; 0.0 on raw feature-table rows.
+                        "directional_momentum": _sf(row.get("directional_momentum", 0), 4),
+                        "directional_momentum_pts": _sf(row.get("directional_momentum_pts", 0), 2),
                         "bullish_flow_intensity": _sf(row.get("bullish_flow_intensity", 0), 4),
                         "bearish_flow_intensity": _sf(row.get("bearish_flow_intensity", 0), 4),
+                        # Delta-weighted flow (shadow when USE_DELTA_WEIGHTED_FLOW is False)
+                        "bullish_delta_intensity": _sf(row.get("bullish_delta_intensity", 0), 6),
+                        "bearish_delta_intensity": _sf(row.get("bearish_delta_intensity", 0), 6),
+                        "bullish_avg_delta": _sf(row.get("bullish_avg_delta", 0), 3),
+                        "bearish_avg_delta": _sf(row.get("bearish_avg_delta", 0), 3),
+                        "bullish_delta_source_mix": _sf(row.get("bullish_delta_source_mix", 0), 3),
+                        "bearish_delta_source_mix": _sf(row.get("bearish_delta_source_mix", 0), 3),
                         "bullish_sweep_count": int(row.get("bullish_sweep_count", 0) or 0),
                         "bearish_sweep_count": int(row.get("bearish_sweep_count", 0) or 0),
                         "bullish_breadth": _sf(row.get("bullish_breadth", 0), 3),
@@ -2560,6 +2700,20 @@ def api_scan_ticker():
                         "bullish_repeat_count": int(row.get("bullish_repeat_count", 0) or 0),
                         "bearish_repeat_count": int(row.get("bearish_repeat_count", 0) or 0),
                         "flow_imbalance_ratio": _sf(row.get("flow_imbalance_ratio", 0)),
+                        # Z-score tier info (None when z-path unavailable)
+                        "bullish_zscore_tier": int(row.get("bullish_zscore_tier")) if row.get("bullish_zscore_tier") is not None and not pd.isna(row.get("bullish_zscore_tier")) else None,
+                        "bearish_zscore_tier": int(row.get("bearish_zscore_tier")) if row.get("bearish_zscore_tier") is not None and not pd.isna(row.get("bearish_zscore_tier")) else None,
+                        "component_tiers": {
+                            comp: {
+                                "bullish": int(row.get(f"bullish_{comp}_tier")) if row.get(f"bullish_{comp}_tier") is not None and not pd.isna(row.get(f"bullish_{comp}_tier")) else None,
+                                "bearish": int(row.get(f"bearish_{comp}_tier")) if row.get(f"bearish_{comp}_tier") is not None and not pd.isna(row.get(f"bearish_{comp}_tier")) else None,
+                            }
+                            for comp in ("flow_intensity", "premium_per_trade", "vol_oi", "repeat", "sweep", "breadth", "dte")
+                        },
+                        "bullish_grade": _cgrade(_sf(row.get("bullish_score", 0) * 10)),
+                        "bearish_grade": _cgrade(_sf(row.get("bearish_score", 0) * 10)),
+                        "bullish_grade_reasons": _bull_reasons,
+                        "bearish_grade_reasons": _bear_reasons,
                     }
         except Exception as fe:
             flow_data["error"] = str(fe)

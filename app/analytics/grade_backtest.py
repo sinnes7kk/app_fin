@@ -145,10 +145,17 @@ def _forward_excess_return(ticker: str, entry_date: str, window: int = FORWARD_W
 
 
 def _aggregate(rows: list[dict[str, Any]]) -> dict[str, Any]:
-    """Summary stats for a list of {grade, direction, forward_excess_return} rows."""
+    """Summary stats for a list of {grade, direction, forward_excess_return} rows.
+
+    Buckets 7-tier grades into their A/B/C family so trailing stats stay
+    statistically stable even as UI tiers refine (A+ / A- still count as A
+    for backtest purposes).
+    """
+    from app.features.grade_explainer import coarse_grade
+
     out: dict[str, Any] = {}
     for grade in ("A", "B", "C"):
-        subset = [r for r in rows if r["grade"] == grade]
+        subset = [r for r in rows if coarse_grade(r["grade"]) == grade]
         if not subset:
             out[grade] = {
                 "count": 0,
@@ -212,7 +219,8 @@ def refresh_grade_stats(
     for as_of in candidate_dates:
         grades = _historical_grades_as_of(as_of)
         for g in grades:
-            if g.get("conviction_grade") not in ("A", "B"):
+            from app.features.grade_explainer import coarse_grade as _cg
+            if _cg(g.get("conviction_grade")) not in ("A", "B"):
                 continue
             excess = _forward_excess_return(g["ticker"], as_of, window=forward_window)
             if excess is None:

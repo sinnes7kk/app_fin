@@ -47,6 +47,13 @@
     <span class="ab-value">{{ ab.grade_stats_line }}</span>
   </div>
   {% endif %}
+
+  {% if ab.zscore_caveat_line %}
+  <div class="ab-item ab-zcaveat" title="Tier 3 (peer) and Tier 4 (absolute) baselines carry reduced confidence. Consider sizing tighter.">
+    <span class="ab-label">Z-Baseline</span>
+    <span class="ab-value ab-mute">{{ ab.zscore_caveat_line }}</span>
+  </div>
+  {% endif %}
 </div>
 {% endif %}
 {% endmacro %}

@@ -65,6 +65,8 @@ def _endpoint_key(url: str) -> str:
     # Collapse ticker-specific paths: /api/stock/AAPL/foo -> /stock/{ticker}/foo
     path = re.sub(r"/stock/[A-Z0-9.]+/", "/stock/{ticker}/", path)
     path = re.sub(r"/darkpool/[A-Z][A-Z0-9.]+", "/darkpool/{ticker}", path)
+    # Collapse OCC contract ids (e.g. AAPL270115C00200000) to {contract}
+    path = re.sub(r"/option-contract/[A-Z0-9.]+/", "/option-contract/{contract}/", path)
     # Strip the /api prefix for brevity
     path = re.sub(r"^/api", "", path)
     return path or url
@@ -709,3 +711,226 @@ def fetch_flow_for_tickers(
     if not frames:
         return pd.DataFrame()
     return pd.concat(frames, ignore_index=True)
+
+
+# ---------------------------------------------------------------------------
+# Option-contract greeks (delta-weighted flow)
+# ---------------------------------------------------------------------------
+
+from pathlib import Path as _Path  # noqa: E402
+import json as _json  # noqa: E402
+import tempfile as _tempfile  # noqa: E402
+import os as _os  # noqa: E402
+from datetime import date as _date  # noqa: E402
+
+_GREEK_CACHE_DIR = _Path(__file__).resolve().parents[2] / "data" / "greek_cache"
+_greek_memo: dict[str, dict | None] = {}  # in-process memo keyed by contract_id
+_greek_day_loaded: str | None = None      # which day is currently in _greek_memo
+
+
+def build_occ_id(
+    ticker: str,
+    expiration_date,
+    option_type: str,
+    strike,
+) -> str | None:
+    """Construct an OCC-style option contract id that UW accepts on the
+    /option-contract/{id}/... endpoints.
+
+    Format: ``{TICKER}{YYMMDD}{C|P}{strike*1000:08d}`` — e.g. ``AAPL270115C00200000``.
+    Returns ``None`` if any component is missing or unparseable so callers can
+    skip the row cleanly.
+    """
+    if not ticker:
+        return None
+    t = str(ticker).upper().strip()
+    if not t:
+        return None
+
+    # Normalize option type → single char
+    ot = str(option_type or "").upper().strip()
+    if ot.startswith("C"):
+        type_char = "C"
+    elif ot.startswith("P"):
+        type_char = "P"
+    else:
+        return None
+
+    # Parse expiration into YYMMDD
+    exp = expiration_date
+    exp_str: str | None = None
+    try:
+        if isinstance(exp, str):
+            exp_str = pd.to_datetime(exp).strftime("%y%m%d")
+        elif hasattr(exp, "strftime"):
+            exp_str = exp.strftime("%y%m%d")
+    except Exception:
+        return None
+    if not exp_str or len(exp_str) != 6:
+        return None
+
+    try:
+        strike_int = int(round(float(strike) * 1000))
+    except (TypeError, ValueError):
+        return None
+    if strike_int <= 0:
+        return None
+
+    return f"{t}{exp_str}{type_char}{strike_int:08d}"
+
+
+def _greek_cache_path(cache_date: _date) -> _Path:
+    return _GREEK_CACHE_DIR / f"{cache_date.isoformat()}.json"
+
+
+def _load_greek_cache(cache_date: _date) -> dict[str, dict | None]:
+    global _greek_memo, _greek_day_loaded
+    day_key = cache_date.isoformat()
+    if _greek_day_loaded == day_key:
+        return _greek_memo
+    path = _greek_cache_path(cache_date)
+    _greek_memo = {}
+    _greek_day_loaded = day_key
+    if path.exists():
+        try:
+            with path.open("r") as f:
+                data = _json.load(f)
+            if isinstance(data, dict):
+                _greek_memo = {str(k): v for k, v in data.items()}
+        except Exception:
+            _greek_memo = {}
+    return _greek_memo
+
+
+def _persist_greek_cache(cache_date: _date) -> None:
+    """Atomically write the in-memory cache to disk."""
+    try:
+        _GREEK_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        path = _greek_cache_path(cache_date)
+        # Write to a temp file in the same directory, then rename → atomic on POSIX.
+        fd, tmp_path = _tempfile.mkstemp(
+            prefix=f".{cache_date.isoformat()}.",
+            suffix=".tmp.json",
+            dir=str(_GREEK_CACHE_DIR),
+        )
+        try:
+            with _os.fdopen(fd, "w") as f:
+                _json.dump(_greek_memo, f)
+            _os.replace(tmp_path, path)
+        except Exception:
+            try:
+                _os.unlink(tmp_path)
+            except OSError:
+                pass
+    except Exception:
+        pass
+
+
+def fetch_contract_greeks(
+    contract_id: str,
+    *,
+    as_of_ts=None,
+    timeout: int = 5,
+) -> dict | None:
+    """Fetch delta/IV for a single option contract from UW's greek-exposure
+    endpoint. Results are cached per-day in ``data/greek_cache/{YYYY-MM-DD}.json``
+    keyed by ``contract_id``; the cache also stores negative results (``None``)
+    so we don't hammer the endpoint for contracts UW doesn't return.
+
+    Returns ``{"delta": float, "iv": float|None, "ts": iso8601}`` or ``None``.
+    """
+    if not contract_id:
+        return None
+
+    # Cache key day — either the event day or today.
+    cache_date: _date
+    if as_of_ts is None:
+        cache_date = _date.today()
+    else:
+        try:
+            cache_date = pd.to_datetime(as_of_ts).date()
+        except Exception:
+            cache_date = _date.today()
+
+    cache = _load_greek_cache(cache_date)
+    if contract_id in cache:
+        return cache[contract_id]
+
+    url = f"{BASE_URL}/option-contract/{contract_id}/greek-exposure"
+    result: dict | None = None
+    try:
+        resp = _uw_request(url, timeout=timeout)
+        resp.raise_for_status()
+        payload = resp.json()
+    except Exception:
+        payload = None
+
+    if payload:
+        data = payload.get("data") if isinstance(payload, dict) else None
+        # UW typically returns a list of daily snapshots; some endpoints return
+        # a single dict. Handle both shapes.
+        rows: list[dict] = []
+        if isinstance(data, list):
+            rows = [r for r in data if isinstance(r, dict)]
+        elif isinstance(data, dict):
+            rows = [data]
+
+        best: dict | None = None
+        if rows:
+            if as_of_ts is not None:
+                try:
+                    target = pd.to_datetime(as_of_ts)
+                    def _row_ts(r: dict):
+                        for k in ("timestamp", "time", "date", "as_of"):
+                            v = r.get(k)
+                            if v:
+                                try:
+                                    return pd.to_datetime(v)
+                                except Exception:
+                                    continue
+                        return None
+                    # Prefer the row with timestamp closest to target.
+                    ranked = [
+                        (abs((t - target).total_seconds()), r)
+                        for r in rows
+                        for t in [_row_ts(r)]
+                        if t is not None
+                    ]
+                    if ranked:
+                        ranked.sort(key=lambda x: x[0])
+                        best = ranked[0][1]
+                except Exception:
+                    best = None
+            if best is None:
+                best = rows[-1]
+
+        if best is not None:
+            def _maybe_float(val) -> float | None:
+                try:
+                    if val is None or val == "":
+                        return None
+                    return float(val)
+                except (TypeError, ValueError):
+                    return None
+
+            delta = _maybe_float(best.get("delta"))
+            if delta is None:
+                # Some shapes expose a nested "greeks" block.
+                greeks = best.get("greeks") or {}
+                if isinstance(greeks, dict):
+                    delta = _maybe_float(greeks.get("delta"))
+            iv = _maybe_float(best.get("iv") or best.get("implied_volatility"))
+            ts_val = best.get("timestamp") or best.get("time") or best.get("date")
+            ts_iso: str | None = None
+            if ts_val:
+                try:
+                    ts_iso = pd.to_datetime(ts_val).isoformat()
+                except Exception:
+                    ts_iso = str(ts_val)
+
+            if delta is not None:
+                result = {"delta": delta, "iv": iv, "ts": ts_iso}
+
+    cache[contract_id] = result
+    _persist_greek_cache(cache_date)
+    return result

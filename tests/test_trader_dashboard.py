@@ -29,11 +29,16 @@ from app.features.flow_tracker import _conviction_grade
 
 
 def test_conviction_grade_thresholds():
+    # 7-tier ladder: A+ >= 8.5, A >= 7.5, A- >= 6.75, B+ >= 6.0,
+    # B >= 5.0, B- >= 4.0, C otherwise.
+    assert _conviction_grade(9.0) == "A+"
     assert _conviction_grade(8.0) == "A"
     assert _conviction_grade(7.5) == "A"
-    assert _conviction_grade(7.49) == "B"
+    assert _conviction_grade(7.49) == "A-"
+    assert _conviction_grade(6.0) == "B+"
     assert _conviction_grade(5.0) == "B"
-    assert _conviction_grade(4.99) == "C"
+    assert _conviction_grade(4.99) == "B-"
+    assert _conviction_grade(3.99) == "C"
 
 
 def test_compute_multi_day_flow_returns_new_fields(monkeypatch, tmp_path):

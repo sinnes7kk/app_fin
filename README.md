@@ -973,6 +973,17 @@ trailing stop loss after Reaching target.
 - **Flow scoring normalized by market cap**: Premium-per-trade converted from raw
   dollars to bps of market cap. Flow intensity thresholds recalibrated.
 
+- **`flow_velocity` deprecated — replaced by `directional_momentum`**: The old
+  median-split premium ratio was non-directional (bullish and bearish scores
+  both used it), unbounded (ratios in the thousands when the older half was
+  near-empty), and penalised single-event tickers. It has been retired from
+  `flow_score_scaled` and its 0.13 weight redistributed proportionally across
+  the remaining 7 components. A directional, bounded replacement is derived
+  from UW `/stock/{ticker}/net-prem-ticks` `delta_momentum` and applied as a
+  post-score bonus on `final_score` (max +0.13, same impact as the retired
+  component). `flow_velocity` is still emitted as `0.0` in aggregate output
+  for back-compat with older snapshot parsers.
+
 # Future Roadmap
 
 ## V3 — Agent-based scoring (compute-then-judge architecture)

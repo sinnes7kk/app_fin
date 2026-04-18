@@ -65,6 +65,31 @@ RS_SHORT_MAX = 0.05   # shorts: demote to watchlist if leading SPY by more than 
 FLOW_PERSISTENCE_DAYS = 3    # look back this many calendar days
 FLOW_PERSISTENCE_BONUS = 0.5 # max score bonus for persistent flow (conservative)
 
+# Rolling z-score baselines for flow components (see app/features/flow_stats.py).
+# When USE_ZSCORE_FLOW is True, each directional flow component is scored as
+# (value - median_30d) / MAD_30d instead of against the absolute thresholds
+# in flow_features._FLOW_THRESHOLDS. Four-tier fallback ladder handles tickers
+# with insufficient history.
+USE_ZSCORE_FLOW = False           # master switch; False keeps current absolute-threshold scoring
+ZSCORE_LOOKBACK_DAYS = 30         # trailing window for per-ticker stats
+ZSCORE_MIN_N_FULL = 20            # Tier 1 minimum valid observations
+ZSCORE_MIN_N_SHRUNK = 5           # Tier 2 minimum (below → Tier 3 cross-sectional)
+ZSCORE_SHRINKAGE_K = 10           # Bayesian shrinkage strength for Tier 2 MAD
+ZSCORE_CLIP = 3.5                 # clamp |z| to this before logistic
+ZSCORE_MIN_COHORT_SIZE = 10       # Tier 3/cross-section needs at least this many tickers
+
+# Delta-weighted directional premium (see app/features/flow_features.py::add_delta_weights).
+# When USE_DELTA_WEIGHTED_FLOW is True, the `flow_intensity` component in the
+# scorer reads from bullish/bearish_delta_intensity (premium × |delta| / mcap)
+# instead of raw bullish/bearish premium over mcap.  The flag ships OFF so we
+# can shadow-log the new intensity distribution for ~1 week, recalibrate the
+# ceiling in _FLOW_THRESHOLDS, then flip on.
+USE_DELTA_WEIGHTED_FLOW = False        # master switch — shadow mode OFF
+DELTA_PROXY_VOL = 0.35                 # annualized vol used by the BS moneyness fallback
+DELTA_FETCH_TIMEOUT = 5                # per-call timeout (seconds) for UW greek-exposure
+DELTA_MAX_UNIQUE_PER_SCAN = 250        # above this, skip UW enrichment and fall back to proxy
+DELTA_MIN_PROXY_COVERAGE = 0.3         # warn if >30% of premium is backed by proxy deltas
+
 MIN_FINAL_SCORE = 7.0
 PORTFOLIO_CAPITAL = 10_000.0
 MAX_POSITIONS = 10
