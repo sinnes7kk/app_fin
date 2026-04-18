@@ -558,12 +558,19 @@ def fetch_stock_screener(
     min_price: float = 5.0,
     min_marketcap: int = 1_000_000_000,
     min_pct_30d_total: float = 1.5,
+    limit: int = 500,
 ) -> list[dict]:
     """Fetch the UW stock screener for tickers with unusual aggregate activity.
 
     Returns a list of dicts with per-ticker metrics (premium, volume ratios,
     iv_rank, sector, etc.).  A single API call covers the entire optionable
     universe, making this the most efficient discovery endpoint.
+
+    ``limit`` defaults to 500 — without it UW silently caps at 50 rows,
+    which meant most Flow Tracker tickers fell back to the thin
+    ``save_flow_feature_snapshot`` row (no close / no OI / no IV rank).
+    Values above ~500 are ignored by UW and revert to the 50-row default,
+    so 500 is the sweet spot.
     """
     url = f"{BASE_URL}/screener/stocks"
     params: dict = {
@@ -572,6 +579,7 @@ def fetch_stock_screener(
         "min_underlying_price": min_price,
         "min_marketcap": min_marketcap,
         "min_perc_30_day_total": min_pct_30d_total,
+        "limit": limit,
     }
     try:
         resp = _uw_request(url, params=params)
@@ -661,6 +669,127 @@ def _enrich_screener_derivations(row: dict) -> None:
         bear = _num(row.get("bearish_premium"))
         if bull is not None or bear is not None:
             row["net_premium"] = (bull or 0.0) - (bear or 0.0)
+
+
+def fetch_ticker_options_snapshot(ticker: str) -> dict | None:
+    """Fetch a screener-shaped dict for a single ticker via per-ticker endpoints.
+
+    Used to back-fill snapshot rows for tickers that aren't in the UW
+    ``/screener/stocks`` response (usually because they fall below the
+    ``min_perc_30_day_total`` relative-volume threshold or the 500-row
+    page cap).  Without this, :func:`save_flow_feature_snapshot` emits
+    rows with no close / OI / IV rank / PCR and every Trader Card shows
+    zeros.
+
+    Hits three endpoints:
+
+    * ``/stock/{ticker}/options-volume?limit=2`` — latest two trading
+      days of call/put volume, OI, premium splits, 3/7/30-day averages.
+      Provides everything needed to derive OI-change and volume ratios
+      (via :func:`_enrich_screener_derivations`).
+    * ``/stock/{ticker}/iv-rank`` — latest close + iv_rank_1y.  UW's
+      response calls it ``iv_rank_1y``; the screener calls the same
+      concept ``iv_rank`` so we alias it.
+    * ``/stock/{ticker}/info`` — marketcap + sector for consistency
+      with screener rows.
+
+    Returns ``None`` if the options-volume endpoint has no data for the
+    ticker (unlisted / illiquid).  Never raises.
+    """
+    ticker = (ticker or "").upper().strip()
+    if not ticker:
+        return None
+
+    try:
+        resp = _uw_request(f"{BASE_URL}/stock/{ticker}/options-volume", params={"limit": 2})
+        resp.raise_for_status()
+        days = resp.json().get("data", []) or []
+    except Exception:
+        return None
+    if not days:
+        return None
+
+    # UW returns days newest-first.  Use row 0 for today/latest, row 1
+    # for prev-day so we can compute OI change.
+    latest = days[0]
+    prev = days[1] if len(days) > 1 else {}
+
+    def _f(v):
+        try:
+            if v is None:
+                return None
+            x = float(v)
+            if x != x:
+                return None
+            return x
+        except (TypeError, ValueError):
+            return None
+
+    row: dict = {
+        "ticker": ticker,
+        "call_volume": _f(latest.get("call_volume")),
+        "put_volume": _f(latest.get("put_volume")),
+        "call_open_interest": _f(latest.get("call_open_interest")),
+        "put_open_interest": _f(latest.get("put_open_interest")),
+        "prev_call_oi": _f(prev.get("call_open_interest")),
+        "prev_put_oi": _f(prev.get("put_open_interest")),
+        "call_premium": _f(latest.get("call_premium")),
+        "put_premium": _f(latest.get("put_premium")),
+        "bullish_premium": _f(latest.get("bullish_premium")),
+        "bearish_premium": _f(latest.get("bearish_premium")),
+        "avg_30_day_call_volume": _f(latest.get("avg_30_day_call_volume")),
+        "avg_30_day_put_volume": _f(latest.get("avg_30_day_put_volume")),
+        "avg_3_day_call_volume": _f(latest.get("avg_3_day_call_volume")),
+        "avg_3_day_put_volume": _f(latest.get("avg_3_day_put_volume")),
+    }
+
+    # Total OI is straightforward — call + put from the same day.
+    c = row["call_open_interest"]
+    p = row["put_open_interest"]
+    if c is not None and p is not None:
+        row["total_open_interest"] = c + p
+
+    # Put/call ratio — UW's screener uses put_volume / call_volume.
+    cv = row["call_volume"] or 0.0
+    pv = row["put_volume"] or 0.0
+    if cv > 0:
+        row["put_call_ratio"] = pv / cv
+
+    # IV rank + close come from /iv-rank (cheap; one call per ticker).
+    try:
+        iv_resp = _uw_request(f"{BASE_URL}/stock/{ticker}/iv-rank", params={"limit": 1})
+        iv_resp.raise_for_status()
+        iv_rows = iv_resp.json().get("data", []) or []
+        if iv_rows:
+            iv_last = iv_rows[-1]  # UW returns oldest-first here
+            row["iv_rank"] = _f(iv_last.get("iv_rank_1y"))
+            row["iv30d"] = _f(iv_last.get("volatility"))
+            row["close"] = _f(iv_last.get("close"))
+    except Exception:
+        pass
+
+    # Sector + marketcap from /info (optional; skip failures silently).
+    try:
+        info_resp = _uw_request(f"{BASE_URL}/stock/{ticker}/info")
+        info_resp.raise_for_status()
+        info = info_resp.json().get("data", {}) or {}
+        if info:
+            row.setdefault("sector", info.get("sector"))
+            mcap = _f(info.get("marketcap"))
+            if mcap is not None:
+                row["marketcap"] = mcap
+    except Exception:
+        pass
+
+    # Final step — reuse the same derivation helper the screener uses so
+    # perc_30_day_total / perc_3_day_total / *_oi_change_perc / volume
+    # are populated consistently.
+    try:
+        _enrich_screener_derivations(row)
+    except Exception:
+        pass
+
+    return row
 
 
 def fetch_uw_alerts(limit: int = 500, hours_back: int = 48) -> list[str]:

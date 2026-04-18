@@ -307,50 +307,111 @@ def save_flow_feature_snapshot(feature_table: pd.DataFrame) -> None:
         except Exception:
             pass
 
-    new_rows: list[dict] = []
+    # Build a list of tickers we'll enrich with per-ticker UW calls.  We do
+    # this up-front (and in parallel) so the slow network calls overlap
+    # rather than blocking one-by-one.
+    gap_tickers: list[str] = []
+    gap_feature_rows: dict[str, dict] = {}
     for _, row in feature_table.iterrows():
         ticker = str(row.get("ticker", "")).upper().strip()
         if not ticker or ticker in existing_today:
             continue
+        gap_tickers.append(ticker)
+        gap_feature_rows[ticker] = {
+            "bull_prem": float(row.get("bullish_premium_raw", 0) or 0),
+            "bear_prem": float(row.get("bearish_premium_raw", 0) or 0),
+            "mcap": float(row.get("marketcap", 0) or 0),
+            "dominant_dte_bucket": row.get("dominant_dte_bucket"),
+            "sweep_share": row.get("sweep_share"),
+            "multileg_share": row.get("multileg_share"),
+            "bullish_accel_ratio": row.get("bullish_accel_ratio"),
+            "bearish_accel_ratio": row.get("bearish_accel_ratio"),
+            "total_count": row.get("total_count"),
+        }
 
-        bull_prem = float(row.get("bullish_premium_raw", 0) or 0)
-        bear_prem = float(row.get("bearish_premium_raw", 0) or 0)
-        mcap = float(row.get("marketcap", 0) or 0)
+    if not gap_tickers:
+        return
+
+    # Per-ticker enrichment — UW screener only returns ~340 tickers per
+    # day (due to the relative-volume filter / 500-row page cap), but
+    # flow-features routinely surfaces 100+ tickers below that cut-off.
+    # Without this, those rows land with close=None / OI=None / IV=None
+    # and every Trader Card for them renders zeros.  We fan-out to
+    # /stock/{ticker}/options-volume + /iv-rank + /info concurrently
+    # and fall back to the thin row when a call fails.
+    enrichment_map: dict[str, dict] = {}
+    try:
+        from concurrent.futures import ThreadPoolExecutor
+        from app.vendors.unusual_whales import fetch_ticker_options_snapshot
+
+        max_workers = min(8, max(1, len(gap_tickers)))
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            for ticker, snap in zip(
+                gap_tickers, pool.map(fetch_ticker_options_snapshot, gap_tickers)
+            ):
+                if snap:
+                    enrichment_map[ticker] = snap
+    except Exception as e:
+        print(f"  [flow-tracker] per-ticker enrichment failed (continuing with thin rows): {e}")
+
+    new_rows: list[dict] = []
+    for ticker in gap_tickers:
+        ft = gap_feature_rows[ticker]
+        bull_prem = ft["bull_prem"]
+        bear_prem = ft["bear_prem"]
+        mcap = ft["mcap"]
+        enriched = enrichment_map.get(ticker) or {}
 
         new_rows.append({
             "snapshot_date": today_str,
             "ticker": ticker,
-            "sector": None,
-            "close": None,
-            "marketcap": mcap if mcap > 0 else None,
-            "bullish_premium": round(bull_prem, 2),
-            "bearish_premium": round(bear_prem, 2),
-            "net_premium": round(bull_prem - bear_prem, 2),
-            "call_volume": None,
-            "put_volume": None,
-            "volume": row.get("total_count"),
-            "call_open_interest": None,
-            "put_open_interest": None,
-            "total_oi_change_perc": None,
-            "call_oi_change_perc": None,
-            "put_oi_change_perc": None,
-            "put_call_ratio": None,
-            "iv_rank": None,
-            "iv30d": None,
-            "perc_3_day_total": None,
-            "perc_30_day_total": None,
-            "call_premium": None,
-            "put_premium": None,
-            "dominant_dte_bucket": row.get("dominant_dte_bucket"),
-            "sweep_share": row.get("sweep_share"),
-            "multileg_share": row.get("multileg_share"),
+            "sector": enriched.get("sector"),
+            "close": enriched.get("close"),
+            # Prefer flow-feature marketcap (already sanitised), fall back
+            # to /stock/{ticker}/info if flow-features didn't have one.
+            "marketcap": (mcap if mcap > 0 else enriched.get("marketcap")),
+            # Screener premiums always win when we have them — they come
+            # straight from UW's own aggregation; otherwise keep the
+            # flow-feature totals.
+            "bullish_premium": round(enriched.get("bullish_premium") or bull_prem, 2),
+            "bearish_premium": round(enriched.get("bearish_premium") or bear_prem, 2),
+            "net_premium": round(
+                enriched.get("net_premium")
+                if enriched.get("net_premium") is not None
+                else (bull_prem - bear_prem),
+                2,
+            ),
+            "call_volume": enriched.get("call_volume"),
+            "put_volume": enriched.get("put_volume"),
+            # Use derived total options volume when available, else the
+            # flow-feature trade count as a last resort.
+            "volume": enriched.get("volume") if enriched.get("volume") is not None else ft.get("total_count"),
+            "call_open_interest": enriched.get("call_open_interest"),
+            "put_open_interest": enriched.get("put_open_interest"),
+            "total_oi_change_perc": enriched.get("total_oi_change_perc"),
+            "call_oi_change_perc": enriched.get("call_oi_change_perc"),
+            "put_oi_change_perc": enriched.get("put_oi_change_perc"),
+            "put_call_ratio": enriched.get("put_call_ratio"),
+            "iv_rank": enriched.get("iv_rank"),
+            "iv30d": enriched.get("iv30d"),
+            "perc_3_day_total": enriched.get("perc_3_day_total"),
+            "perc_30_day_total": enriched.get("perc_30_day_total"),
+            "call_premium": enriched.get("call_premium"),
+            "put_premium": enriched.get("put_premium"),
+            "dominant_dte_bucket": ft.get("dominant_dte_bucket"),
+            "sweep_share": ft.get("sweep_share"),
+            "multileg_share": ft.get("multileg_share"),
             # Wave 2 — per-side acceleration ratio (today only).
-            "bullish_accel_ratio": row.get("bullish_accel_ratio"),
-            "bearish_accel_ratio": row.get("bearish_accel_ratio"),
+            "bullish_accel_ratio": ft.get("bullish_accel_ratio"),
+            "bearish_accel_ratio": ft.get("bearish_accel_ratio"),
         })
 
     if not new_rows:
         return
+
+    enriched_count = sum(1 for t in gap_tickers if t in enrichment_map)
+    print(f"  [flow-tracker] per-ticker enrichment: {enriched_count}/{len(gap_tickers)} "
+          f"gap-filler rows back-filled with close/OI/IV from UW")
 
     # Append to the existing file (screener snapshot already wrote today's rows)
     all_rows: list[dict] = []
