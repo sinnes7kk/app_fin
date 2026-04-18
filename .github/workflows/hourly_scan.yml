@@ -45,6 +45,12 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          # Explicit allowlist of pipeline outputs.  Added Wave 2 / Wave 8
+          # caches (iv_rank_history, market_indicators) and the grade
+          # backtest + flow_stats meta files — without these the runner
+          # left them unstaged, which made ``git pull --rebase`` bail out
+          # on push-rejection retries.  Always keep this list in sync
+          # with whatever pipeline steps write under ``data/``.
           for f in \
             data/raw_flow/ \
             data/trade_log.csv \
@@ -65,20 +71,28 @@ jobs:
             data/dp_snapshots.csv \
             data/hottest_chains.json \
             data/insider_recent.json \
-            data/earnings_cache.json; do
+            data/earnings_cache.json \
+            data/iv_rank_history.json \
+            data/market_indicators.json \
+            data/grade_stats.json \
+            data/flow_stats_meta.json; do
             [ -e "$f" ] && git add "$f"
           done
           git diff --cached --quiet && echo "No data changes to commit" && exit 0
           git commit -m "auto: hourly scan $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
-          # Retry push up to 3 times with pull --rebase on conflict
+          # Retry push up to 3 times with pull --rebase on conflict.
+          # ``--autostash`` auto-stashes any residual unstaged changes
+          # (e.g. new data files we haven't listed yet) so the rebase
+          # doesn't bail with "cannot pull with rebase: You have
+          # unstaged changes".
           for attempt in 1 2 3; do
             if git push; then
               echo "Push succeeded on attempt $attempt"
               break
             fi
             echo "Push failed (attempt $attempt), pulling and retrying..."
-            git pull --rebase origin main
+            git pull --rebase --autostash origin main || true
           done
 
       - name: Build static dashboard
