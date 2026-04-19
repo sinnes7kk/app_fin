@@ -3289,6 +3289,7 @@
       function ftSubtabBar() {
         return '<div class="detail-subtabs" role="tablist">' +
           '<button type="button" class="detail-subtab active" role="tab" aria-selected="true" data-subtab="summary">Flow Summary</button>' +
+          '<button type="button" class="detail-subtab" role="tab" aria-selected="false" data-subtab="premium_mix">Premium Mix</button>' +
           '<button type="button" class="detail-subtab" role="tab" aria-selected="false" data-subtab="why">Why?</button>' +
           '<button type="button" class="detail-subtab" role="tab" aria-selected="false" data-subtab="structure">Structure</button>' +
           '<button type="button" class="detail-subtab" role="tab" aria-selected="false" data-subtab="chart">Chart</button>' +
@@ -3357,7 +3358,9 @@
       function ftPanelsHtml(d, ticker) {
         var narrative = buildNarrativeHtml(d && d.narrative, { context: ticker });
         var structure = buildStructureHtml(d && d.trade_structure, { context: ticker });
+        var premiumMix = buildPremiumMixHtml(d && d.premium_mix_ui, { context: ticker });
         return '<div class="detail-subtab-panel active" data-panel="summary">' + ftSummaryHtml(d) + '</div>' +
+          '<div class="detail-subtab-panel" data-panel="premium_mix">' + premiumMix + '</div>' +
           '<div class="detail-subtab-panel" data-panel="why">' + narrative + '</div>' +
           '<div class="detail-subtab-panel" data-panel="structure">' + structure + '</div>' +
           '<div class="detail-subtab-panel" data-panel="chart"><div class="tv-chart-wrap" id="tv-chart-ft-' + escHtml(ticker) + '"></div></div>';
