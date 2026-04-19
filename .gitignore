@@ -53,3 +53,6 @@ data/dark_pool_daily_*.json
 data/dp_scan_count.txt
 !data/positions.json
 !data/watchlist.json
+
+# Migration backups (see scripts/restamp_snapshot_weekends.py)
+data/*.bak
