@@ -43,6 +43,7 @@ from app.config import (
     ZSCORE_MIN_N_SHRUNK,
     ZSCORE_SHRINKAGE_K,
 )
+from app.utils.market_calendar import current_trading_day
 
 DATA_DIR = Path(__file__).resolve().parents[2] / "data"
 DP_SNAPSHOTS_PATH = DATA_DIR / "dp_snapshots.csv"
@@ -94,7 +95,7 @@ def _load_history(
         return pd.DataFrame()
 
     if as_of is None:
-        as_of = date.today()
+        as_of = current_trading_day()
     cutoff = (as_of - timedelta(days=lookback_days)).isoformat()
     df = df[df["snapshot_date"] >= cutoff].copy()
     if df.empty:
@@ -180,7 +181,7 @@ def compute_dp_z_tier(
         return {"z": None, "tier": TIER_ABS, "tier_label": TIER_LABELS[TIER_ABS], "n": 0}
 
     per_ticker = _per_ticker_stats(history)
-    today_str = (as_of or date.today()).isoformat()
+    today_str = (as_of or current_trading_day()).isoformat()
     cs_med, cs_mad = _cross_sectional_stats(history, as_of_date=today_str)
 
     key = str(ticker or "").upper().strip()
@@ -223,7 +224,7 @@ def attach_dp_z_tiers(
 
     # Pre-compute stats once for efficiency.
     per_ticker = _per_ticker_stats(history) if not history.empty else {}
-    today_str = (as_of or date.today()).isoformat()
+    today_str = (as_of or current_trading_day()).isoformat()
     cs_med, cs_mad = _cross_sectional_stats(history, as_of_date=today_str) if not history.empty else (None, None)
     all_vals = pd.to_numeric(history.get("total_notional"), errors="coerce").dropna() if not history.empty else pd.Series(dtype=float)
     scale_ref = float(all_vals.abs().median()) if not all_vals.empty else 0.0

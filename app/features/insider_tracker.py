@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
+from app.utils.market_calendar import current_trading_day
+
 NOTABLE_TITLES = {
     "ceo", "cfo", "coo", "cto", "president", "chairman",
     "director", "chief", "officer", "vp", "evp", "svp",
@@ -22,7 +24,7 @@ def classify_insider_activity(
     if not transactions:
         return {}
 
-    cutoff = str(date.today() - timedelta(days=lookback_days))
+    cutoff = (current_trading_day() - timedelta(days=lookback_days)).isoformat()
     ticker_agg: dict[str, dict] = {}
 
     for row in transactions:

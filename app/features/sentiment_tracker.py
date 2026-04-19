@@ -10,6 +10,7 @@ from typing import Optional
 import pandas as pd
 
 from app.config import FLOW_TRACKER_LOOKBACK_DAYS
+from app.utils.market_calendar import current_trading_day
 
 DATA_DIR = Path(__file__).resolve().parents[2] / "data"
 SENTIMENT_PATH = DATA_DIR / "sentiment_snapshots.csv"
@@ -40,8 +41,9 @@ def fetch_and_save_sentiment(tickers: list[str]) -> None:
     if not tickers:
         return
 
-    today_str = str(date.today())
-    cutoff = str(date.today() - timedelta(days=FLOW_TRACKER_LOOKBACK_DAYS + 3))
+    today = current_trading_day()
+    today_str = today.isoformat()
+    cutoff = (today - timedelta(days=FLOW_TRACKER_LOOKBACK_DAYS + 3)).isoformat()
 
     new_rows: list[dict] = []
     for ticker in tickers:
@@ -109,7 +111,7 @@ def compute_sentiment_trend(
     if df.empty or "snapshot_date" not in df.columns:
         return {}
 
-    cutoff = str(date.today() - timedelta(days=lookback))
+    cutoff = (current_trading_day() - timedelta(days=lookback)).isoformat()
     df = df[df["snapshot_date"] >= cutoff].copy()
     if df.empty:
         return {}

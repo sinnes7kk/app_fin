@@ -27,6 +27,8 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from app.utils.market_calendar import current_trading_day
+
 # Keep three weeks of history.  This is enough for the default 5d delta
 # to survive holiday weeks, and small enough that the JSON stays in the
 # single-digit-KB range even with hundreds of tickers.
@@ -111,7 +113,7 @@ def record_iv_rank(ticker: str, iv_rank: float | None, *, on: date | None = None
     if not tk:
         return
 
-    today = on or date.today()
+    today = on or current_trading_day()
     today_str = today.isoformat()
 
     history = _load()
@@ -138,7 +140,7 @@ def compute_iv_rank_delta(
     if not tk:
         return None, None, 0
 
-    today = on or date.today()
+    today = on or current_trading_day()
     cutoff = today - timedelta(days=lookback_days)
 
     samples = _load().get(tk, [])

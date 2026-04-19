@@ -11,6 +11,7 @@ from pathlib import Path
 import pandas as pd
 
 from app.config import DP_TRACKER_LOOKBACK_DAYS, DP_TRACKER_MIN_ACTIVE_DAYS
+from app.utils.market_calendar import current_trading_day
 
 DATA_DIR = Path(__file__).resolve().parents[2] / "data"
 DP_SNAPSHOTS_PATH = DATA_DIR / "dp_snapshots.csv"
@@ -198,7 +199,7 @@ def aggregate_dark_pool_prints(
 
 
 def _daily_path(d: date | None = None) -> Path:
-    d = d or date.today()
+    d = d or current_trading_day()
     return DATA_DIR / f"{_DAILY_PREFIX}{d.isoformat()}.json"
 
 
@@ -212,7 +213,7 @@ def accumulate_daily_prints(new_prints: list[dict]) -> list[dict]:
     if not new_prints:
         return load_daily_accumulated()
 
-    today = date.today()
+    today = current_trading_day()
     path = _daily_path(today)
     DATA_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -266,7 +267,7 @@ def load_daily_accumulated() -> list[dict]:
 
 def get_daily_scan_count() -> int:
     """How many scans contributed to today's accumulated data."""
-    today_str = date.today().isoformat()
+    today_str = current_trading_day().isoformat()
     if not _scan_counter_path.exists():
         return 0
     try:
@@ -421,8 +422,9 @@ def save_dp_snapshot(
         return
 
     screener_meta = screener_meta or {}
-    today_str = str(date.today())
-    cutoff = str(date.today() - timedelta(days=DP_TRACKER_LOOKBACK_DAYS + 3))
+    today = current_trading_day()
+    today_str = today.isoformat()
+    cutoff = (today - timedelta(days=DP_TRACKER_LOOKBACK_DAYS + 3)).isoformat()
 
     new_rows: list[dict] = []
     for agg in ticker_aggregates:
@@ -500,7 +502,7 @@ def compute_multi_day_dp(
     if df.empty or "snapshot_date" not in df.columns:
         return []
 
-    cutoff = str(date.today() - timedelta(days=lookback_days))
+    cutoff = (current_trading_day() - timedelta(days=lookback_days)).isoformat()
     df = df[df["snapshot_date"] >= cutoff].copy()
     if df.empty:
         return []

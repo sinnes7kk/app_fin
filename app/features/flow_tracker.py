@@ -9,6 +9,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from app.utils.market_calendar import current_trading_day
 from app.config import (
     FLOW_TRACKER_DTE_BUCKETS,
     FLOW_TRACKER_ETF_EXCLUDE,
@@ -152,7 +153,7 @@ def update_stats_meta(tickers) -> None:
     """
     if not tickers:
         return
-    today_str = str(date.today())
+    today_str = current_trading_day().isoformat()
     meta = _load_stats_meta()
     changed = False
     for t in tickers:
@@ -367,11 +368,12 @@ def save_screener_snapshot(
     if not screener_data:
         return
 
-    today_str = str(date.today())
+    today = current_trading_day()
+    today_str = today.isoformat()
     # Wave 0.5 C1 — retention extended from LOOKBACK+3 (8d) to 21d so the
     # 15d horizon toggle has its history and the B3 relative-PCR baseline
     # can reach the ≥10-observation threshold.
-    cutoff = str(date.today() - timedelta(days=FLOW_TRACKER_RETENTION_DAYS))
+    cutoff = (today - timedelta(days=FLOW_TRACKER_RETENTION_DAYS)).isoformat()
     flow_enrichment = flow_enrichment or {}
     premium_buckets = premium_buckets or {}
 
@@ -453,7 +455,7 @@ def save_flow_feature_snapshot(
     if feature_table is None or feature_table.empty:
         return
 
-    today_str = str(date.today())
+    today_str = current_trading_day().isoformat()
 
     # Read existing today rows to find which tickers are already covered
     existing_today: set[str] = set()
@@ -652,7 +654,7 @@ def compute_multi_day_flow(
     if "ticker" in df.columns:
         df = df[~df["ticker"].isin(FLOW_TRACKER_ETF_EXCLUDE)]
 
-    cutoff = str(date.today() - timedelta(days=lookback_days))
+    cutoff = (current_trading_day() - timedelta(days=lookback_days)).isoformat()
     df = df[df["snapshot_date"] >= cutoff].copy()
     if df.empty:
         return []
