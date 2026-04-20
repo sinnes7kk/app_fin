@@ -1427,7 +1427,7 @@ def run_flow_to_price_pipeline(
     active_watchlist, expired_watchlist = prune_expired(prev_watchlist)
 
     try:
-        payload = fetch_flow_raw(limit=flow_limit)
+        payload = fetch_flow_raw(limit=flow_limit, min_premium=min_premium)
     except Exception as api_err:
         print(f"\n  [FATAL] Flow API call failed: {api_err}")
         print("  Skipping scan — will retry next scheduled run.")
@@ -1467,6 +1467,30 @@ def run_flow_to_price_pipeline(
             qualified = compute_multi_day_flow()
             if qualified:
                 fetch_and_save_sentiment([t["ticker"] for t in qualified])
+
+            # Wave B1/B2/B3 — quant feedback loop.  Persist today's
+            # grades with their feature vectors, attach forward
+            # returns for matured rows, and refresh the attribution
+            # report.  Guarded individually so a failure in one step
+            # doesn't break the rest of the pipeline.
+            try:
+                from app.analytics.grade_history import (
+                    attach_forward_returns,
+                    persist_grade_history,
+                )
+                from app.utils.market_calendar import current_trading_day
+                as_of_today = current_trading_day().isoformat()
+                wrote = persist_grade_history(qualified or [], as_of=as_of_today)
+                attached = attach_forward_returns(window=5)
+                print(f"  [grade-history] wrote={wrote} attached={attached}")
+            except Exception as ge:
+                print(f"  [grade-history] skipped: {ge}")
+
+            try:
+                from app.analytics.grade_attribution import refresh_attribution
+                refresh_attribution()
+            except Exception as ae:
+                print(f"  [grade-attribution] skipped: {ae}")
         except Exception as se:
             print(f"  [sentiment] skipped: {se}")
 
@@ -1704,21 +1728,43 @@ def run_flow_to_price_pipeline(
                             for k in brow.index
                             if k != "ticker" and k.endswith("_premium")
                         }
+
+                    # UF Trader Card fix: also merge the 8 bucket columns
+                    # into feature_table so flow_features_*.csv persists them.
+                    # The Unusual Flow view reads these directly from r (one
+                    # source of truth; buckets sum to bullish/bearish_premium
+                    # _raw by construction since both are derived from the
+                    # same `bucket_base` DataFrame).
+                    if not feature_table.empty:
+                        _bucket_cols = [
+                            c for c in bucket_df.columns
+                            if c != "ticker" and c.endswith("_premium")
+                        ]
+                        # Drop any pre-existing bucket columns so the merge
+                        # is idempotent if the pipeline is re-run in-process.
+                        _existing = [c for c in _bucket_cols if c in feature_table.columns]
+                        if _existing:
+                            feature_table = feature_table.drop(columns=_existing)
+                        feature_table = feature_table.merge(
+                            bucket_df[["ticker", *_bucket_cols]],
+                            on="ticker",
+                            how="left",
+                        )
+                        for _col in _bucket_cols:
+                            if _col in feature_table.columns:
+                                feature_table[_col] = feature_table[_col].fillna(0.0)
         except Exception as _be:
             print(f"  [flow-tracker] premium-bucket aggregation failed (continuing without): {_be}")
 
-        save_flow_feature_snapshot(feature_table, premium_buckets=premium_buckets)
-
         # Wave 0.5 A1/A2 — back-fill today's screener rows with the
         # structural enrichment (dominant DTE bucket, sweep share,
-        # multileg share).  save_screener_snapshot's upsert only touches
-        # today's date so historical rows are untouched.
+        # multileg share).  Build enrichment from feature_table first so
+        # it can be forwarded to save_screener_snapshot below.
+        enrichment: dict[str, dict] = {}
         if (
             not feature_table.empty
             and "dominant_dte_bucket" in feature_table.columns
-            and screener_rows
         ):
-            enrichment: dict[str, dict] = {}
             for _, fr in feature_table.iterrows():
                 t = str(fr.get("ticker", "")).upper().strip()
                 if not t:
@@ -1731,11 +1777,21 @@ def run_flow_to_price_pipeline(
                     "bullish_accel_ratio": float(fr.get("bullish_accel_ratio", 0) or 0),
                     "bearish_accel_ratio": float(fr.get("bearish_accel_ratio", 0) or 0),
                 }
+
+        # Snapshot writer order matters: save_screener_snapshot rewrites
+        # today's slice of the CSV (drops all today-rows, writes screener
+        # rows), so it must run *before* save_flow_feature_snapshot,
+        # which only appends gap-tickers not already present for today.
+        # Calling save_flow_feature_snapshot first would see its rows
+        # wiped by save_screener_snapshot's replace-today logic.
+        if screener_rows:
             save_screener_snapshot(
                 screener_rows,
                 flow_enrichment=enrichment,
                 premium_buckets=premium_buckets,
             )
+
+        save_flow_feature_snapshot(feature_table, premium_buckets=premium_buckets)
     except Exception as e:
         print(f"  [flow-tracker] flow-feature merge failed: {e}")
 

@@ -110,6 +110,133 @@ def test_premium_mix_ui_dominant_prefers_highest_gross():
 
 
 # ---------------------------------------------------------------------------
+# 1b. UF DTE Bucket Fix — bucket columns on `r` propagate to _synth_mix,
+#     and context="unusual_flow" drops the redundant "Unusual flow" row.
+# ---------------------------------------------------------------------------
+
+
+def test_premium_mix_ui_context_unusual_flow_omits_unusual_row():
+    """Unusual-flow context tab: `_build_premium_mix_ui(context="unusual_flow")`
+    must NOT include an "unusual" key.  Under the Unusual Flow tab every
+    print already cleared the $500K floor upstream, so "total == unusual"
+    tautologically and showing both would be noise.
+    """
+    from app.web.view_models import _build_premium_mix_ui
+
+    synth = {
+        "total_bullish":   2_000_000,
+        "total_bearish":   1_000_000,
+        "lottery_bullish":   500_000,
+        "lottery_bearish":   200_000,
+        "swing_bullish":   1_000_000,
+        "swing_bearish":     500_000,
+        "leap_bullish":      500_000,
+        "leap_bearish":      300_000,
+        "source":          "flow_features",
+    }
+    ui = _build_premium_mix_ui({"premium_mix": synth}, context="unusual_flow")
+    assert ui is not None
+    assert ui.get("context") == "unusual_flow"
+    assert "unusual" not in ui, (
+        "context='unusual_flow' must skip the redundant 'Unusual flow' row"
+    )
+    # But total + buckets still populated so the panel renders meaningfully.
+    assert ui["total"]["gross"] == 3_000_000.0
+    assert any(b["gross"] > 0 for b in ui["buckets"])
+
+
+def test_premium_mix_ui_context_flow_tracker_keeps_unusual_row():
+    """Default context (Flow Tracker) must still emit both kicker rows,
+    otherwise the Flow Tracker Trader Card loses the "unusual flow"
+    subset row that it genuinely needs (it shows the subset of total
+    that came from institutional-sized prints, which IS different from
+    total in the Flow Tracker data source).
+    """
+    from app.web.view_models import _build_premium_mix_ui
+
+    synth = {
+        "total_bullish":   5_000_000,
+        "total_bearish":   1_000_000,
+        "unusual_bullish": 4_000_000,
+        "unusual_bearish":   900_000,
+        "lottery_bullish":   500_000,
+        "lottery_bearish":   100_000,
+        "swing_bullish":   3_000_000,
+        "swing_bearish":     500_000,
+        "leap_bullish":      500_000,
+        "leap_bearish":      300_000,
+        "source":          "flow_features",
+    }
+    ui_default = _build_premium_mix_ui({"premium_mix": synth})
+    ui_explicit = _build_premium_mix_ui({"premium_mix": synth}, context="flow_tracker")
+    for ui in (ui_default, ui_explicit):
+        assert ui is not None
+        assert "unusual" in ui
+        # Unusual row gross = 4.9M, distinct from total gross 6M.
+        assert ui["unusual"]["gross"] == 4_900_000.0
+        assert ui["total"]["gross"] == 6_000_000.0
+
+
+def test_synth_mix_reads_bucket_columns_off_feature_row():
+    """The server.py `top_flow` loop reads bucket columns straight off
+    `r` (a flow_features row) when building `_synth_mix`.  This test
+    simulates that projection with bucket columns present and absent,
+    ensuring the zero-fill fallback keeps the UI non-crashing.
+    """
+    # Reproduce the relevant fragment of the server-side projection.
+    def _build_synth(r: dict) -> dict:
+        _bull = float(r.get("bullish_premium_raw", 0) or 0)
+        _bear = float(r.get("bearish_premium_raw", 0) or 0)
+        return {
+            "total_bullish":   _bull,
+            "total_bearish":   _bear,
+            "lottery_bullish": float(r.get("lottery_bullish_premium") or 0),
+            "lottery_bearish": float(r.get("lottery_bearish_premium") or 0),
+            "swing_bullish":   float(r.get("swing_bullish_premium")   or 0),
+            "swing_bearish":   float(r.get("swing_bearish_premium")   or 0),
+            "leap_bullish":    float(r.get("leap_bullish_premium")    or 0),
+            "leap_bearish":    float(r.get("leap_bearish_premium")    or 0),
+            "other_bullish":   float(r.get("other_bullish_premium")   or 0),
+            "other_bearish":   float(r.get("other_bearish_premium")   or 0),
+            "source":          "flow_features",
+        }
+
+    # Case A: pipeline persisted bucket columns — buckets populate.
+    r_full = {
+        "bullish_premium_raw": 3_600_000,
+        "bearish_premium_raw":   600_000,
+        "lottery_bullish_premium": 1_000_000,
+        "lottery_bearish_premium":         0,
+        "swing_bullish_premium":     600_000,
+        "swing_bearish_premium":     600_000,
+        "leap_bullish_premium":    2_000_000,
+        "leap_bearish_premium":            0,
+    }
+    synth_full = _build_synth(r_full)
+    assert synth_full["lottery_bullish"] == 1_000_000
+    assert synth_full["swing_bearish"] == 600_000
+    assert synth_full["leap_bullish"] == 2_000_000
+    # Bullish buckets reconcile to bullish raw total.
+    assert (
+        synth_full["lottery_bullish"]
+        + synth_full["swing_bullish"]
+        + synth_full["leap_bullish"]
+        == synth_full["total_bullish"]
+    )
+
+    # Case B: pre-fix scan with no bucket columns — synth falls back
+    # to zeros across all buckets; no crash, no NaN leakage.
+    r_legacy = {
+        "bullish_premium_raw": 500_000,
+        "bearish_premium_raw":       0,
+    }
+    synth_legacy = _build_synth(r_legacy)
+    for side in ("bullish", "bearish"):
+        for bucket in ("lottery", "swing", "leap", "other"):
+            assert synth_legacy[f"{bucket}_{side}"] == 0
+
+
+# ---------------------------------------------------------------------------
 # 2. Dominant-side accel selection + chip clamping (server-side projection)
 # ---------------------------------------------------------------------------
 

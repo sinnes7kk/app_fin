@@ -34,6 +34,7 @@
       <li><a href="#ref-tabs" data-ref-anchor="ref-tabs">Tabs &amp; workflow</a></li>
       <li><a href="#ref-chip-glossary" data-ref-anchor="ref-chip-glossary">Chip glossary</a></li>
       <li><a href="#ref-unusual-flow" data-ref-anchor="ref-unusual-flow">Unusual Flow &mdash; Trader Card</a></li>
+      <li><a href="#ref-attribution" data-ref-anchor="ref-attribution">Feature attribution (60d)</a></li>
     </ul>
   </aside>
 
@@ -537,6 +538,98 @@
         Repeat chip is flat, you&apos;re looking at fresh but ephemeral
         speculation. A high grade with bucket SWING + repeat &ge; 1.3x
         is much more likely to be real institutional money.
+      </p>
+    </section>
+
+    <section id="ref-attribution" class="ref-section">
+      <h3>Feature attribution (trailing 60d)</h3>
+      <p>
+        Spearman rank correlation between each Flow Tracker feature and
+        the direction-signed forward 5-day excess return (ticker return
+        minus SPY). Positive &rho; &rarr; bigger values predict better
+        outcomes. n is the sample size; p is the two-sided p-value.
+        Needs &ge;30 matured samples before stats populate.
+      </p>
+
+      {% if grade_attribution and grade_attribution.get("status") == "ok" and grade_attribution.get("ranked_numeric") %}
+        <p class="ref-note">
+          n_rows = {{ grade_attribution.n_rows }} &middot; window =
+          {{ grade_attribution.window_days }}d &middot; computed
+          {{ grade_attribution.computed_at | default("?", true) | truncate(19, True, "") }}
+        </p>
+        <table class="ref-attrib-table">
+          <thead>
+            <tr>
+              <th>Feature</th>
+              <th>n</th>
+              <th>&rho; (Spearman)</th>
+              <th>p</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in grade_attribution.ranked_numeric %}
+              <tr>
+                <td><code>{{ row.feature }}</code></td>
+                <td>{{ row.n }}</td>
+                <td>
+                  {% if row.rho is not none %}
+                    {{ "%+.3f"|format(row.rho) }}
+                  {% else %}&mdash;{% endif %}
+                </td>
+                <td>
+                  {% if row.p is not none %}
+                    {{ "%.3f"|format(row.p) }}
+                  {% else %}&mdash;{% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+
+        {% set cat = grade_attribution.get("categorical") or {} %}
+        {% if cat %}
+          <h4>By bucket / tag</h4>
+          {% for feat, payload in cat.items() %}
+            {% if payload.get("levels") %}
+              <p class="ref-note"><code>{{ feat }}</code></p>
+              <table class="ref-attrib-table">
+                <thead>
+                  <tr>
+                    <th>Level</th>
+                    <th>n</th>
+                    <th>Mean signed excess (%)</th>
+                    <th>Hit rate</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for level, stats in payload.levels.items() %}
+                    <tr>
+                      <td>{{ level }}</td>
+                      <td>{{ stats.n }}</td>
+                      <td>{{ "%+.2f"|format(stats.mean_signed_excess_return_pct) }}</td>
+                      <td>{{ "%.0f"|format((stats.hit_rate or 0) * 100) }}%</td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            {% endif %}
+          {% endfor %}
+        {% endif %}
+      {% else %}
+        <p class="ref-note">
+          Not enough matured history yet &mdash; attribution populates
+          once the grade history has at least 30 rows with a closed
+          5-day forward window (typically ~2 weeks of scans after the
+          cold start).
+        </p>
+      {% endif %}
+
+      <p class="ref-tip">
+        Use this to pressure-test weights: if <code>conviction_stack</code>
+        ranks near the top and <code>window_return_pct</code> has a
+        negative &rho;, the stack is working and return-chasing is not.
+        Re-weight accordingly in future batches &mdash; this plan only
+        produces the evidence.
       </p>
     </section>
 

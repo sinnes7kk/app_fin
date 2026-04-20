@@ -29,6 +29,7 @@ from app.config import (
     REGIME_THRESHOLD_BOOST,
 )
 from app.analytics.grade_backtest import format_header as _grade_stats_header, load_grade_stats
+from app.analytics.grade_attribution import load_attribution as _load_grade_attribution
 from app.features.decision_context import (
     compute_liquidity,
     compute_r_at_market,
@@ -2760,6 +2761,7 @@ def index():
             limit=150,
             hours_back=24,
             opening_only=alerts_opening_only,
+            min_premium=500_000,
         )
     except Exception as e:
         alerts_error = str(e)
@@ -2808,18 +2810,22 @@ def index():
                 "days_until_earnings": _sr.get("days_until_earnings"),
             }
 
-    # Premium-Taxonomy plan — recompute per-ticker DTE-bucket breakdown
-    # from the current scan's normalized alert flow (same 500K unusual
-    # floor the pipeline uses in `run_flow_to_price_pipeline`).  Used to
-    # populate the Trader Card modal's Premium-Mix panel + the card-face
-    # mini-bar.  Kept strictly scan-only (no multi-day merge) so the
-    # Unusual Flow tab stays complementary to the Flow Tracker view.
-    _uf_bucket_lookup: dict[str, dict] = {}
+    # UF Trader Card fix: DTE-bucket breakdown now comes from the pipeline
+    # directly (`flow_features_*.csv` carries lottery/swing/leap/other
+    # bullish/bearish premium columns built from the same normalized flow
+    # feed that produced `bullish_premium_raw` / `bearish_premium_raw`).
+    # The server simply reads them off `r` when building `_synth_mix`
+    # below, so buckets sum to the card-header total by construction.
+    #
+    # What we still compute here is only the scan-only "recent large
+    # prints" list for the Trades tab (top 10 by premium per ticker,
+    # classified by DTE).  Uses `alerts_raw` — the top-150 most-recent
+    # large-print UW alerts snapshot — so the tab stays intentionally
+    # scan-only and complementary to Flow Tracker.
     _uf_top_trades: dict[str, list[dict]] = {}
     try:
         if isinstance(alerts_raw, pd.DataFrame) and not alerts_raw.empty:
             from app.features.flow_features import (
-                aggregate_premium_by_dte_bucket as _uf_agg_buckets,
                 filter_qualifying_flow as _uf_filter_flow,
             )
 
@@ -2830,17 +2836,6 @@ def index():
                 max_dte=9999,
             )
             if not _uf_base.empty:
-                _uf_buckets_df = _uf_agg_buckets(_uf_base)
-                if not _uf_buckets_df.empty:
-                    for _, _brow in _uf_buckets_df.iterrows():
-                        _bt = str(_brow.get("ticker", "")).upper().strip()
-                        if _bt:
-                            _uf_bucket_lookup[_bt] = {
-                                k: float(_brow[k] or 0.0)
-                                for k in _brow.index
-                                if k != "ticker" and k.endswith("_premium")
-                            }
-
                 def _uf_classify_dte(dte_val) -> str:
                     try:
                         d = int(dte_val)
@@ -3000,31 +2995,38 @@ def index():
                 except Exception:
                     _dominant_bucket = None
 
-                _buckets = _uf_bucket_lookup.get(_tk, {}) or {}
+                # UF Trader Card fix: read DTE buckets straight off the
+                # flow_features row (`r`) — the pipeline now persists them
+                # alongside bullish/bearish_premium_raw, so they sum to the
+                # card-header total by construction.  No server-side
+                # re-aggregation, no data-source mismatch.
                 _bull_total_raw = float(r.get("bullish_premium_raw", 0) or 0)
                 _bear_total_raw = float(r.get("bearish_premium_raw", 0) or 0)
                 _synth_mix = {
                     "total_bullish":   _bull_total_raw,
                     "total_bearish":   _bear_total_raw,
-                    "lottery_bullish": float(_buckets.get("lottery_bullish_premium", 0) or 0),
-                    "lottery_bearish": float(_buckets.get("lottery_bearish_premium", 0) or 0),
-                    "swing_bullish":   float(_buckets.get("swing_bullish_premium", 0) or 0),
-                    "swing_bearish":   float(_buckets.get("swing_bearish_premium", 0) or 0),
-                    "leap_bullish":    float(_buckets.get("leap_bullish_premium", 0) or 0),
-                    "leap_bearish":    float(_buckets.get("leap_bearish_premium", 0) or 0),
-                    # "Unusual" in the scan-only view = same as total
-                    # (every included print already cleared the 500K
-                    # unusual floor via _uf_filter_flow).
-                    "unusual_bullish": _bull_total_raw,
-                    "unusual_bearish": _bear_total_raw,
-                    "other_bullish":   0.0,
-                    "other_bearish":   0.0,
+                    "lottery_bullish": float(r.get("lottery_bullish_premium") or 0),
+                    "lottery_bearish": float(r.get("lottery_bearish_premium") or 0),
+                    "swing_bullish":   float(r.get("swing_bullish_premium")   or 0),
+                    "swing_bearish":   float(r.get("swing_bearish_premium")   or 0),
+                    "leap_bullish":    float(r.get("leap_bullish_premium")    or 0),
+                    "leap_bearish":    float(r.get("leap_bearish_premium")    or 0),
+                    "other_bullish":   float(r.get("other_bullish_premium")   or 0),
+                    "other_bearish":   float(r.get("other_bearish_premium")   or 0),
+                    # No redundant "unusual_bullish/bearish" here — the
+                    # context="unusual_flow" flag below tells
+                    # _build_premium_mix_ui to skip that row (in this tab
+                    # every print already cleared the 500K unusual floor
+                    # upstream, so "total == unusual" tautologically).
                     "source": "flow_features",
                 }
                 _premium_mix_ui = None
                 if _uf_build_mix_ui is not None:
                     try:
-                        _premium_mix_ui = _uf_build_mix_ui({"premium_mix": _synth_mix})
+                        _premium_mix_ui = _uf_build_mix_ui(
+                            {"premium_mix": _synth_mix},
+                            context="unusual_flow",
+                        )
                     except Exception:
                         _premium_mix_ui = None
 
@@ -3136,6 +3138,7 @@ def index():
     # Grade-backtest header for Flow Tracker + action bar.
     grade_stats = load_grade_stats()
     grade_stats_header = _grade_stats_header(grade_stats)
+    grade_attribution = _load_grade_attribution()
 
     # Top-of-page action bar (uses signals DataFrame — signals already loaded above).
     action_bar_ctx = _build_action_bar(positions, regime, signals, watchlist, grade_stats)
@@ -3326,6 +3329,7 @@ def index():
         "actionable_now": actionable_now,
         "grade_stats": grade_stats,
         "grade_stats_header": grade_stats_header,
+        "grade_attribution": grade_attribution,
         "flow_tracker_lookback": FLOW_TRACKER_HORIZONS[active_horizon]["lookback_days"],
         "flow_tracker_mode_default": FLOW_TRACKER_MODE_DEFAULT,
         "flow_tracker_auto_widen_min": FLOW_TRACKER_AUTO_WIDEN_MIN,
@@ -3375,6 +3379,7 @@ def api_alerts():
             limit=limit,
             hours_back=hours,
             opening_only=opening_only,
+            min_premium=500_000,
         )
         sub = _alerts_subset(df)
         return jsonify(

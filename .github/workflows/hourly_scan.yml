@@ -75,7 +75,11 @@ jobs:
             data/iv_rank_history.json \
             data/market_indicators.json \
             data/grade_stats.json \
-            data/flow_stats_meta.json; do
+            data/flow_stats_meta.json \
+            data/snapshots_archive.csv.gz \
+            data/grade_history.csv \
+            data/grade_attribution.json \
+            data/_ohlcv_cache/; do
             [ -e "$f" ] && git add "$f"
           done
           git diff --cached --quiet && echo "No data changes to commit" && exit 0

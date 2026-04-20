@@ -900,6 +900,7 @@ def fetch_recent_alert_flow(
     hours_back: int = 24,
     *,
     opening_only: bool | None = None,
+    min_premium: int | None = None,
 ) -> pd.DataFrame:
     """Return normalized flow rows for recent UW sweep + vol>Oi alerts (for UI / research).
 
@@ -911,6 +912,11 @@ def fetch_recent_alert_flow(
     decides.  Explicit ``True``/``False`` always wins, so the
     ``/api/alerts`` endpoint can let the UI toggle the filter live without
     mutating global config.
+
+    ``min_premium`` is forwarded to UW as the ``min_premium`` query
+    parameter so the server-side filter matches the $500k institutional
+    floor used elsewhere in the pipeline.  Passing ``None`` preserves the
+    legacy behaviour (no server-side floor).
     """
     from app.config import FLOW_OPENING_ONLY  # lazy import avoids cycles
 
@@ -926,6 +932,8 @@ def fetch_recent_alert_flow(
     effective_opening = FLOW_OPENING_ONLY if opening_only is None else bool(opening_only)
     if effective_opening:
         params["size_greater_oi"] = "true"
+    if min_premium is not None:
+        params["min_premium"] = int(min_premium)
     try:
         resp = _uw_request(FLOW_ALERTS_ENDPOINT, params=params)
         resp.raise_for_status()

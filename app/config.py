@@ -290,9 +290,12 @@ FLOW_TRACKER_MIN_3D_PERCENTILE = 0.70
 
 # Wave 0.5 A3: when True, flow alert fetches include UW's
 # `size_greater_oi=true` flag so we only count prints that likely opened a
-# position (trade size > current OI).  Default OFF so behaviour is unchanged
-# until you explicitly cut over.
-FLOW_OPENING_ONLY = False
+# position (trade size > current OI).  Closing-trades flow the same way on
+# the tape as opening-trades, so leaving this OFF silently dilutes the
+# directional signal with profit-taking / short-covering activity.  Cut
+# over to True as the default; the UI's `/api/alerts?opening_only=0` knob
+# still allows discretionary exploration without mutating this flag.
+FLOW_OPENING_ONLY = True
 
 # Wave 0.5 A8: dark-pool alignment bonus.  When DP flow direction agrees
 # with options flow direction AND DP notional is material (>3 bps of

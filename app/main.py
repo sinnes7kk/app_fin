@@ -176,7 +176,7 @@ def main() -> None:
             print(f"  [agent portfolio] {len(agent_result['still_open'])} open, {len(agent_result['closed'])} closed")
         return
 
-    out = run_flow_to_price_pipeline(flow_limit=2000, top_n=50, min_premium=50_000, alert_hours_back=48)
+    out = run_flow_to_price_pipeline(flow_limit=2000, top_n=50, min_premium=500_000, alert_hours_back=48)
     _print_signals(out)
 
     if args.scan_only:

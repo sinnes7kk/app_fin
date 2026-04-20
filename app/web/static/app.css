@@ -3681,3 +3681,35 @@ body.ref-modal-open {
 .uf-trade-bucket-pill.bucket-other   { background: rgba(255,255,255,0.06); color: rgba(230,237,243,0.55); }
 .uf-trade-side-long  { color: #7fc58a; font-weight: 600; }
 .uf-trade-side-short { color: #ff8a82; font-weight: 600; }
+
+/* --- Feature attribution table (reference modal) ------------------- */
+.ref-body .ref-attrib-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+  margin: 0.5rem 0 0.9rem 0;
+}
+.ref-body .ref-attrib-table th,
+.ref-body .ref-attrib-table td {
+  padding: 0.35rem 0.6rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  text-align: right;
+}
+.ref-body .ref-attrib-table th:first-child,
+.ref-body .ref-attrib-table td:first-child {
+  text-align: left;
+}
+.ref-body .ref-attrib-table th {
+  font-weight: 600;
+  color: rgba(230, 237, 243, 0.75);
+  background: rgba(255, 255, 255, 0.03);
+}
+.ref-body .ref-attrib-table code {
+  font-size: 0.82rem;
+  color: #d6dae4;
+}
+.ref-body .ref-note {
+  margin: 0.35rem 0 0.4rem;
+  font-size: 0.82rem;
+  color: rgba(230, 237, 243, 0.6);
+}

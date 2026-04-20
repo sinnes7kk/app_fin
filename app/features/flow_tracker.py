@@ -118,6 +118,37 @@ def _accumulation_score(
 DATA_DIR = Path(__file__).resolve().parents[2] / "data"
 SNAPSHOTS_PATH = DATA_DIR / "screener_snapshots.csv"
 STATS_META_PATH = DATA_DIR / "flow_stats_meta.json"
+# Append-only full-history archive used by the grade backtest.  The hot
+# CSV above is pruned at FLOW_TRACKER_RETENTION_DAYS; this archive is
+# strictly additive so backtests can regress over 60-90+ days without
+# the retention policy capping them.
+SNAPSHOTS_ARCHIVE_PATH = DATA_DIR / "snapshots_archive.csv.gz"
+
+
+def _append_rows_to_archive(rows: list[dict]) -> None:
+    """Append ``rows`` to the append-only snapshot archive.
+
+    Writes a header on first create.  Silently tolerates schema
+    evolution: new columns not in ``SNAPSHOT_COLS`` are ignored
+    (``extrasaction='ignore'``); columns present in the header but not
+    in a given row are written as empty strings.  Gzipped to keep the
+    artifact small in git.
+    """
+    if not rows:
+        return
+    import gzip
+
+    SNAPSHOTS_ARCHIVE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    first_write = not SNAPSHOTS_ARCHIVE_PATH.exists()
+    mode = "wt" if first_write else "at"
+    try:
+        with gzip.open(SNAPSHOTS_ARCHIVE_PATH, mode, newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=SNAPSHOT_COLS, extrasaction="ignore")
+            if first_write:
+                writer.writeheader()
+            writer.writerows(rows)
+    except Exception as e:
+        print(f"  [flow-tracker] archive append failed (continuing): {e}")
 
 
 def _load_stats_meta() -> dict:
@@ -420,6 +451,11 @@ def save_screener_snapshot(
         writer.writeheader()
         writer.writerows(all_rows)
 
+    # Append-only archive (never pruned) for the grade backtest.  The
+    # hot CSV above is self-pruning at FLOW_TRACKER_RETENTION_DAYS, but
+    # backtests need longer history.
+    _append_rows_to_archive(new_rows)
+
     try:
         update_stats_meta(r["ticker"] for r in new_rows)
     except Exception as e:
@@ -594,6 +630,10 @@ def save_flow_feature_snapshot(
         writer.writeheader()
         writer.writerows(all_rows)
 
+    # Mirror the gap-filler rows into the append-only archive so the
+    # backtest sees a complete universe (not just screener tickers).
+    _append_rows_to_archive(new_rows)
+
     try:
         update_stats_meta(r["ticker"] for r in new_rows)
     except Exception as e:
@@ -622,6 +662,8 @@ def compute_multi_day_flow(
     min_prem_mcap_bps: float = FLOW_TRACKER_MIN_PREM_MCAP_BPS,
     max_results: int = FLOW_TRACKER_MAX_RESULTS,
     mode: str | None = None,
+    as_of: "date | str | None" = None,
+    snapshots_path: "Path | None" = None,
 ) -> list[dict]:
     """Aggregate screener snapshots over the lookback window.
 
@@ -639,11 +681,13 @@ def compute_multi_day_flow(
     Legacy callers that pass ``mode=None`` get the original behaviour
     (every row tagged with ``passes_*`` flags).
     """
-    if not SNAPSHOTS_PATH.exists():
+    source_path = snapshots_path if snapshots_path is not None else SNAPSHOTS_PATH
+    if not source_path.exists():
         return []
 
     try:
-        df = pd.read_csv(SNAPSHOTS_PATH)
+        # pandas transparently handles `.csv.gz` via the extension.
+        df = pd.read_csv(source_path)
     except Exception:
         return []
 
@@ -654,7 +698,24 @@ def compute_multi_day_flow(
     if "ticker" in df.columns:
         df = df[~df["ticker"].isin(FLOW_TRACKER_ETF_EXCLUDE)]
 
-    cutoff = (current_trading_day() - timedelta(days=lookback_days)).isoformat()
+    # Resolve `as_of` — supports date, ISO string, or None (live scan).
+    # When `as_of` is explicit, we're in backtest-replay mode and must
+    # drop rows strictly after `as_of` (point-in-time replay).  When
+    # `as_of` is None we're live; we use current_trading_day() as the
+    # window anchor but do NOT apply the future-row filter — existing
+    # tests and weekend scans rely on being able to seed/load
+    # snapshots dated slightly ahead of the current NYSE trading day.
+    if as_of is None:
+        today = current_trading_day()
+    else:
+        if isinstance(as_of, str):
+            today = date.fromisoformat(as_of)
+        else:
+            today = as_of
+        today_str = today.isoformat()
+        df = df[df["snapshot_date"] <= today_str]
+
+    cutoff = (today - timedelta(days=lookback_days)).isoformat()
     df = df[df["snapshot_date"] >= cutoff].copy()
     if df.empty:
         return []

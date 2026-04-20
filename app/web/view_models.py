@@ -149,7 +149,11 @@ def _pct(part: float, whole: float) -> float:
         return 0.0
 
 
-def _build_premium_mix_ui(row: dict[str, Any]) -> dict[str, Any] | None:
+def _build_premium_mix_ui(
+    row: dict[str, Any],
+    *,
+    context: str = "flow_tracker",
+) -> dict[str, Any] | None:
     """Normalize ``row.premium_mix`` into a UI-friendly payload.
 
     Combines bullish + bearish into a single "dominant side" number per
@@ -157,6 +161,17 @@ def _build_premium_mix_ui(row: dict[str, Any]) -> dict[str, Any] | None:
     bucket percent-of-total for easy sparkline / stacked-bar rendering.
     Returns ``None`` when the row has no taxonomy data (legacy / ranked
     signal rows — those fall back to the existing Flow-Feature panel).
+
+    ``context`` controls which "kicker" rows are rendered:
+      - ``"flow_tracker"`` (default): emits both the ``total`` and
+        ``unusual`` rows.  Flow Tracker's data source spans the full
+        directional flow feed, where "total" (all directional premium)
+        and "unusual" (the >=$500K/trade subset) genuinely differ.
+      - ``"unusual_flow"``: skips the ``unusual`` row.  Every print in
+        this view already cleared the $500K unusual floor upstream, so
+        ``total == unusual`` tautologically and rendering both would be
+        redundant.  The Trader-Card JS renderer gracefully handles a
+        missing ``unusual`` key (``_mixRowHtml(undefined) -> ""``).
     """
     mix = row.get("premium_mix")
     if not isinstance(mix, dict):
@@ -197,10 +212,10 @@ def _build_premium_mix_ui(row: dict[str, Any]) -> dict[str, Any] | None:
     dominant = max(buckets, key=lambda b: b["gross"]) if any(b["gross"] > 0 for b in buckets) else None
 
     total_copy = PREMIUM_BUCKET_COPY["total"]
-    unusual_copy = PREMIUM_BUCKET_COPY["unusual"]
 
-    return {
+    payload: dict[str, Any] = {
         "source": mix.get("source"),
+        "context": context,
         "total": {
             "label": total_copy["label"],
             "tip": total_copy["tip"],
@@ -210,7 +225,17 @@ def _build_premium_mix_ui(row: dict[str, Any]) -> dict[str, Any] | None:
             "gross": round(total_gross, 2),
             "pct_bullish": bull_share_pct,
         },
-        "unusual": {
+        "buckets": buckets,
+        "dominant_bucket": dominant["key"] if dominant else None,
+        "dominant_label": dominant["label"] if dominant else None,
+    }
+
+    # Flow Tracker context — the "Unusual flow" subset row carries real
+    # information (it's a strict subset of Total directional).  Skip it
+    # for the Unusual Flow tab, where it would always equal Total.
+    if context == "flow_tracker":
+        unusual_copy = PREMIUM_BUCKET_COPY["unusual"]
+        payload["unusual"] = {
             "label": unusual_copy["label"],
             "tip": unusual_copy["tip"],
             "signal": unusual_copy["signal"],
@@ -221,11 +246,9 @@ def _build_premium_mix_ui(row: dict[str, Any]) -> dict[str, Any] | None:
                 _f("unusual_bullish") + _f("unusual_bearish"),
                 total_gross,
             ),
-        },
-        "buckets": buckets,
-        "dominant_bucket": dominant["key"] if dominant else None,
-        "dominant_label": dominant["label"] if dominant else None,
-    }
+        }
+
+    return payload
 
 
 @dataclass

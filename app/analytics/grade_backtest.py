@@ -1,112 +1,152 @@
 """Historical Flow Tracker grade performance.
 
-Replays the Flow Tracker algorithm over the rolling screener snapshot history
-(``data/screener_snapshots.csv``) and measures the **forward 5-day return vs
-SPY** of every (ticker, day, direction) that would have scored a Grade A or B
-at that point in time. Writes summary stats to ``data/grade_stats.json``.
+Replays the Flow Tracker algorithm over the append-only snapshot archive
+(``data/snapshots_archive.csv.gz``) and measures the **forward 5-day return
+vs SPY** of every (ticker, day, direction) that would have scored a Grade
+A or B at that point in time.  Writes summary stats to
+``data/grade_stats.json``.
 
 The output powers the "Grade A: 58% hit, +1.2R avg over trailing 60" header
-on the Flow Tracker tab — the quant feedback loop the system has been missing.
+on the Flow Tracker tab — the quant feedback loop the system has been
+missing.
 
-Run periodically (it's idempotent-ish — cheap once the ~60-day yfinance cache
-is warm) from the end of each scan:
+Run periodically (it's idempotent — OHLCV lookups are disk-cached at 24h
+TTL) from the end of each scan:
 
     from app.analytics.grade_backtest import refresh_grade_stats
     refresh_grade_stats()
 
 Design notes
 ------------
-- Uses the *current* `compute_multi_day_flow` logic, which makes this a
-  self-consistent posterior (not a pure out-of-sample test — it reflects how
-  today's algorithm would have graded historical flow, which is what we want
-  for calibrating UI confidence).
+- Uses the *current* ``compute_multi_day_flow`` logic via its new ``as_of``
+  / ``snapshots_path`` kwargs — self-consistent posterior (not a pure
+  out-of-sample test), which is what we want for calibrating UI confidence.
+- Archive source lets the backtest regress over the full
+  ``MAX_HISTORY_DAYS`` window (was previously capped at the hot CSV's
+  21-day retention).
 - Forward return uses close-to-close over 5 trading days, minus SPY's same
   return (pair-trade P&L proxy).
 - "Hit rate" = fraction where direction-signed excess return > 0.
-- "Avg R" converts excess return to an approximate R-multiple using a fixed
-  2% initial-stop assumption (matches our swing trade plan ballpark).
+- "Avg R" converts excess return to an approximate R-multiple using a
+  fixed 2% initial-stop assumption (matches our swing trade plan
+  ballpark).
 """
 
 from __future__ import annotations
 
 import json
+import time
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
 
-from app.features.flow_tracker import SNAPSHOTS_PATH, compute_multi_day_flow
+from app.features.flow_tracker import (
+    SNAPSHOTS_ARCHIVE_PATH,
+    SNAPSHOTS_PATH,
+    compute_multi_day_flow,
+)
 from app.features.price_features import fetch_ohlcv
 
 DATA_DIR = Path(__file__).resolve().parents[2] / "data"
 STATS_PATH = DATA_DIR / "grade_stats.json"
+OHLCV_CACHE_DIR = DATA_DIR / "_ohlcv_cache"
+OHLCV_CACHE_TTL_SECONDS = 24 * 3600  # 24h — backtest reads same bar many times per run
 
 FORWARD_WINDOW = 5
 ASSUMED_STOP_PCT = 0.02  # 2% — rough R-multiple normalizer for swing trades
 MAX_HISTORY_DAYS = 90
-LOOKBACK_DAYS = 5  # must match FLOW_TRACKER_LOOKBACK_DAYS
 
 
-def _load_snapshots(as_of: str) -> pd.DataFrame | None:
-    """Return a snapshots DataFrame truncated to rows on/before ``as_of``."""
-    if not SNAPSHOTS_PATH.exists():
+def _archive_source() -> Path:
+    """Prefer the append-only archive; fall back to the hot CSV.
+
+    The hot CSV fallback keeps the backtest functional on fresh installs
+    that haven't accumulated archive history yet.
+    """
+    if SNAPSHOTS_ARCHIVE_PATH.exists():
+        return SNAPSHOTS_ARCHIVE_PATH
+    return SNAPSHOTS_PATH
+
+
+def _load_archive() -> pd.DataFrame | None:
+    """Load the full snapshot archive (handles `.csv` and `.csv.gz`)."""
+    src = _archive_source()
+    if not src.exists():
         return None
     try:
-        df = pd.read_csv(SNAPSHOTS_PATH)
+        df = pd.read_csv(src)
     except Exception:
         return None
     if df.empty or "snapshot_date" not in df.columns:
         return None
-    return df[df["snapshot_date"] <= as_of]
-
-
-def _write_truncated_snapshots(df: pd.DataFrame, tmp_path: Path) -> None:
-    """Write a point-in-time snapshots CSV to ``tmp_path`` for replay."""
-    tmp_path.parent.mkdir(parents=True, exist_ok=True)
-    df.to_csv(tmp_path, index=False)
+    return df
 
 
 def _historical_grades_as_of(as_of: str) -> list[dict[str, Any]]:
     """Reconstruct the Flow Tracker grades that would have been shown on ``as_of``.
 
-    Uses a tmp CSV + monkeypatch trick: point ``compute_multi_day_flow`` at a
-    truncated copy of the snapshots file.
+    Uses ``compute_multi_day_flow``'s new ``as_of`` + ``snapshots_path``
+    kwargs — no monkeypatching, no tmp files.
     """
-    from app.features import flow_tracker as ft_mod
+    return compute_multi_day_flow(as_of=as_of, snapshots_path=_archive_source())
 
-    snaps = _load_snapshots(as_of)
-    if snaps is None or snaps.empty:
-        return []
 
-    tmp = DATA_DIR / "_grade_backtest_tmp.csv"
-    _write_truncated_snapshots(snaps, tmp)
+def _ohlcv_cache_path(ticker: str) -> Path:
+    safe = "".join(ch for ch in str(ticker or "").upper() if ch.isalnum() or ch in "._-")
+    return OHLCV_CACHE_DIR / f"{safe}.csv"
 
-    orig_path = ft_mod.SNAPSHOTS_PATH
-    orig_today = ft_mod.date
+
+def _ohlcv_cached(ticker: str, lookback_days: int) -> pd.DataFrame | None:
+    """Return cached OHLCV for ``ticker`` when present and fresh.
+
+    Cache is keyed by ticker only (not lookback) because we always fetch
+    the longest window required and sub-select via the date index — a
+    single cache entry covers every backtest forward-return call for the
+    same ticker.
+    """
+    p = _ohlcv_cache_path(ticker)
+    if not p.exists():
+        return None
     try:
-        ft_mod.SNAPSHOTS_PATH = tmp
+        age = time.time() - p.stat().st_mtime
+        if age > OHLCV_CACHE_TTL_SECONDS:
+            return None
+        df = pd.read_csv(p, index_col=0, parse_dates=True)
+    except Exception:
+        return None
+    if df.empty:
+        return None
+    return df
 
-        class _FakeDate:
-            @staticmethod
-            def today():
-                return datetime.strptime(as_of, "%Y-%m-%d").date()
 
-            @staticmethod
-            def fromisoformat(s):
-                return date.fromisoformat(s)
+def _ohlcv_cache_write(ticker: str, df: pd.DataFrame) -> None:
+    try:
+        OHLCV_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        df.to_csv(_ohlcv_cache_path(ticker))
+    except Exception:
+        # Cache failures should never break the backtest.
+        pass
 
-        # compute_multi_day_flow uses date.today() via `from datetime import date`.
-        # Patch the module-level name.
-        ft_mod.date = _FakeDate  # type: ignore[attr-defined]
-        grades = compute_multi_day_flow()
-    finally:
-        ft_mod.SNAPSHOTS_PATH = orig_path
-        ft_mod.date = orig_today  # type: ignore[attr-defined]
-        if tmp.exists():
-            tmp.unlink()
 
-    return grades
+def _fetch_ohlcv_cached(ticker: str, lookback_days: int) -> pd.DataFrame | None:
+    """``fetch_ohlcv`` wrapped in a 24h disk cache.
+
+    Silently returns ``None`` on yfinance errors / rate-limits so the
+    backtest degrades gracefully instead of zeroing out.
+    """
+    cached = _ohlcv_cached(ticker, lookback_days)
+    if cached is not None:
+        return cached
+    try:
+        df = fetch_ohlcv(ticker, lookback_days=lookback_days, include_partial=False)
+    except Exception:
+        return None
+    if df is None or df.empty:
+        return None
+    _ohlcv_cache_write(ticker, df)
+    return df
 
 
 def _forward_excess_return(ticker: str, entry_date: str, window: int = FORWARD_WINDOW) -> float | None:
@@ -114,11 +154,9 @@ def _forward_excess_return(ticker: str, entry_date: str, window: int = FORWARD_W
 
     Returns ``None`` when there aren't enough forward bars yet.
     """
-    try:
-        df = fetch_ohlcv(ticker, lookback_days=window + 30, include_partial=False)
-        spy = fetch_ohlcv("SPY", lookback_days=window + 30, include_partial=False)
-    except Exception:
-        return None
+    lookback = window + 30
+    df = _fetch_ohlcv_cached(ticker, lookback_days=lookback)
+    spy = _fetch_ohlcv_cached("SPY", lookback_days=lookback)
     if df is None or spy is None or df.empty or spy.empty:
         return None
 
@@ -148,8 +186,8 @@ def _aggregate(rows: list[dict[str, Any]]) -> dict[str, Any]:
     """Summary stats for a list of {grade, direction, forward_excess_return} rows.
 
     Buckets 7-tier grades into their A/B/C family so trailing stats stay
-    statistically stable even as UI tiers refine (A+ / A- still count as A
-    for backtest purposes).
+    statistically stable even as UI tiers refine (A+ / A- still count as
+    A for backtest purposes).
     """
     from app.features.grade_explainer import coarse_grade
 
@@ -194,32 +232,30 @@ def refresh_grade_stats(
 ) -> dict[str, Any]:
     """Recompute historical grade statistics and optionally write them to disk.
 
-    Only evaluates entries where we have at least ``forward_window`` trading
-    days of forward history (so we can measure the outcome).
+    Only evaluates entries where we have at least ``forward_window``
+    trading days of forward history (so we can measure the outcome).
+
+    Evaluates both Grade A and Grade B families so the UI can surface
+    either family when the other is too thin.
     """
-    if not SNAPSHOTS_PATH.exists():
+    all_snaps = _load_archive()
+    if all_snaps is None or all_snaps.empty:
         return {"error": "no snapshots"}
 
-    try:
-        all_snaps = pd.read_csv(SNAPSHOTS_PATH)
-    except Exception:
-        return {"error": "snapshots unreadable"}
-
-    if all_snaps.empty or "snapshot_date" not in all_snaps.columns:
-        return {"error": "snapshots empty"}
-
     dates = sorted(all_snaps["snapshot_date"].dropna().unique().tolist())
-    today_str = str(date.today())
-    cutoff_past = str(date.today() - timedelta(days=max_history_days))
-    cutoff_forward = str(date.today() - timedelta(days=forward_window + 2))
+    today = date.today()
+    today_str = today.isoformat()
+    cutoff_past = (today - timedelta(days=max_history_days)).isoformat()
+    cutoff_forward = (today - timedelta(days=forward_window + 2)).isoformat()
     candidate_dates = [d for d in dates if cutoff_past <= d <= cutoff_forward]
 
     evaluations: list[dict[str, Any]] = []
 
+    from app.features.grade_explainer import coarse_grade as _cg
+
     for as_of in candidate_dates:
         grades = _historical_grades_as_of(as_of)
         for g in grades:
-            from app.features.grade_explainer import coarse_grade as _cg
             if _cg(g.get("conviction_grade")) not in ("A", "B"):
                 continue
             excess = _forward_excess_return(g["ticker"], as_of, window=forward_window)
@@ -243,6 +279,7 @@ def refresh_grade_stats(
         "as_of": today_str,
         "stats": stats,
         "assumed_stop_pct": ASSUMED_STOP_PCT,
+        "source": str(_archive_source().name),
     }
 
     if write:
