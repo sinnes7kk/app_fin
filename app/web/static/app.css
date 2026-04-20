@@ -3544,3 +3544,140 @@ body.ref-modal-open {
     height: min(90vh, 900px);
   }
 }
+
+/* ═══════════════════════════════════════════════════════════════════
+   Unusual Flow — Trader Card (Premium-Taxonomy plan)
+   Chips + mini-bar for the "Top Flow Intensity by Ticker" cards and
+   the companion click-to-expand Trader Card modal.
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* DTE-bucket chip on the card header. */
+.uf-bucket-chip {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.64rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  padding: 0.18rem 0.42rem;
+  border-radius: 3px;
+  border: 1px solid transparent;
+  font-variant-numeric: tabular-nums;
+}
+.uf-bucket-chip.uf-bucket-lottery {
+  background: rgba(255,152,0,0.14);
+  color: #f0a85a;
+  border-color: rgba(255,152,0,0.32);
+}
+.uf-bucket-chip.uf-bucket-swing {
+  background: rgba(63,185,80,0.14);
+  color: #7fc58a;
+  border-color: rgba(63,185,80,0.32);
+}
+.uf-bucket-chip.uf-bucket-leap {
+  background: rgba(88,166,255,0.14);
+  color: #79b8ff;
+  border-color: rgba(88,166,255,0.32);
+}
+.uf-bucket-chip.uf-bucket-other {
+  background: rgba(255,255,255,0.04);
+  color: rgba(230,237,243,0.60);
+  border-color: rgba(255,255,255,0.10);
+}
+
+/* Quality-signals chip row below the metrics. */
+.uf-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin: 0.6rem 0 0;
+}
+.uf-chip {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  padding: 0.15rem 0.38rem;
+  border-radius: 3px;
+  border: 1px solid rgba(255,255,255,0.10);
+  background: rgba(255,255,255,0.04);
+  color: rgba(230,237,243,0.75);
+  font-variant-numeric: tabular-nums;
+}
+.uf-chip-sweep    { border-color: rgba(255,184,108,0.28); color: #ffc28a; }
+.uf-chip-multileg { border-color: rgba(137,180,250,0.28); color: #9fbeff; }
+.uf-chip-accel-flat { opacity: 0.55; }
+.uf-chip-accel-warm { border-color: rgba(255,152,0,0.32); color: #f0a85a; }
+.uf-chip-accel-hot  { border-color: rgba(248,81,73,0.38); color: #ff8a82;
+                       background: rgba(248,81,73,0.10); }
+
+/* Stacked mini-bar showing lottery/swing/leap premium share. */
+.uf-mini-bar {
+  display: flex;
+  width: 100%;
+  height: 6px;
+  margin-top: 0.55rem;
+  border-radius: 3px;
+  overflow: hidden;
+  background: rgba(255,255,255,0.05);
+}
+.uf-mini-bar-seg { display: block; height: 100%; transition: opacity 0.12s ease; }
+.uf-mini-bar-seg:hover { opacity: 0.75; }
+.uf-mini-bar-lottery { background: #f0a85a; }
+.uf-mini-bar-swing   { background: #7fc58a; }
+.uf-mini-bar-leap    { background: #79b8ff; }
+.uf-mini-bar-other   { background: rgba(230,237,243,0.30); }
+
+/* ── Unusual Flow trader-card modal ── */
+#detail-unusual-flow .uf-bridge-link {
+  display: inline-block;
+  margin-top: 0.75rem;
+  padding: 0.4rem 0.7rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #79b8ff;
+  background: rgba(88,166,255,0.08);
+  border: 1px solid rgba(88,166,255,0.25);
+  border-radius: 4px;
+  text-decoration: none;
+}
+#detail-unusual-flow .uf-bridge-link:hover {
+  background: rgba(88,166,255,0.16);
+}
+
+/* Trades tab table. */
+.uf-trades-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+}
+.uf-trades-table th,
+.uf-trades-table td {
+  padding: 0.4rem 0.55rem;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+  text-align: left;
+}
+.uf-trades-table th {
+  color: rgba(230,237,243,0.55);
+  font-weight: 600;
+  font-size: 0.7rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border-bottom: 1px solid rgba(255,255,255,0.12);
+}
+.uf-trades-table tr:hover td { background: rgba(255,255,255,0.02); }
+.uf-trade-bucket-pill {
+  display: inline-block;
+  font-size: 0.64rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 0.1rem 0.35rem;
+  border-radius: 2px;
+}
+.uf-trade-bucket-pill.bucket-lottery { background: rgba(255,152,0,0.18); color: #f0a85a; }
+.uf-trade-bucket-pill.bucket-swing   { background: rgba(63,185,80,0.18);  color: #7fc58a; }
+.uf-trade-bucket-pill.bucket-leap    { background: rgba(88,166,255,0.18); color: #79b8ff; }
+.uf-trade-bucket-pill.bucket-other   { background: rgba(255,255,255,0.06); color: rgba(230,237,243,0.55); }
+.uf-trade-side-long  { color: #7fc58a; font-weight: 600; }
+.uf-trade-side-short { color: #ff8a82; font-weight: 600; }

@@ -33,6 +33,7 @@
       <li><a href="#ref-warmup" data-ref-anchor="ref-warmup">Warmup banner</a></li>
       <li><a href="#ref-tabs" data-ref-anchor="ref-tabs">Tabs &amp; workflow</a></li>
       <li><a href="#ref-chip-glossary" data-ref-anchor="ref-chip-glossary">Chip glossary</a></li>
+      <li><a href="#ref-unusual-flow" data-ref-anchor="ref-unusual-flow">Unusual Flow &mdash; Trader Card</a></li>
     </ul>
   </aside>
 
@@ -396,6 +397,147 @@
         <li><strong>Avg |&Delta;|</strong> — premium-weighted average option delta. Higher = more directional conviction; &quot;PRX&quot; tag = delta came from proxy greeks rather than UW quotes.</li>
         <li><strong>t=</strong> — acceleration t-stat. Above +1.5 is meaningful rising; below -1.5 is meaningful fading.</li>
       </ul>
+    </section>
+
+    <section id="ref-unusual-flow" class="ref-section">
+      <h3>Unusual Flow &mdash; Trader Card</h3>
+
+      <p>
+        The <strong>Unusual Flow</strong> tab is a <em>scan-only</em> recap:
+        &quot;what has the hottest unusual flow <em>right now</em>?&quot; Every
+        number on these cards comes from the current pipeline scan
+        (<code>flow_features_*.csv</code> + today&apos;s normalized alert
+        feed). For multi-day persistence, accumulation, and window return,
+        use the <strong>Flow Tracker</strong> tab instead &mdash; a bridge
+        link is shown on the modal when a ticker has history there.
+      </p>
+
+      <h4>Card header chips</h4>
+      <ul class="ref-list">
+        <li>
+          <strong>LONG / SHORT</strong> &mdash; dominant side today, chosen
+          by whichever of <code>bullish_flow_intensity</code> or
+          <code>bearish_flow_intensity</code> is higher.
+        </li>
+        <li>
+          <strong>Grade (e.g. B+ 6.6)</strong> &mdash; conviction grade and
+          0-10 flow score for the dominant side. Same scale as the Flow
+          Tracker conviction chip but computed on this scan only.
+        </li>
+        <li>
+          <strong>DTE bucket (LOTTERY / SWING / LEAP / OTHER)</strong> &mdash;
+          which Days-To-Expiry bucket holds the largest share of today&apos;s
+          unusual premium for the dominant side. Definitions:
+          <ul>
+            <li><strong>LOTTERY</strong> &mdash; 0-14 DTE. Event speculation,
+              earnings bets, squeezes. Fast decay; binary exposure.</li>
+            <li><strong>SWING</strong> &mdash; 30-120 DTE. Institutional
+              swing window; the signal-pipeline sweet spot.</li>
+            <li><strong>LEAP</strong> &mdash; 180+ DTE. Deep positional
+              / long-dated commitment.</li>
+            <li><strong>OTHER</strong> &mdash; 15-29 or 121-179 DTE, the
+              gaps between the canonical buckets.</li>
+          </ul>
+        </li>
+        <li>
+          <strong>Stack (e.g. Stack 49 D)</strong> &mdash; same 0-100
+          composite as Flow Tracker. Top flow cards carry a lighter
+          input set (no DP / hot-chain), so stack here leans on
+          flow-score + dealer regime.
+        </li>
+        <li>
+          <strong>Dealer chip (CHASE / PIN)</strong> &mdash; market-maker
+          hedge bias from signal enrichment. CHASE = dealers forced to
+          buy as price rises; PIN = pin-risk near a large strike.
+        </li>
+        <li>
+          <strong>ER Nd</strong> &mdash; earnings within 2 weeks; red tone
+          if &le; 5 days. Flags binary risk around a print.
+        </li>
+        <li>
+          <strong>Size label (Outsized / Notable / Normal / Minor)</strong>
+          &mdash; flow intensity as basis points of market cap.
+          <em>Outsized</em> &gt; 5 bps, <em>Notable</em> 1-5 bps,
+          <em>Normal</em> 0.1-1 bps, <em>Minor</em> &lt; 0.1 bps.
+        </li>
+      </ul>
+
+      <h4>Quality-signal chips (below the metrics)</h4>
+      <ul class="ref-list">
+        <li>
+          <strong>Sweep N%</strong> &mdash; what percent of qualifying
+          prints on the dominant side were sweeps (urgency orders that
+          cleared multiple exchanges at once). Higher means more
+          aggressive positioning.
+        </li>
+        <li>
+          <strong>Multileg N%</strong> &mdash; what percent of qualifying
+          prints were part of multi-leg structures (spreads, combos).
+          Higher means more defined-risk / hedged flow and less outright
+          directional conviction.
+        </li>
+        <li>
+          <strong>Repeat Nx</strong> &mdash; today&apos;s
+          <em>repeat-flow acceleration ratio</em> on the dominant side.
+          1.0 is flat vs. the preceding baseline; the chip warms at
+          &ge; 1.3x and flashes hot at &ge; 2.0x &mdash; a sign of fresh
+          conviction vs. rehashed positioning.
+        </li>
+      </ul>
+
+      <h4>Premium-mix mini-bar</h4>
+      <p>
+        The thin stacked bar at the bottom of each card shows lottery /
+        swing / leap dollar share of today&apos;s total unusual premium
+        (both sides combined). Hover any segment for the exact dollar
+        value. A bar dominated by swing tells you most of the money is in
+        the institutional window; a bar dominated by lottery tells you
+        it&apos;s short-dated speculation.
+      </p>
+
+      <h4>Trader Card modal (click any card)</h4>
+      <p>
+        Tapping a card opens a modal with six tabs:
+      </p>
+      <ul class="ref-list">
+        <li>
+          <strong>Summary</strong> &mdash; every metric above in one view,
+          plus dealer hedge, catalyst, and (when present) a bridge link
+          to the Flow Tracker tab for the same ticker.
+        </li>
+        <li>
+          <strong>Premium Mix</strong> &mdash; the full DTE-bucket
+          breakdown (bullish / bearish / percent-of-total for lottery,
+          swing, leap, and other). Same payload the Flow Tracker modal
+          uses.
+        </li>
+        <li>
+          <strong>Why?</strong> &mdash; plain-English narrative bullets
+          explaining what&apos;s driving the flow score and direction.
+        </li>
+        <li>
+          <strong>Structure</strong> &mdash; recommended option structure
+          (primary vehicle + alternatives + avoid + caveats) for this
+          setup.
+        </li>
+        <li>
+          <strong>Trades</strong> &mdash; top 10 contributing prints
+          (strike / expiry / DTE / bucket / premium / side) so you can
+          see the actual LEAPS / swing / lottery contracts that drive
+          the aggregated numbers.
+        </li>
+        <li>
+          <strong>Chart</strong> &mdash; full TradingView chart for the
+          ticker with the same EMA studies used elsewhere.
+        </li>
+      </ul>
+
+      <p class="ref-tip">
+        Tip: if a card has a high grade but the bucket is LOTTERY and the
+        Repeat chip is flat, you&apos;re looking at fresh but ephemeral
+        speculation. A high grade with bucket SWING + repeat &ge; 1.3x
+        is much more likely to be real institutional money.
+      </p>
     </section>
 
   </div>

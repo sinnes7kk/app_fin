@@ -459,9 +459,29 @@
 
       {% if top_flow %}
       <h2 style="margin:1.2rem 0 0.6rem;font-size:1rem;opacity:0.9">Top Flow Intensity by Ticker</h2>
-      <div class="card-grid">
+      <div class="card-grid" id="top-flow-list">
         {% for tf in top_flow %}
-        <article class="data-card">
+        {# Premium-Taxonomy card — primary bucket comes from the premium_mix
+           breakdown (LOTTERY / SWING / LEAP / OTHER).  Falls back to the
+           flow-features DTE-range bucket when no bucket mix was derived
+           from today's scan (sparse alert feed, etc.). #}
+        {% set _pm = tf.premium_mix_ui %}
+        {% set _pm_bucket = _pm.dominant_bucket if _pm and _pm.dominant_bucket else None %}
+        {% set _uf_bucket_key = (_pm_bucket or tf.dominant_dte_bucket or 'other')|string|lower %}
+        {% set _uf_bucket_meta = {
+            'lottery': ('LOTTERY', 'uf-bucket-lottery', '0-14 DTE — lottery ticket / event / earnings speculation.'),
+            'swing':   ('SWING',   'uf-bucket-swing',   '30-120 DTE — institutional swing window (the signal-pipeline sweet spot).'),
+            'leap':    ('LEAP',    'uf-bucket-leap',    '180+ DTE — deep positional / long-dated commitment.'),
+            'other':   ('OTHER',   'uf-bucket-other',   'DTE falls in the 15-29 or 121-179 gap between standard buckets.'),
+            '0-7':     ('0-7d',    'uf-bucket-lottery', 'Dominant DTE 0-7d — weekly / hedging-prone flow.'),
+            '8-30':    ('8-30d',   'uf-bucket-other',   'Dominant DTE 8-30d — short-term swing window.'),
+            '31-90':   ('31-90d',  'uf-bucket-swing',   'Dominant DTE 31-90d — medium-term swing window.'),
+            '91+':     ('91+d',    'uf-bucket-leap',    'Dominant DTE 91+d — LEAPS territory.'),
+        } %}
+        {% set _uf_bucket_label, _uf_bucket_cls, _uf_bucket_tip = _uf_bucket_meta.get(_uf_bucket_key, _uf_bucket_meta['other']) %}
+        <article class="data-card data-card--interactive" data-ticker="{{ tf.ticker }}"
+                 data-uf-bucket="{{ _uf_bucket_key }}">
+          <div class="data-card-head">
           <header class="data-card-header">
             <strong class="data-card-ticker">{{ tf.ticker }}</strong>
             <span class="data-card-badges">
@@ -473,6 +493,12 @@
                 }.get(tf.conviction_grade, 'tc-grade-c') %}
                 <span class="badge tc-grade {{ _gcls }}" style="margin-left:0.3rem" title="Flow-score grade ({{ '%.1f'|format(tf.flow_score_10) }}/10)">{{ tf.conviction_grade }} · {{ "%.1f"|format(tf.flow_score_10) }}</span>
               {% endif %}
+              {# Premium-Taxonomy — dominant DTE bucket chip (LOTTERY / SWING / LEAP / OTHER). #}
+              <span class="badge uf-bucket-chip {{ _uf_bucket_cls }}" style="margin-left:0.3rem" title="{{ _uf_bucket_tip }}{% if tf.avg_dte %}&#10;Avg DTE: {{ '%.0f'|format(tf.avg_dte) }}d{% endif %}">{{ _uf_bucket_label }}</span>
+              <button type="button" class="ref-chip-trigger"
+                      data-ref-open="ref-unusual-flow"
+                      title="Explain DTE buckets"
+                      aria-label="Explain DTE bucket">?</button>
               {# Wave 5 — Conviction Stack chip.  Mirrors the Flow Tracker card chip
                  but uses flow_score_scaled (top_flow rows don't carry full candidate
                  enrichment). #}
@@ -528,9 +554,49 @@
             </dd>
             {% endif %}
           </dl>
+          {# Premium-Taxonomy chip row — structural quality signals. #}
+          {% set _has_structural = (tf.sweep_share and tf.sweep_share > 0) or (tf.multileg_share and tf.multileg_share > 0) or (tf.accel_ratio and tf.accel_ratio > 1.05) %}
+          {% if _has_structural %}
+          <div class="uf-chip-row">
+            {% if tf.sweep_share is defined and tf.sweep_share is not none %}
+              <span class="uf-chip uf-chip-sweep" title="Sweep share — what % of qualifying prints were sweeps (multiple-exchange urgency orders). Higher = more aggressive positioning.">Sweep {{ "%.0f"|format(tf.sweep_share * 100) }}%</span>
+            {% endif %}
+            {% if tf.multileg_share is defined and tf.multileg_share is not none %}
+              <span class="uf-chip uf-chip-multileg" title="Multileg share — what % of prints were part of multi-leg structures (spreads, combos). Higher = more defined-risk / hedged positioning.">Multileg {{ "%.0f"|format(tf.multileg_share * 100) }}%</span>
+            {% endif %}
+            {% if tf.accel_ratio is defined and tf.accel_ratio > 0 %}
+              {% set _acc_cls = 'uf-chip-accel-hot' if tf.accel_ratio >= 2.0 else ('uf-chip-accel-warm' if tf.accel_ratio >= 1.3 else 'uf-chip-accel-flat') %}
+              <span class="uf-chip {{ _acc_cls }}" title="Repeat-flow acceleration — today vs. the preceding baseline. 1.0 = flat, &gt;1 = accelerating. Captures fresh conviction vs. rehashed positioning.">Repeat {{ "%.1f"|format(tf.accel_ratio) }}x</span>
+            {% endif %}
+          </div>
+          {% endif %}
+          {# Premium-Taxonomy mini-bar — stacked lottery / swing / leap shares. #}
+          {% if _pm and _pm.buckets %}
+          {% set _pm_total = _pm.total.gross if _pm.total and _pm.total.gross else 0 %}
+          {% if _pm_total > 0 %}
+          {% set _pm_lot = (_pm.buckets|selectattr('key','equalto','lottery')|list|first).gross if (_pm.buckets|selectattr('key','equalto','lottery')|list) else 0 %}
+          {% set _pm_swg = (_pm.buckets|selectattr('key','equalto','swing')|list|first).gross if (_pm.buckets|selectattr('key','equalto','swing')|list) else 0 %}
+          {% set _pm_lp  = (_pm.buckets|selectattr('key','equalto','leap')|list|first).gross if (_pm.buckets|selectattr('key','equalto','leap')|list) else 0 %}
+          {% set _pm_other = _pm_total - (_pm_lot + _pm_swg + _pm_lp) %}
+          {% if _pm_other < 0 %}{% set _pm_other = 0 %}{% endif %}
+          <div class="uf-mini-bar" title="Premium mix — lottery / swing / leap dollars as % of today's unusual premium.&#10;Lottery: ${{ '%.2f'|format(_pm_lot/1000) }}K&#10;Swing: ${{ '%.2f'|format(_pm_swg/1000) }}K&#10;LEAP: ${{ '%.2f'|format(_pm_lp/1000) }}K">
+            {% if _pm_lot > 0 %}<span class="uf-mini-bar-seg uf-mini-bar-lottery" style="width:{{ (_pm_lot / _pm_total * 100)|round(1) }}%" title="Lottery — {{ '%.0f'|format(_pm_lot / _pm_total * 100) }}% (${{ '%.1f'|format(_pm_lot/1000) }}K)"></span>{% endif %}
+            {% if _pm_swg > 0 %}<span class="uf-mini-bar-seg uf-mini-bar-swing" style="width:{{ (_pm_swg / _pm_total * 100)|round(1) }}%" title="Swing — {{ '%.0f'|format(_pm_swg / _pm_total * 100) }}% (${{ '%.1f'|format(_pm_swg/1000) }}K)"></span>{% endif %}
+            {% if _pm_lp > 0 %}<span class="uf-mini-bar-seg uf-mini-bar-leap" style="width:{{ (_pm_lp / _pm_total * 100)|round(1) }}%" title="LEAP — {{ '%.0f'|format(_pm_lp / _pm_total * 100) }}% (${{ '%.1f'|format(_pm_lp/1000) }}K)"></span>{% endif %}
+            {% if _pm_other > 0 %}<span class="uf-mini-bar-seg uf-mini-bar-other" style="width:{{ (_pm_other / _pm_total * 100)|round(1) }}%" title="Other — {{ '%.0f'|format(_pm_other / _pm_total * 100) }}% (${{ '%.1f'|format(_pm_other/1000) }}K)"></span>{% endif %}
+          </div>
+          {% endif %}
+          {% endif %}
+          </div>
         </article>
         {% endfor %}
       </div>
+
+      {# Premium-Taxonomy — Unusual Flow Trader-Card detail modal.
+         JS injects subtabs (Summary / Premium Mix / Why / Structure /
+         Trades / Chart) on click.  Uses the same detail-panel shell +
+         close-modal helpers as the Flow Tracker modal. #}
+      <div id="detail-unusual-flow" class="detail-panel" style="display:none"></div>
       {% endif %}
 
       <h2 style="margin:1.6rem 0 0.6rem;font-size:1rem;opacity:0.9">Individual Trades</h2>
@@ -3397,6 +3463,217 @@
         ftPanel.classList.add("detail-panel--modal-open");
         ftPanel.style.display = "flex";
         document.body.style.overflow = "hidden";
+      });
+    })();
+
+    /* ── Unusual Flow (top flow intensity) detail modal ──
+       Premium-Taxonomy plan — click-to-expand Trader Card for each
+       "Top Flow Intensity by Ticker" card.  Strictly scan-only: all
+       data comes from the current pipeline scan (flow_features_*.csv
+       + today's normalized alert feed).  For multi-day persistence
+       / accumulation, the Summary tab renders a bridge link to the
+       Flow Tracker panel when a ticker has history there. */
+    (function () {
+      var ufList = document.getElementById("top-flow-list");
+      var ufPanel = document.getElementById("detail-unusual-flow");
+      if (!ufList || !ufPanel) return;
+
+      var ufData = {{ top_flow | default([], true) | tojson }};
+      var ufIdx = {};
+      ufData.forEach(function (d) { if (d && d.ticker) ufIdx[String(d.ticker).toUpperCase()] = d; });
+
+      // Flow Tracker ticker set — drives the bridge link shown on the
+      // Summary tab when a ticker has multi-day history.
+      var _ftData = {{ flow_tracker | default([], true) | tojson }};
+      var ftTickerSet = {};
+      (_ftData || []).forEach(function (d) { if (d && d.ticker) ftTickerSet[String(d.ticker).toUpperCase()] = true; });
+
+      function ufFmtDollar(v) {
+        if (!v && v !== 0) return "—";
+        if (v >= 1e9) return "$" + (v / 1e9).toFixed(2) + "B";
+        if (v >= 1e6) return "$" + (v / 1e6).toFixed(2) + "M";
+        if (v >= 1e3) return "$" + (v / 1e3).toFixed(1) + "K";
+        return "$" + Number(v).toFixed(0);
+      }
+
+      function ufSubtabBar() {
+        return '<div class="detail-subtabs" role="tablist">' +
+          '<button type="button" class="detail-subtab active" role="tab" aria-selected="true" data-subtab="summary">Summary</button>' +
+          '<button type="button" class="detail-subtab" role="tab" aria-selected="false" data-subtab="premium_mix">Premium Mix</button>' +
+          '<button type="button" class="detail-subtab" role="tab" aria-selected="false" data-subtab="why">Why?</button>' +
+          '<button type="button" class="detail-subtab" role="tab" aria-selected="false" data-subtab="structure">Structure</button>' +
+          '<button type="button" class="detail-subtab" role="tab" aria-selected="false" data-subtab="trades">Trades</button>' +
+          '<button type="button" class="detail-subtab" role="tab" aria-selected="false" data-subtab="chart">Chart</button>' +
+          '</div>';
+      }
+
+      function ufBucketLabel(key) {
+        if (!key) return "—";
+        var k = String(key).toLowerCase();
+        if (k === "lottery") return "LOTTERY";
+        if (k === "swing")   return "SWING";
+        if (k === "leap")    return "LEAP";
+        if (k === "other")   return "OTHER";
+        return String(key).toUpperCase();
+      }
+
+      function ufSummaryHtml(d) {
+        var sideCls = d.direction === "LONG" ? "badge-long" : "badge-short";
+        var grade = d.conviction_grade || "—";
+        var gradeColor = (grade && grade[0] === "A") ? "#3fb950" :
+                         (grade && grade[0] === "B") ? "#ff9800" : "rgba(255,255,255,0.55)";
+        var bucketKey = d.premium_mix_ui && d.premium_mix_ui.dominant_bucket
+          ? d.premium_mix_ui.dominant_bucket
+          : d.dominant_dte_bucket || "other";
+        var html = '<dl class="card-metrics" style="column-count:2;column-gap:2rem">';
+        html += '<dt>Grade</dt><dd style="font-weight:700;color:' + gradeColor + '">' + escHtml(grade) + ' · ' + (d.flow_score_10 || 0).toFixed(1) + '/10</dd>';
+        html += '<dt>Direction</dt><dd><span class="badge ' + sideCls + '">' + escHtml(d.direction || "—") + '</span></dd>';
+        html += '<dt>Intensity</dt><dd>' + (d.bps || 0).toFixed(2) + ' bps <span style="opacity:0.5;font-size:0.8rem">(' + escHtml(d.label || "") + ')</span></dd>';
+        html += '<dt>Unusual premium</dt><dd>' + ufFmtDollar(d.premium) + (d.count ? ' <span style="opacity:0.5;font-size:0.8rem">(' + d.count + ' trades)</span>' : '') + '</dd>';
+        html += '<dt>DTE bucket</dt><dd><span class="uf-bucket-chip uf-bucket-' + escHtml(String(bucketKey).toLowerCase()) + '">' + ufBucketLabel(bucketKey) + '</span>';
+        if (d.avg_dte) { html += ' <span style="opacity:0.55;font-size:0.82rem">avg ' + Number(d.avg_dte).toFixed(0) + 'd</span>'; }
+        html += '</dd>';
+        if (d.sweep_share !== null && d.sweep_share !== undefined) {
+          html += '<dt>Sweep share</dt><dd>' + (Number(d.sweep_share) * 100).toFixed(0) + '%</dd>';
+        }
+        if (d.multileg_share !== null && d.multileg_share !== undefined) {
+          html += '<dt>Multileg share</dt><dd>' + (Number(d.multileg_share) * 100).toFixed(0) + '%</dd>';
+        }
+        if (d.accel_ratio) {
+          html += '<dt>Repeat-flow accel</dt><dd>' + Number(d.accel_ratio).toFixed(2) + 'x</dd>';
+        }
+        if (d.avg_delta) {
+          var srcNote = "";
+          if (d.delta_source_mix !== null && d.delta_source_mix !== undefined) {
+            var sm = Number(d.delta_source_mix);
+            if (sm >= 0.85) srcNote = ' <span style="opacity:0.55;font-size:0.78rem">(UW ' + Math.round(sm * 100) + '%)</span>';
+            else if (sm <= 0.15) srcNote = ' <span style="opacity:0.55;font-size:0.78rem">(proxy)</span>';
+            else srcNote = ' <span style="opacity:0.55;font-size:0.78rem">(mix ' + Math.round(sm * 100) + '%)</span>';
+          }
+          html += '<dt>Avg |Δ|</dt><dd>' + Number(d.avg_delta).toFixed(2) + srcNote + '</dd>';
+        }
+        if (d.conviction_stack && d.conviction_stack.score !== undefined) {
+          html += '<dt>Conviction stack</dt><dd>' + d.conviction_stack.score + '/100 · ' + escHtml(d.conviction_stack.tier_label || d.conviction_stack.tier || "") + '</dd>';
+        }
+        if (d.dealer_hedge_bias && d.dealer_hedge_bias !== "neutral") {
+          html += '<dt>Dealer hedge</dt><dd>' + escHtml(d.dealer_hedge_label || d.dealer_hedge_bias) + '</dd>';
+        }
+        if (d.catalyst_label) {
+          html += '<dt>Catalyst</dt><dd>' + escHtml(d.catalyst_label) + '</dd>';
+        }
+        html += '</dl>';
+
+        // Bridge link — only shown when the ticker also has multi-day
+        // history in Flow Tracker; scope stays scan-only otherwise.
+        var tkUpper = String(d.ticker || "").toUpperCase();
+        if (ftTickerSet[tkUpper]) {
+          html += '<a href="#panel-flow-tracker" class="uf-bridge-link" data-uf-bridge="' + escHtml(tkUpper) + '">' +
+                  'Tracked multi-day — open in Flow Tracker &rarr;</a>';
+        } else {
+          html += '<p style="margin-top:0.9rem;opacity:0.5;font-size:0.8rem">' +
+                  'Scan-only view. This ticker has no multi-day history yet — come back after a few more scans or check the Flow Tracker tab for tickers with sustained flow.</p>';
+        }
+        return html;
+      }
+
+      function ufTradesHtml(d) {
+        var trades = (d && d.trades) || [];
+        if (!trades.length) {
+          return '<p class="empty">No individual qualifying prints fetched for this ticker this scan.</p>';
+        }
+        var html = '<table class="uf-trades-table"><thead><tr>' +
+          '<th>Type</th><th>Bucket</th><th>DTE</th><th>Strike</th><th>Expiry</th>' +
+          '<th>Premium</th><th>Side</th><th>Exec</th>' +
+          '</tr></thead><tbody>';
+        trades.forEach(function (t) {
+          var bucket = String(t.dte_bucket || "other").toLowerCase();
+          var sideCls = t.direction === "LONG" ? "uf-trade-side-long"
+                     : (t.direction === "SHORT" ? "uf-trade-side-short" : "");
+          html += '<tr>' +
+            '<td>' + escHtml(t.option_type || "—") + '</td>' +
+            '<td><span class="uf-trade-bucket-pill bucket-' + escHtml(bucket) + '">' + ufBucketLabel(bucket) + '</span></td>' +
+            '<td>' + (t.dte !== undefined && t.dte !== null ? t.dte : "—") + '</td>' +
+            '<td>' + (t.strike ? "$" + Number(t.strike).toFixed(2) : "—") + '</td>' +
+            '<td>' + escHtml(t.expiry || "—") + '</td>' +
+            '<td>' + ufFmtDollar(t.premium) + '</td>' +
+            '<td class="' + sideCls + '">' + escHtml(t.direction || "—") + '</td>' +
+            '<td style="opacity:0.6">' + escHtml(t.execution_side || "—") + '</td>' +
+            '</tr>';
+        });
+        html += '</tbody></table>';
+        return html;
+      }
+
+      function ufPanelsHtml(d, ticker) {
+        var narrative = buildNarrativeHtml(d && d.narrative, { context: ticker });
+        var structure = buildStructureHtml(d && d.trade_structure, { context: ticker });
+        var premiumMix = buildPremiumMixHtml(d && d.premium_mix_ui, { context: ticker });
+        return '<div class="detail-subtab-panel active" data-panel="summary">' + ufSummaryHtml(d) + '</div>' +
+          '<div class="detail-subtab-panel" data-panel="premium_mix">' + premiumMix + '</div>' +
+          '<div class="detail-subtab-panel" data-panel="why">' + narrative + '</div>' +
+          '<div class="detail-subtab-panel" data-panel="structure">' + structure + '</div>' +
+          '<div class="detail-subtab-panel" data-panel="trades">' + ufTradesHtml(d) + '</div>' +
+          '<div class="detail-subtab-panel" data-panel="chart"><div class="tv-chart-wrap" id="tv-chart-uf-' + escHtml(ticker) + '"></div></div>';
+      }
+
+      ufList.addEventListener("click", function (e) {
+        // Let reference-chip buttons handle their own click in the capture
+        // phase above — don't treat them as a card-expand request.
+        if (e.target.closest(".ref-chip-trigger")) return;
+        var head = e.target.closest(".data-card-head");
+        if (!head) return;
+        var card = head.closest("article.data-card--interactive");
+        if (!card || !ufList.contains(card)) return;
+        var ticker = (card.getAttribute("data-ticker") || "").toUpperCase();
+        if (!ticker) return;
+
+        if (ufPanel.classList.contains("detail-panel--modal-open") && ufPanel.getAttribute("data-ticker") === ticker) {
+          closeTickerDetailModal(ufPanel); return;
+        }
+        document.querySelectorAll(".detail-panel.detail-panel--modal-open").forEach(closeTickerDetailModal);
+
+        var d = ufIdx[ticker];
+        var body;
+        if (d) {
+          body = '<div class="detail-subtabs-wrap">' + ufSubtabBar() + '<div class="detail-subtab-panels">' + ufPanelsHtml(d, ticker) + '</div></div>';
+        } else {
+          body = '<p class="empty">No detail for ' + escHtml(ticker) + '.</p>';
+        }
+
+        var headerBits = '<span class="detail-ticker">' + escHtml(ticker) + '</span>';
+        if (d && d.direction) {
+          var dirCls = d.direction === "LONG" ? "badge-long" : "badge-short";
+          headerBits += ' <span class="badge ' + dirCls + '" style="margin-left:0.5rem">' + escHtml(d.direction) + '</span>';
+        }
+        if (d && d.conviction_grade) {
+          headerBits += ' <span class="badge tc-grade" style="margin-left:0.35rem;opacity:0.85">' + escHtml(d.conviction_grade) + ' · ' + (d.flow_score_10 || 0).toFixed(1) + '</span>';
+        }
+
+        ufPanel.innerHTML = wrapDetailModal(
+          '<div class="detail-header">' + headerBits + '<button type="button" class="detail-close" aria-label="Close">&times;</button></div>' +
+          '<div class="detail-body">' + body + '</div>'
+        );
+        bindDetailSubtabs(ufPanel);
+        bindNarrativeToggle(ufPanel);
+        attachModalClose(ufPanel);
+        ufPanel.setAttribute("data-ticker", ticker);
+        ufPanel.classList.add("detail-panel--modal-open");
+        ufPanel.style.display = "flex";
+        document.body.style.overflow = "hidden";
+
+        // Bridge link: route through the sidebar nav so the Flow Tracker
+        // tab is activated (anchor alone doesn't trigger our tab switcher).
+        var bridge = ufPanel.querySelector(".uf-bridge-link");
+        if (bridge) {
+          bridge.addEventListener("click", function (ev) {
+            ev.preventDefault();
+            closeTickerDetailModal(ufPanel);
+            var navBtn = document.querySelector('[data-tab-target="flow-tracker"], a[href="#panel-flow-tracker"]');
+            if (navBtn) { try { navBtn.click(); } catch (_e) {} }
+            var target = document.getElementById("panel-flow-tracker");
+            if (target && target.scrollIntoView) { target.scrollIntoView({ behavior: "smooth", block: "start" }); }
+          });
+        }
       });
     })();
 

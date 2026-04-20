@@ -2808,6 +2808,95 @@ def index():
                 "days_until_earnings": _sr.get("days_until_earnings"),
             }
 
+    # Premium-Taxonomy plan — recompute per-ticker DTE-bucket breakdown
+    # from the current scan's normalized alert flow (same 500K unusual
+    # floor the pipeline uses in `run_flow_to_price_pipeline`).  Used to
+    # populate the Trader Card modal's Premium-Mix panel + the card-face
+    # mini-bar.  Kept strictly scan-only (no multi-day merge) so the
+    # Unusual Flow tab stays complementary to the Flow Tracker view.
+    _uf_bucket_lookup: dict[str, dict] = {}
+    _uf_top_trades: dict[str, list[dict]] = {}
+    try:
+        if isinstance(alerts_raw, pd.DataFrame) and not alerts_raw.empty:
+            from app.features.flow_features import (
+                aggregate_premium_by_dte_bucket as _uf_agg_buckets,
+                filter_qualifying_flow as _uf_filter_flow,
+            )
+
+            _uf_base = _uf_filter_flow(
+                alerts_raw,
+                min_premium=500_000,
+                min_dte=0,
+                max_dte=9999,
+            )
+            if not _uf_base.empty:
+                _uf_buckets_df = _uf_agg_buckets(_uf_base)
+                if not _uf_buckets_df.empty:
+                    for _, _brow in _uf_buckets_df.iterrows():
+                        _bt = str(_brow.get("ticker", "")).upper().strip()
+                        if _bt:
+                            _uf_bucket_lookup[_bt] = {
+                                k: float(_brow[k] or 0.0)
+                                for k in _brow.index
+                                if k != "ticker" and k.endswith("_premium")
+                            }
+
+                def _uf_classify_dte(dte_val) -> str:
+                    try:
+                        d = int(dte_val)
+                    except (TypeError, ValueError):
+                        return "other"
+                    if 0 <= d <= 14:
+                        return "lottery"
+                    if 30 <= d <= 120:
+                        return "swing"
+                    if d >= 180:
+                        return "leap"
+                    return "other"
+
+                for _grp_tk, _grp in _uf_base.groupby("ticker"):
+                    _top = _grp.sort_values("premium", ascending=False).head(10)
+                    _rows_out: list[dict] = []
+                    for _, _tr in _top.iterrows():
+                        try:
+                            _dte_val = int(_tr.get("dte") or 0)
+                        except (TypeError, ValueError):
+                            _dte_val = 0
+                        _exp = _tr.get("expiration_date")
+                        _exp_str = ""
+                        try:
+                            if _exp is not None and not pd.isna(_exp):
+                                _exp_str = pd.to_datetime(_exp).strftime("%Y-%m-%d")
+                        except Exception:
+                            _exp_str = str(_exp)[:10] if _exp is not None else ""
+                        _rows_out.append({
+                            "strike": float(_tr.get("strike") or 0) if _tr.get("strike") is not None else None,
+                            "expiry": _exp_str,
+                            "dte": _dte_val,
+                            "dte_bucket": _uf_classify_dte(_dte_val),
+                            "premium": float(_tr.get("premium") or 0),
+                            "option_type": str(_tr.get("option_type") or ""),
+                            "direction": str(_tr.get("direction") or ""),
+                            "execution_side": str(_tr.get("execution_side") or ""),
+                        })
+                    _uf_top_trades[str(_grp_tk).upper().strip()] = _rows_out
+    except Exception as _uf_err:
+        print(f"  [top-flow] bucket/trades enrichment failed: {_uf_err}")
+
+    # View-model helpers for the Trader Card modal (scan-only).
+    try:
+        from app.web.view_models import _build_premium_mix_ui as _uf_build_mix_ui
+    except Exception:
+        _uf_build_mix_ui = None  # type: ignore[assignment]
+    try:
+        from app.features.flow_narrative import build_flow_feature_narrative as _uf_narrative
+    except Exception:
+        _uf_narrative = None  # type: ignore[assignment]
+    try:
+        from app.features.trade_structure import recommend_structure as _uf_structure
+    except Exception:
+        _uf_structure = None  # type: ignore[assignment]
+
     top_flow: list[dict] = []
     if not flow.empty:
         _tf = flow.copy()
@@ -2879,6 +2968,97 @@ def index():
                     _catalyst_label = f"ER {int(_due_f)}d"
                     _catalyst_tone = "hot" if _due_f <= 5 else "warm"
 
+                # ── Premium-Taxonomy plan — DTE bucket context + mix ──
+                def _f01(v) -> float:
+                    try:
+                        f = float(v)
+                    except (TypeError, ValueError):
+                        return 0.0
+                    if pd.isna(f):
+                        return 0.0
+                    return max(0.0, min(1.0, f))
+
+                _sweep_share = _f01(r.get("sweep_share"))
+                _multileg_share = _f01(r.get("multileg_share"))
+                try:
+                    _accel_ratio = float(
+                        r.get(f"{side}_accel_ratio", 0) or 0
+                    )
+                except (TypeError, ValueError):
+                    _accel_ratio = 0.0
+                try:
+                    _avg_dte_val = float(r.get("avg_dte", 0) or 0)
+                except (TypeError, ValueError):
+                    _avg_dte_val = 0.0
+                _dominant_bucket_raw = r.get("dominant_dte_bucket")
+                try:
+                    _dominant_bucket = (
+                        str(_dominant_bucket_raw).lower().strip()
+                        if _dominant_bucket_raw is not None and not pd.isna(_dominant_bucket_raw)
+                        else None
+                    )
+                except Exception:
+                    _dominant_bucket = None
+
+                _buckets = _uf_bucket_lookup.get(_tk, {}) or {}
+                _bull_total_raw = float(r.get("bullish_premium_raw", 0) or 0)
+                _bear_total_raw = float(r.get("bearish_premium_raw", 0) or 0)
+                _synth_mix = {
+                    "total_bullish":   _bull_total_raw,
+                    "total_bearish":   _bear_total_raw,
+                    "lottery_bullish": float(_buckets.get("lottery_bullish_premium", 0) or 0),
+                    "lottery_bearish": float(_buckets.get("lottery_bearish_premium", 0) or 0),
+                    "swing_bullish":   float(_buckets.get("swing_bullish_premium", 0) or 0),
+                    "swing_bearish":   float(_buckets.get("swing_bearish_premium", 0) or 0),
+                    "leap_bullish":    float(_buckets.get("leap_bullish_premium", 0) or 0),
+                    "leap_bearish":    float(_buckets.get("leap_bearish_premium", 0) or 0),
+                    # "Unusual" in the scan-only view = same as total
+                    # (every included print already cleared the 500K
+                    # unusual floor via _uf_filter_flow).
+                    "unusual_bullish": _bull_total_raw,
+                    "unusual_bearish": _bear_total_raw,
+                    "other_bullish":   0.0,
+                    "other_bearish":   0.0,
+                    "source": "flow_features",
+                }
+                _premium_mix_ui = None
+                if _uf_build_mix_ui is not None:
+                    try:
+                        _premium_mix_ui = _uf_build_mix_ui({"premium_mix": _synth_mix})
+                    except Exception:
+                        _premium_mix_ui = None
+
+                # Narrative + structure — reuse the same helpers used by
+                # the Candidates trader card so the modal's Why / Structure
+                # tabs stay consistent across the app.
+                _narrative_row = r.to_dict()
+                _narrative_row.update({
+                    "direction": "LONG" if is_bull else "SHORT",
+                    "flow_score_scaled": flow_score_10,
+                    "conviction_stack": _stack,
+                    "dealer_hedge_bias": _ctx.get("dealer_hedge_bias"),
+                    "dealer_hedge_label": _ctx.get("dealer_hedge_label"),
+                    "pin_risk_distance_pct": _ctx.get("pin_risk_distance_pct"),
+                    "days_until_earnings": _due_f,
+                    "avg_delta": avg_delta_val,
+                    "delta_source_mix": source_mix_val,
+                })
+                _narrative = []
+                if _uf_narrative is not None:
+                    try:
+                        _narrative = _uf_narrative(_narrative_row) or []
+                    except Exception:
+                        _narrative = []
+                _trade_structure = None
+                if _uf_structure is not None:
+                    try:
+                        _trade_structure = _uf_structure(
+                            _narrative_row,
+                            side="LONG" if is_bull else "SHORT",
+                        )
+                    except Exception:
+                        _trade_structure = None
+
                 top_flow.append({
                     "ticker": r.get("ticker", "?"),
                     "direction": "LONG" if is_bull else "SHORT",
@@ -2902,6 +3082,17 @@ def index():
                     "days_until_earnings": _due_f,
                     "catalyst_label": _catalyst_label,
                     "catalyst_tone": _catalyst_tone,
+                    # ── Premium-Taxonomy / Trader Card chips ────────
+                    "dominant_dte_bucket": _dominant_bucket,
+                    "avg_dte": round(_avg_dte_val, 1),
+                    "sweep_share": round(_sweep_share, 3),
+                    "multileg_share": round(_multileg_share, 3),
+                    "accel_ratio": round(_accel_ratio, 2),
+                    "premium_mix": _synth_mix,
+                    "premium_mix_ui": _premium_mix_ui,
+                    "narrative": _narrative,
+                    "trade_structure": _trade_structure,
+                    "trades": _uf_top_trades.get(_tk, []),
                 })
 
     perf = _compute_performance()
