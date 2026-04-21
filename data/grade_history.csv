@@ -1,0 +1,10 @@
+as_of,ticker,direction,sector,conviction_score,conviction_grade,conviction_stack,flow_intensity,persistence_ratio,accumulation_score,sweep_share,multileg_share,accel_ratio_today,window_return_pct,cumulative_premium,prem_mcap_bps,latest_put_call_ratio,latest_iv_rank,latest_oi_change,perc_3_day_total_latest,perc_30_day_total_latest,dominant_dte_bucket,premium_source,forward_excess_return,forward_attached_at
+2026-04-20,DOCS,BULLISH,Healthcare,6.5,B+,,3.92,1.0,60.7,0.0,0.0,0.0,-0.26,1744495.0,3.92,1.37,60.3,3.94,1.434,,,screener,,
+2026-04-20,UNH,BULLISH,Healthcare,6.4,B+,,6.07,1.0,50.4,0.0,0.0,0.0,7.47,365892043.0,6.07,0.57,7.3,5.78,1.994,,31-90,screener,,
+2026-04-20,GPC,BEARISH,Consumer Cyclical,6.3,B+,,1.9,1.0,57.6,0.0,0.0,0.0,3.12,4056018.0,1.9,35.07,44.9,18.23,3.946,,,screener,,
+2026-04-20,CAR,BULLISH,Industrials,6.1,B+,,216.41,1.0,50.3,0.0,0.0,0.0,7.36,952404478.0,216.41,1.83,100.0,20.67,1.058,,,screener,,
+2026-04-20,VICR,BEARISH,Technology,5.9,B,,6.78,1.0,49.3,0.0,0.0,0.0,6.32,10806232.0,6.78,0.56,62.5,33.24,1.282,,,screener,,
+2026-04-20,TSCO,BULLISH,Consumer Cyclical,4.8,B-,,1.43,1.0,48.5,0.0,0.0,0.0,-8.65,5066289.0,1.43,1.24,63.4,49.38,1.789,,,screener,,
+2026-04-20,MXL,BULLISH,Technology,4.5,B-,,7.28,1.0,28.7,0.0,0.0,0.0,3.36,3592738.0,7.28,1.17,100.0,63.27,0.648,,,screener,,
+2026-04-20,STLD,BULLISH,Basic Materials,4.5,B-,,1.12,1.0,47.0,0.0,0.0,0.0,3.38,5897500.0,1.12,0.73,59.9,8.07,1.528,,,screener,,
+2026-04-20,WCN,BEARISH,Industrials,3.3,C,,0.15,1.0,24.7,0.0,0.0,0.0,-1.56,888061.0,0.15,0.65,95.7,140.34,0.694,,,screener,,
