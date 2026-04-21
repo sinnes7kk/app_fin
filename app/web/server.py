@@ -1900,6 +1900,36 @@ def _flow_tracker_warmup_state() -> dict | None:
     return {"active": True, "day": int(distinct_days), "target": target}
 
 
+def _flow_tracker_distinct_days() -> int:
+    """Return the count of distinct ``snapshot_date`` values in
+    ``screener_snapshots.csv`` — i.e. the number of closed-session
+    trading days the Flow Tracker currently has to regress over.
+
+    Drives the per-horizon empty-state message in the Jinja template
+    so we can say e.g. "15d needs 4 days, you have 2" instead of a
+    generic "not enough data" blurb.  Uses the real column name
+    (``snapshot_date``) rather than the ``date`` alias used in the
+    sibling ``_flow_tracker_warmup_state`` helper.
+
+    Returns ``0`` when the CSV is missing, empty, malformed, or the
+    column is absent — the template branch treats 0 < any threshold
+    as "still warming up" which is the correct default state.
+    """
+    try:
+        from app.features.flow_tracker import SNAPSHOTS_PATH
+    except Exception:
+        return 0
+    try:
+        if not SNAPSHOTS_PATH.exists():
+            return 0
+        df = pd.read_csv(SNAPSHOTS_PATH, usecols=["snapshot_date"])
+    except Exception:
+        return 0
+    if df is None or df.empty or "snapshot_date" not in df.columns:
+        return 0
+    return int(df["snapshot_date"].dropna().astype(str).nunique())
+
+
 def _actionable_now(
     signals_df: pd.DataFrame,
     positions: list[dict],
@@ -3323,6 +3353,7 @@ def index():
         "flow_tracker": _flow_tracker_rows,
         "flow_tracker_active_horizon": active_horizon,
         "flow_tracker_horizons_config": FLOW_TRACKER_HORIZONS,
+        "flow_tracker_active_days": _flow_tracker_distinct_days(),
         "flow_tracker_hero": _build_flow_tracker_hero(_flow_tracker_rows),
         # Trader dashboard decision surfaces
         "ab": action_bar_ctx,

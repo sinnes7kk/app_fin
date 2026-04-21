@@ -1281,7 +1281,15 @@
       <div id="detail-flow-tracker" class="detail-panel" style="display:none"></div>
 
       {% else %}
-      <p class="empty">No tickers with repeat unusual flow detected yet. The tracker requires at least 2 days of screener data to identify sustained activity. Data accumulates with each scan.</p>
+        {% set _active_horizon_cfg = flow_tracker_horizons_config.get(flow_tracker_active_horizon) if flow_tracker_horizons_config else None %}
+        {% set _horizon_label = (_active_horizon_cfg.label if _active_horizon_cfg else flow_tracker_active_horizon) or flow_tracker_active_horizon %}
+        {% set _required_days = (_active_horizon_cfg.min_active_days if _active_horizon_cfg else 2) or 2 %}
+        {% set _active_days = flow_tracker_active_days or 0 %}
+        {% if _active_days < _required_days %}
+      <p class="empty">The <strong>{{ _horizon_label }}</strong> view needs at least <strong>{{ _required_days }}</strong> closed-session days of screener history to identify sustained activity. You have <strong>{{ _active_days }}</strong> so far &mdash; new days land after each <code>17:00 ET</code> scan.</p>
+        {% else %}
+      <p class="empty">No tickers with repeat unusual flow detected for the <strong>{{ _horizon_label }}</strong> window yet. You have <strong>{{ _active_days }}</strong> closed-session days of history; none currently clear the conviction thresholds. New candidates may qualify after each <code>17:00 ET</code> scan.</p>
+        {% endif %}
       {% endif %}
     </section>
 
