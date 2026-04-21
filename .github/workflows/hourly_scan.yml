@@ -80,7 +80,14 @@ jobs:
             data/grade_history.csv \
             data/grade_attribution.json \
             data/_ohlcv_cache/; do
-            [ -e "$f" ] && git add "$f"
+            # Tolerate `git add` exit-1 for paths that happen to be
+            # gitignored — `set -e` would otherwise kill the whole
+            # step (see 2026-04-21 failure for grade_history.csv).
+            # If a file truly needs tracking, fix .gitignore; we
+            # don't want to paper over genuine add failures, but we
+            # also don't want a single stale listed path to break
+            # the hourly scan.
+            [ -e "$f" ] && git add "$f" || true
           done
           git diff --cached --quiet && echo "No data changes to commit" && exit 0
           git commit -m "auto: hourly scan $(date -u +%Y-%m-%dT%H:%M:%SZ)"
