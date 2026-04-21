@@ -2,9 +2,18 @@ name: Hourly signal scan
 
 on:
   schedule:
-    # Every hour on the hour, Mon-Fri, UTC 14-21.
-    # Covers US market hours in both EDT (14-20) and EST (15-21).
-    - cron: "0 14-21 * * 1-5"
+    # Every hour on the hour, Mon-Fri, UTC 14-22.
+    # Covers US market hours in both EDT (14-20) and EST (15-21),
+    # plus a post-close buffer: the 21:00 UTC slot is our primary
+    # "stamp today" scan (17:00 ET in EDT, past the 16:15 ET cutoff
+    # in `app.utils.market_calendar.POST_CLOSE_CUTOFF`), and 22:00 UTC
+    # is an idempotent backup.  GitHub Actions routinely skips
+    # scheduled runs under platform load and does NOT retry missed
+    # runs, so the 22:00 slot is insurance against losing a session
+    # from `screener_snapshots.csv` entirely.  Winter (EST) also
+    # benefits: 22:00 UTC = 17:00 ET, which clears the cutoff even
+    # when the 21:00 UTC slot (= 16:00 ET in EST) would not.
+    - cron: "0 14-22 * * 1-5"
   workflow_dispatch:
 
 permissions:
