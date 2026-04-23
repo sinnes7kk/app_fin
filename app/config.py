@@ -86,6 +86,18 @@ ZSCORE_MIN_COHORT_SIZE = 10       # Tier 3/cross-section needs at least this man
 ZSCORE_COMPONENTS = ["flow_intensity"]  # components whose z-baseline is UW-backed;
                                         # others stay on absolute thresholds until
                                         # hydrated separately
+
+# Extended z-score path — hydrates vol_oi and unusual_premium_share in addition
+# to flow_intensity via the widened UW baseline (``load_uw_baselines``). Kept
+# behind a flag so the wider set can be shadow-logged before cutover; when
+# ``USE_ZSCORE_FLOW_EXTENDED`` is True, ``ZSCORE_COMPONENTS_EXTENDED`` is used
+# in place of ``ZSCORE_COMPONENTS``. ``unusual_premium_share`` is emitted as a
+# shadow component (z + tier columns attach to the feature table) but does not
+# feed the weighted ``bullish_score`` / ``bearish_score`` yet — that cutover
+# is a separate, weight-aware change.
+USE_ZSCORE_FLOW_EXTENDED = False
+ZSCORE_COMPONENTS_EXTENDED = ["flow_intensity", "vol_oi", "unusual_premium_share"]
+
 UW_HISTORY_CACHE_TTL_HOURS = 24   # per-ticker UW options-volume history cache TTL
 
 # Delta-weighted directional premium (see app/features/flow_features.py::add_delta_weights).

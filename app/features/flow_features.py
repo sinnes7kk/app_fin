@@ -895,6 +895,30 @@ def rescore_with_z(
     agg["bullish_zscore_tier"] = bull_tiers.max(axis=1).astype(int)
     agg["bearish_zscore_tier"] = bear_tiers.max(axis=1).astype(int)
 
+    # Shadow components: z-scored but not (yet) in _FLOW_WEIGHTS — attach their
+    # tier/z columns to agg so coverage tracking and downstream analysis can
+    # observe them, even though they don't contribute to the weighted score.
+    if components:
+        from app.features.flow_stats import COMPONENT_COLUMNS
+
+        scored_names = set(_FLOW_WEIGHTS.keys())
+        for comp_name in components:
+            if comp_name in scored_names:
+                continue
+            cfg = COMPONENT_COLUMNS.get(comp_name)
+            if cfg is None:
+                continue
+            for side, z_df in (("bullish", bull_z), ("bearish", bear_z)):
+                col = cfg[side]
+                if z_df is None:
+                    continue
+                z_col = f"{col}_z"
+                tier_col = f"{col}_tier"
+                if z_col in z_df.columns:
+                    agg[f"{side}_{comp_name}_z"] = z_df[z_col].astype(float)
+                if tier_col in z_df.columns:
+                    agg[f"{side}_{comp_name}_tier"] = z_df[tier_col].astype(int)
+
     _attach_component_breakdown(
         agg, side="bullish",
         flow_intensity_col=_active_flow_intensity_col("bullish"),
@@ -917,6 +941,7 @@ def aggregate_flow_by_ticker(
     df: pd.DataFrame,
     *,
     z_stats: "ZStatsBundle | None" = None,
+    total_tape_map: dict[str, dict[str, float]] | None = None,
 ) -> pd.DataFrame:
     """
     Aggregate filtered normalized flow to one row per ticker.
@@ -935,6 +960,13 @@ def aggregate_flow_by_ticker(
     component tier columns ``{side}_{component}_tier`` are attached to the
     output, plus a summary ``{side}_zscore_tier`` (worst component tier on
     the scored side).
+
+    When ``total_tape_map`` is provided (``{ticker: {"call_premium": X,
+    "put_premium": Y}}``), two extra columns are emitted:
+    ``bullish_unusual_premium_share`` (bullish flagged premium / total call-tape
+    premium) and ``bearish_unusual_premium_share`` (mirror for the put side).
+    These feed the z-score baseline for the "unusual premium share" component
+    when that path is enabled. Tickers missing from the map get NaN.
     """
     if df.empty:
         return pd.DataFrame(
@@ -970,6 +1002,10 @@ def aggregate_flow_by_ticker(
                 "marketcap",
                 "bullish_flow_intensity",
                 "bearish_flow_intensity",
+                "total_call_premium",
+                "total_put_premium",
+                "bullish_unusual_premium_share",
+                "bearish_unusual_premium_share",
                 "bullish_score",
                 "bearish_score",
                 # Wave 2 — repeat-flow acceleration columns.
@@ -1323,6 +1359,30 @@ def aggregate_flow_by_ticker(
         agg[["bullish_flow_intensity", "bearish_flow_intensity"]].fillna(0.0)
     )
 
+    # Unusual premium share: flagged directional premium / total-tape premium
+    # on the matching side. Needs ``total_tape_map`` from the caller; without
+    # it the columns stay NaN and the z-score baseline for this component
+    # falls to Tier 4 (absolute fallback) downstream.
+    if total_tape_map:
+        def _tape_get(t: str, side: str) -> float:
+            entry = total_tape_map.get(t) or total_tape_map.get(str(t).upper()) or {}
+            val = entry.get(side)
+            try:
+                return float(val) if val is not None and pd.notna(val) else float("nan")
+            except (TypeError, ValueError):
+                return float("nan")
+
+        agg["total_call_premium"] = agg["ticker"].map(lambda t: _tape_get(t, "call_premium"))
+        agg["total_put_premium"] = agg["ticker"].map(lambda t: _tape_get(t, "put_premium"))
+    else:
+        agg["total_call_premium"] = np.nan
+        agg["total_put_premium"] = np.nan
+
+    call_tape = agg["total_call_premium"].where(agg["total_call_premium"] > 0)
+    put_tape = agg["total_put_premium"].where(agg["total_put_premium"] > 0)
+    agg["bullish_unusual_premium_share"] = (agg["bullish_premium_raw"] / call_tape).astype(float)
+    agg["bearish_unusual_premium_share"] = (agg["bearish_premium_raw"] / put_tape).astype(float)
+
     # Delta-weighted intensity: Σ(premium × |delta|) / marketcap. Same mcap
     # floor as flow_intensity so micro-caps / ETFs don't dominate the
     # distribution. Legacy `bullish_flow_intensity` is preserved above so we
@@ -1550,6 +1610,7 @@ def build_flow_feature_table(
     require_ask_side: bool = False,
     *,
     z_stats: ZStatsBundle | None = None,
+    total_tape_map: dict[str, dict[str, float]] | None = None,
 ) -> pd.DataFrame:
     """
     Full flow feature pipeline: filter qualifying flow (ASK + BID by default),
@@ -1557,6 +1618,10 @@ def build_flow_feature_table(
 
     When ``z_stats`` is supplied, directional scoring uses rolling z-scores
     with the 4-tier fallback ladder instead of absolute thresholds.
+
+    ``total_tape_map`` (``{ticker: {"call_premium": X, "put_premium": Y}}``)
+    lets the aggregator emit ``bullish_unusual_premium_share`` /
+    ``bearish_unusual_premium_share`` columns for z-scoring. Optional.
     """
     filtered = filter_qualifying_flow(
         normalized_df,
@@ -1572,5 +1637,7 @@ def build_flow_feature_table(
     filtered = add_repeat_flow_count(filtered)
     filtered = add_delta_weights(filtered)
 
-    agg = aggregate_flow_by_ticker(filtered, z_stats=z_stats)
+    agg = aggregate_flow_by_ticker(
+        filtered, z_stats=z_stats, total_tape_map=total_tape_map
+    )
     return agg

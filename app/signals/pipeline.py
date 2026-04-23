@@ -31,9 +31,11 @@ from app.config import (
     RS_SHORT_MAX,
     USE_DELTA_WEIGHTED_FLOW,
     USE_ZSCORE_FLOW,
+    USE_ZSCORE_FLOW_EXTENDED,
     WALL_PROXIMITY_REJECT_ATR,
     WALL_PROXIMITY_REJECT_PCT,
     ZSCORE_COMPONENTS,
+    ZSCORE_COMPONENTS_EXTENDED,
     ZSCORE_LOOKBACK_DAYS,
 )
 from app.signals.trade_plan import (
@@ -1307,6 +1309,84 @@ def _run_stamp() -> str:
     return datetime.utcnow().strftime("%Y%m%d_%H%M%S")
 
 
+def _append_zscore_coverage(
+    feature_table: "pd.DataFrame",
+    components: list[str],
+    mode_label: str,
+) -> None:
+    """Append one record to ``data/zscore_coverage_history.json`` summarising
+    this run's z-score tier coverage per component.
+
+    Record shape::
+
+        {
+          "ts": "2026-04-23T17:05:22Z",
+          "mode": "extended",
+          "n_tickers": 50,
+          "components": {
+            "flow_intensity": {
+              "bullish_tiers": {"1": 48, "2": 1, "4": 1},
+              "bullish_tier1_pct": 96.0,
+              "bearish_tiers": {...},
+              "bearish_tier1_pct": ...
+            },
+            ...
+          }
+        }
+
+    File is capped at the last 500 runs; older entries are truncated so the
+    committed artefact stays small. Designed to be called inside a
+    try/except — any failure is swallowed by the caller so the pipeline
+    never dies on telemetry.
+    """
+    import json as _json
+    from datetime import datetime, timezone
+
+    path = DATA_ROOT / "zscore_coverage_history.json"
+    history: list[dict] = []
+    if path.exists():
+        try:
+            loaded = _json.loads(path.read_text() or "[]")
+            if isinstance(loaded, list):
+                history = loaded
+        except Exception:
+            history = []
+
+    n_tickers = int(len(feature_table))
+    per_component: dict[str, dict] = {}
+    for comp in components:
+        entry: dict[str, object] = {}
+        for side in ("bullish", "bearish"):
+            col = f"{side}_{comp}_tier"
+            if col not in feature_table.columns or n_tickers == 0:
+                continue
+            counts = (
+                feature_table[col].dropna().astype(int).value_counts().sort_index()
+            )
+            tier_map = {str(int(k)): int(v) for k, v in counts.items()}
+            t1 = int(counts.get(1, 0))
+            entry[f"{side}_tiers"] = tier_map
+            entry[f"{side}_tier1_pct"] = round(100.0 * t1 / n_tickers, 1)
+        if entry:
+            per_component[comp] = entry
+
+    record = {
+        "ts": datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "mode": mode_label,
+        "n_tickers": n_tickers,
+        "components": per_component,
+    }
+    history.append(record)
+
+    # Keep the file bounded — ~500 scans is ~50 trading days at 10 scans/day,
+    # plenty of history for validation while staying <200 KB.
+    if len(history) > 500:
+        history = history[-500:]
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(_json.dumps(history, indent=2))
+
+
 def save_run_outputs(
     feature_table: pd.DataFrame,
     bullish_ranked: pd.DataFrame,
@@ -1601,7 +1681,31 @@ def run_flow_to_price_pipeline(
         raw_flow_dir.mkdir(parents=True, exist_ok=True)
         normalized.to_csv(raw_flow_dir / f"raw_flow_{_run_stamp()}.csv", index=False)
 
-    feature_table = build_flow_feature_table(normalized, min_premium=min_premium)
+    # Build today's total-tape premium map from the screener enrichment rows so
+    # ``aggregate_flow_by_ticker`` can emit ``*_unusual_premium_share`` columns
+    # (flagged premium / total-tape premium). Best-effort: missing tickers get
+    # NaN share and fall to Tier 4 on that component's z-score ladder.
+    total_tape_map: dict[str, dict[str, float]] = {}
+    for sym, meta in screener_meta.items():
+        call_prem = meta.get("call_premium")
+        put_prem = meta.get("put_premium")
+        entry: dict[str, float] = {}
+        try:
+            if call_prem is not None and pd.notna(call_prem):
+                entry["call_premium"] = float(call_prem)
+        except (TypeError, ValueError):
+            pass
+        try:
+            if put_prem is not None and pd.notna(put_prem):
+                entry["put_premium"] = float(put_prem)
+        except (TypeError, ValueError):
+            pass
+        if entry:
+            total_tape_map[sym] = entry
+
+    feature_table = build_flow_feature_table(
+        normalized, min_premium=min_premium, total_tape_map=total_tape_map
+    )
 
     # Shadow-logging summary for the delta-weighted flow pipeline. Runs every
     # scan regardless of USE_DELTA_WEIGHTED_FLOW so we can audit distributions
@@ -1649,13 +1753,29 @@ def run_flow_to_price_pipeline(
     # comparison but don't use it for ranking.
     try:
         if USE_ZSCORE_FLOW and not feature_table.empty:
-            # UW-backed z-score: hydrate flow_intensity's 30-day baseline from
+            # UW-backed z-score: hydrate each component's 30-day baseline from
             # /stock/{ticker}/options-volume?limit=30 (cached 24h per ticker).
-            # Other components (ppt, vol_oi, repeat, sweep, breadth, dte) can't
-            # be reconstructed from that endpoint, so we scope the z-ladder to
-            # flow_intensity only; everything else keeps absolute-threshold
-            # scoring via ``_weighted_flow_score_mixed``.
-            from app.features.uw_history import load_uw_intensity_history
+            # We always hydrate the extended set (flow_intensity + vol_oi +
+            # unusual_premium_share) so the cache is fully populated, but
+            # only the ``active_components`` subset feeds ``rescore_with_z``.
+            # When ``USE_ZSCORE_FLOW_EXTENDED`` is False, the rest are
+            # shadow-logged: tier columns attach to ``feature_table`` and
+            # show up in ``zscore_coverage_history.json`` without affecting
+            # ``bullish_score`` / ``bearish_score``.
+            # Components not covered by the UW payload (ppt, repeat, sweep,
+            # breadth, dte) keep absolute-threshold scoring via
+            # ``_weighted_flow_score_mixed``.
+            from app.features.uw_history import load_uw_baselines
+
+            hydrate_components = list(ZSCORE_COMPONENTS_EXTENDED)
+            active_components = (
+                list(ZSCORE_COMPONENTS_EXTENDED)
+                if USE_ZSCORE_FLOW_EXTENDED
+                else list(ZSCORE_COMPONENTS)
+            )
+            shadow_components = [
+                c for c in hydrate_components if c not in active_components
+            ]
 
             tickers = feature_table["ticker"].astype(str).str.upper().tolist()
             mcap_map: dict[str, float] = {}
@@ -1666,23 +1786,78 @@ def run_flow_to_price_pipeline(
                 ):
                     if pd.notna(m):
                         mcap_map[t] = float(m)
-            history = load_uw_intensity_history(
-                tickers, mcap_map, lookback_days=ZSCORE_LOOKBACK_DAYS
+            history = load_uw_baselines(
+                tickers,
+                mcap_map,
+                components=hydrate_components,
+                lookback_days=ZSCORE_LOOKBACK_DAYS,
             )
             feature_table = rescore_with_z(
-                feature_table, history, components=list(ZSCORE_COMPONENTS)
+                feature_table, history, components=active_components
             )
-            tier_counts = (
-                feature_table["bullish_flow_intensity_tier"]
-                .value_counts()
-                .sort_index()
-                .to_dict()
-            )
+
+            # Shadow pass: compute tier columns for components that are
+            # hydrated but not in the active scoring set. Pure observability —
+            # no scores written.
+            if shadow_components and not history.empty:
+                try:
+                    from app.features.flow_stats import (
+                        COMPONENT_COLUMNS,
+                        compute_z_with_tier,
+                        cross_sectional_stats,
+                        per_ticker_stats,
+                    )
+
+                    shadow_cols: list[str] = []
+                    for comp in shadow_components:
+                        cfg = COMPONENT_COLUMNS.get(comp)
+                        if cfg is None:
+                            continue
+                        for side_col in cfg.values():
+                            if side_col not in shadow_cols:
+                                shadow_cols.append(side_col)
+
+                    per_t = per_ticker_stats(history, shadow_cols)
+                    cs = cross_sectional_stats(feature_table, shadow_cols)
+                    shadow_z = compute_z_with_tier(
+                        feature_table, columns=shadow_cols, per_ticker=per_t, cross=cs
+                    )
+                    for comp in shadow_components:
+                        cfg = COMPONENT_COLUMNS.get(comp)
+                        if cfg is None:
+                            continue
+                        for side, col in (("bullish", cfg["bullish"]), ("bearish", cfg["bearish"])):
+                            tier_col = f"{col}_tier"
+                            if tier_col in shadow_z.columns:
+                                feature_table[f"{side}_{comp}_tier"] = (
+                                    shadow_z[tier_col].astype(int).to_numpy()
+                                )
+                except Exception as _se:
+                    print(f"  [flow-scoring] shadow tier attach failed (non-fatal): {_se}")
+
+            mode_label = "extended" if USE_ZSCORE_FLOW_EXTENDED else "flow_intensity-only"
             print(
                 f"  [flow-scoring] UW-backed z-score active "
-                f"(components={list(ZSCORE_COMPONENTS)}). "
-                f"bullish flow_intensity tier distribution: {tier_counts}"
+                f"(mode={mode_label}, active={active_components}, "
+                f"shadow={shadow_components})."
             )
+            for comp in hydrate_components:
+                col = f"bullish_{comp}_tier"
+                if col not in feature_table.columns:
+                    continue
+                tier_counts = (
+                    feature_table[col].value_counts().sort_index().to_dict()
+                )
+                is_shadow = comp in shadow_components
+                suffix = " (shadow)" if is_shadow else ""
+                print(f"    {comp}{suffix}: bullish tier distribution = {tier_counts}")
+
+            try:
+                _append_zscore_coverage(
+                    feature_table, hydrate_components, mode_label
+                )
+            except Exception as _ce:
+                print(f"  [flow-scoring] coverage tracker failed (non-fatal): {_ce}")
         elif not feature_table.empty:
             # Shadow log: compute z-scored scores into a side channel for diff review
             history = load_flow_history(lookback_days=ZSCORE_LOOKBACK_DAYS)

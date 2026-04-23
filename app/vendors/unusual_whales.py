@@ -798,9 +798,13 @@ def fetch_ticker_options_history(ticker: str, *, days: int = 30) -> pd.DataFrame
     Single UW call: ``/stock/{ticker}/options-volume?limit=N``. Returns a
     DataFrame with one row per trading day, newest-first, with columns:
     ``date`` (ISO ``YYYY-MM-DD``), ``bullish_premium``, ``bearish_premium``,
-    ``call_volume``, ``put_volume``, ``call_open_interest``,
-    ``put_open_interest``. Values are coerced to floats; rows missing a
-    parseable ``date`` are dropped.
+    ``call_premium``, ``put_premium``, ``call_volume``, ``put_volume``,
+    ``call_open_interest``, ``put_open_interest``. Values are coerced to floats;
+    rows missing a parseable ``date`` are dropped.
+
+    ``call_premium`` / ``put_premium`` capture the total-tape premium for each
+    side (normal + unusual), enabling the "unusual premium share" baseline in
+    :mod:`app.features.uw_history`.
 
     Returns ``None`` on any API failure or when the response is empty — never
     raises. Callers fall back to Tier 4 absolute scoring for the affected
@@ -844,6 +848,8 @@ def fetch_ticker_options_history(ticker: str, *, days: int = 30) -> pd.DataFrame
                 "date": d,
                 "bullish_premium": _f(r.get("bullish_premium")),
                 "bearish_premium": _f(r.get("bearish_premium")),
+                "call_premium": _f(r.get("call_premium")),
+                "put_premium": _f(r.get("put_premium")),
                 "call_volume": _f(r.get("call_volume")),
                 "put_volume": _f(r.get("put_volume")),
                 "call_open_interest": _f(r.get("call_open_interest")),

@@ -85,6 +85,7 @@ jobs:
             data/market_indicators.json \
             data/grade_stats.json \
             data/flow_stats_meta.json \
+            data/zscore_coverage_history.json \
             data/snapshots_archive.csv.gz \
             data/grade_history.csv \
             data/grade_attribution.json \

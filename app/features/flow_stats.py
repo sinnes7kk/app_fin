@@ -362,13 +362,14 @@ def logistic_to_unit(z):
 # variant (except dte_score which is shared). The z-scoring keys match the
 # aggregate_flow_by_ticker output column names.
 COMPONENT_COLUMNS: dict[str, dict[str, str]] = {
-    "flow_intensity":    {"bullish": "bullish_flow_intensity",     "bearish": "bearish_flow_intensity"},
-    "premium_per_trade": {"bullish": "bullish_ppt_bps",            "bearish": "bearish_ppt_bps"},
-    "vol_oi":            {"bullish": "bullish_vol_oi",             "bearish": "bearish_vol_oi"},
-    "repeat":            {"bullish": "bullish_repeat_count",       "bearish": "bearish_repeat_count"},
-    "sweep":             {"bullish": "bullish_sweep_count",        "bearish": "bearish_sweep_count"},
-    "breadth":           {"bullish": "bullish_breadth",            "bearish": "bearish_breadth"},
-    "dte":               {"bullish": "dte_score",                  "bearish": "dte_score"},
+    "flow_intensity":        {"bullish": "bullish_flow_intensity",         "bearish": "bearish_flow_intensity"},
+    "premium_per_trade":     {"bullish": "bullish_ppt_bps",                "bearish": "bearish_ppt_bps"},
+    "vol_oi":                {"bullish": "bullish_vol_oi",                 "bearish": "bearish_vol_oi"},
+    "unusual_premium_share": {"bullish": "bullish_unusual_premium_share",  "bearish": "bearish_unusual_premium_share"},
+    "repeat":                {"bullish": "bullish_repeat_count",           "bearish": "bearish_repeat_count"},
+    "sweep":                 {"bullish": "bullish_sweep_count",            "bearish": "bearish_sweep_count"},
+    "breadth":               {"bullish": "bullish_breadth",                "bearish": "bearish_breadth"},
+    "dte":                   {"bullish": "dte_score",                      "bearish": "dte_score"},
 }
 
 
