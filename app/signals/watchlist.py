@@ -26,6 +26,116 @@ from app.signals.trade_plan import build_long_trade_plan, build_short_trade_plan
 
 WATCHLIST_PATH = Path(__file__).resolve().parents[2] / "data" / "watchlist.json"
 
+# Cap on how many historical observations we keep per (ticker, direction) entry.
+# Long enough to compute a robust 5-day mean and flow trend, short enough to
+# keep watchlist.json readable.
+STREAK_HISTORY_MAX = 10
+# Window used by ``mean_flow_score_5d``.
+STREAK_MEAN_WINDOW = 5
+
+
+def _compute_flow_trend(history: list[float]) -> str:
+    """Classify a short flow-score series as rising/flat/falling.
+
+    Uses last min(STREAK_MEAN_WINDOW, len(history)) points and a simple linear
+    slope normalised by the series mean. Returns "n/a" for histories shorter
+    than 3 observations — one or two data points don't define a trend.
+    """
+    if not history or len(history) < 3:
+        return "n/a"
+    window = history[-STREAK_MEAN_WINDOW:]
+    n = len(window)
+    xs = list(range(n))
+    mean_x = sum(xs) / n
+    mean_y = sum(window) / n
+    num = sum((xs[i] - mean_x) * (window[i] - mean_y) for i in range(n))
+    den = sum((xs[i] - mean_x) ** 2 for i in range(n))
+    if den <= 0:
+        return "flat"
+    slope = num / den
+    # Normalise slope by mean magnitude so thresholds are scale-invariant.
+    scale = max(abs(mean_y), 1e-6)
+    norm = slope / scale
+    if norm > 0.05:
+        return "rising"
+    if norm < -0.05:
+        return "falling"
+    return "flat"
+
+
+def _streak_summary(entry: dict) -> dict:
+    """Return derived streak fields for an entry.
+
+    Pure function over the entry's persisted history. Safe to call before or
+    after ``add_candidates`` so callers can read "today" or "before today"
+    snapshots depending on when they invoke it.
+    """
+    history = list(entry.get("flow_score_history") or [])
+    seen_dates = list(entry.get("seen_dates") or [])
+    streak_days = len(seen_dates)
+    if history:
+        max_flow = max(history)
+        window = history[-STREAK_MEAN_WINDOW:]
+        mean_5d = sum(window) / len(window)
+    else:
+        max_flow = float(entry.get("flow_score_raw") or 0.0)
+        mean_5d = float(entry.get("flow_score_raw") or 0.0)
+    return {
+        "watchlist_streak_days": int(streak_days),
+        "watchlist_max_flow_score": float(max_flow),
+        "watchlist_mean_flow_score_5d": float(mean_5d),
+        "watchlist_flow_trend": _compute_flow_trend(history),
+        "watchlist_first_seen": entry.get("first_seen"),
+        "watchlist_last_seen": entry.get("last_seen") or entry.get("first_seen"),
+    }
+
+
+def build_streak_lookup(entries: list[dict]) -> dict[tuple[str, str], dict]:
+    """Map (ticker, direction) -> streak summary fields for the given entries.
+
+    Handy for enriching pipeline output rows after ``add_candidates`` has
+    folded today's observation into the watchlist. Legacy entries are
+    backfilled in-place via ``_backfill_streak``.
+    """
+    lookup: dict[tuple[str, str], dict] = {}
+    for entry in entries:
+        e = _backfill_streak(dict(entry))
+        lookup[(e["ticker"], e["direction"])] = _streak_summary(e)
+    return lookup
+
+
+def apply_streak_lookup(rows: list[dict], lookup: dict[tuple[str, str], dict]) -> None:
+    """Stamp watchlist streak fields onto rows in-place."""
+    for row in rows:
+        key = (row.get("ticker"), row.get("direction"))
+        fields = lookup.get(key)
+        if fields:
+            for k, v in fields.items():
+                row.setdefault(k, v)
+
+
+def _backfill_streak(entry: dict) -> dict:
+    """Populate streak bookkeeping on legacy entries that pre-date Layer 1.
+
+    Mutates and returns the entry so downstream consumers can rely on the
+    fields existing.  Idempotent.
+    """
+    if "seen_dates" not in entry or not entry.get("seen_dates"):
+        first_seen = entry.get("first_seen")
+        if first_seen:
+            entry["seen_dates"] = [str(first_seen)]
+        else:
+            entry["seen_dates"] = []
+    if "flow_score_history" not in entry or not entry.get("flow_score_history"):
+        flow_raw = entry.get("flow_score_raw")
+        if flow_raw is not None and entry["seen_dates"]:
+            entry["flow_score_history"] = [float(flow_raw)] * len(entry["seen_dates"])
+        else:
+            entry["flow_score_history"] = []
+    if "last_seen" not in entry and entry["seen_dates"]:
+        entry["last_seen"] = entry["seen_dates"][-1]
+    return entry
+
 
 def load_watchlist() -> list[dict]:
     """Load the watchlist from disk, returning an empty list if missing."""
@@ -62,16 +172,22 @@ def add_candidates(
 ) -> list[dict]:
     """Merge newly rejected candidates into the watchlist.
 
-    If a ticker+direction already exists, keep the one with the higher
-    flow_score_raw (the stronger original signal).  New entries get today's date
-    as first_seen.
+    Layer 1 streak tracking: every refresh appends today's date and
+    flow_score_raw to ``seen_dates`` / ``flow_score_history`` (capped at
+    ``STREAK_HISTORY_MAX``) so we can surface "this name has been on the
+    watchlist N days running with rising flow" on the dashboard.
+
+    flow_score_raw / flow_score_scaled on the entry track *today's* values
+    (so re-evaluation runs against the latest flow), while
+    ``max_flow_score`` and ``flow_score_history`` retain the multi-day
+    picture.
     """
     today = date.today().isoformat()
 
     keyed: dict[tuple[str, str], dict] = {}
     for entry in existing:
         key = (entry["ticker"], entry["direction"])
-        keyed[key] = entry
+        keyed[key] = _backfill_streak(dict(entry))
 
     for rej in new_rejects:
         if rej.get("reject_reason", "").startswith("error:"):
@@ -82,22 +198,59 @@ def add_candidates(
             continue
 
         key = (rej["ticker"], rej["direction"])
-        new_entry = {
-            "ticker": rej["ticker"],
-            "direction": rej["direction"],
-            "flow_score_raw": rej["flow_score_raw"],
-            "flow_score_scaled": rej.get("flow_score_scaled", rej["flow_score_raw"]),
-            "first_seen": today,
-            "reject_reason": rej.get("reject_reason", "price_validation_failed"),
-            "checks_passed": rej.get("checks_passed", ""),
-            "checks_failed": rej.get("checks_failed", ""),
-            "price_score": rej.get("price_score"),
-        }
-        for fk in _FLOW_COMPONENT_KEYS:
-            if fk in rej:
-                new_entry[fk] = rej[fk]
+        flow_raw = float(rej.get("flow_score_raw") or 0.0)
+        flow_scaled = float(rej.get("flow_score_scaled", rej.get("flow_score_raw") or 0.0))
 
-        if key not in keyed or new_entry["flow_score_raw"] > keyed[key]["flow_score_raw"]:
+        if key in keyed:
+            entry = keyed[key]
+            seen = list(entry.get("seen_dates") or [])
+            history = list(entry.get("flow_score_history") or [])
+            if not seen or seen[-1] != today:
+                seen.append(today)
+                history.append(flow_raw)
+            else:
+                # Same trading day, multiple rejects — keep the strongest
+                # observation so the day's streak data point reflects peak
+                # flow rather than the last one we happened to process.
+                if history:
+                    history[-1] = max(history[-1], flow_raw)
+                else:
+                    history.append(flow_raw)
+            seen = seen[-STREAK_HISTORY_MAX:]
+            history = history[-STREAK_HISTORY_MAX:]
+
+            entry["seen_dates"] = seen
+            entry["flow_score_history"] = [float(x) for x in history]
+            entry["last_seen"] = today
+            entry["flow_score_raw"] = flow_raw
+            entry["flow_score_scaled"] = flow_scaled
+            entry["reject_reason"] = rej.get("reject_reason", entry.get("reject_reason", "price_validation_failed"))
+            entry["checks_passed"] = rej.get("checks_passed", entry.get("checks_passed", ""))
+            entry["checks_failed"] = rej.get("checks_failed", entry.get("checks_failed", ""))
+            if rej.get("price_score") is not None:
+                entry["price_score"] = rej.get("price_score")
+            for fk in _FLOW_COMPONENT_KEYS:
+                if fk in rej:
+                    entry[fk] = rej[fk]
+            keyed[key] = entry
+        else:
+            new_entry = {
+                "ticker": rej["ticker"],
+                "direction": rej["direction"],
+                "flow_score_raw": flow_raw,
+                "flow_score_scaled": flow_scaled,
+                "first_seen": today,
+                "last_seen": today,
+                "seen_dates": [today],
+                "flow_score_history": [flow_raw],
+                "reject_reason": rej.get("reject_reason", "price_validation_failed"),
+                "checks_passed": rej.get("checks_passed", ""),
+                "checks_failed": rej.get("checks_failed", ""),
+                "price_score": rej.get("price_score"),
+            }
+            for fk in _FLOW_COMPONENT_KEYS:
+                if fk in rej:
+                    new_entry[fk] = rej[fk]
             keyed[key] = new_entry
 
     return list(keyed.values())
@@ -145,6 +298,7 @@ def reevaluate_watchlist(
     watch_rejected: list[dict] = []
 
     for entry in entries:
+        entry = _backfill_streak(dict(entry))
         key = (entry["ticker"], entry["direction"])
         if key in fresh_tickers:
             continue
@@ -153,6 +307,7 @@ def reevaluate_watchlist(
         direction = entry["direction"]
         flow_raw = entry["flow_score_raw"]
         flow_scaled = entry.get("flow_score_scaled", flow_raw)
+        streak_fields = _streak_summary(entry)
 
         if ticker in flow_lookup:
             for fk in _FLOW_COMPONENT_KEYS:
@@ -184,6 +339,8 @@ def reevaluate_watchlist(
                 updated["reject_reason"] = rej["reject_reason"]
                 if rej.get("price_score") is not None:
                     updated["price_score"] = rej["price_score"]
+                rej.update(streak_fields)
+                updated.update(streak_fields)
                 still_watching.append(updated)
                 watch_rejected.append(rej)
                 continue
@@ -234,6 +391,8 @@ def reevaluate_watchlist(
                                 updated["options_context_score"] = _opts_score
                                 updated["options_context"] = opts_ctx
                                 rej["options_context_score"] = _opts_score
+                            rej.update(streak_fields)
+                            updated.update(streak_fields)
                             still_watching.append(updated)
                             watch_rejected.append(rej)
                             continue
@@ -281,6 +440,7 @@ def reevaluate_watchlist(
                 for fk in _FLOW_COMPONENT_KEYS:
                     if fk in entry and entry[fk] is not None:
                         promoted[-1][fk] = entry[fk]
+                promoted[-1].update(streak_fields)
             else:
                 rej = _build_rejection_row(
                     ticker, direction, flow_raw, price_signal, all_reasons,
@@ -316,6 +476,8 @@ def reevaluate_watchlist(
                         rej[oc_key] = opts_ctx.get(oc_key)
                 updated["pattern"] = _extract_pattern(price_signal.get("reasons", []))
                 rej["pattern"] = updated["pattern"]
+                rej.update(streak_fields)
+                updated.update(streak_fields)
                 still_watching.append(updated)
                 watch_rejected.append(rej)
 
@@ -331,6 +493,8 @@ def reevaluate_watchlist(
             updated["checks_passed"] = rej["checks_passed"]
             updated["checks_failed"] = rej["checks_failed"]
             updated["reject_reason"] = rej["reject_reason"]
+            rej.update(streak_fields)
+            updated.update(streak_fields)
             still_watching.append(updated)
             watch_rejected.append(rej)
 

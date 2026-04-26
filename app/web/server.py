@@ -2614,22 +2614,39 @@ def _rejected_insights(rejected: pd.DataFrame, watchlist: list[dict]) -> str:
         best_flow = float(best_wl.get("flow_score_scaled", 0) or 0)
         lines.append(_line("warn", f"{n_wl} on watchlist. Closest to promotion: {html_escape(str(best_ticker))} (flow {best_flow:.1f})"))
 
-        # Recurring names (3+ days on watchlist)
+        # Recurring names: prefer Layer 1 actual-observation streak (count
+        # of distinct days the ticker has been refreshed on the watchlist)
+        # over the calendar-day fallback for legacy entries. When the
+        # streak history is rising we flag it as a "freight train" hint.
         from datetime import date
         today = date.today()
-        persistent: list[str] = []
+        persistent: list[tuple[int, str]] = []
         for w in watchlist:
+            seen_dates = w.get("seen_dates") or []
+            streak = len(seen_dates) if seen_dates else 0
+            if streak >= 3:
+                history = w.get("flow_score_history") or []
+                trend_suffix = ""
+                if len(history) >= 3:
+                    window = history[-5:]
+                    if window[-1] > window[0] * 1.05:
+                        trend_suffix = " rising"
+                    elif window[-1] < window[0] * 0.95:
+                        trend_suffix = " falling"
+                persistent.append((streak, f"{w.get('ticker', '?')} ({streak}d{trend_suffix})"))
+                continue
             first_seen = w.get("first_seen")
             if first_seen:
                 try:
                     seen_date = date.fromisoformat(str(first_seen))
                     days_on = (today - seen_date).days
                     if days_on >= 3:
-                        persistent.append(f"{w.get('ticker', '?')} ({days_on}d)")
+                        persistent.append((days_on, f"{w.get('ticker', '?')} ({days_on}d)"))
                 except (ValueError, TypeError):
                     pass
         if persistent:
-            lines.append(_line("warn", "Persistent flow: " + ", ".join(persistent[:5])))
+            persistent.sort(reverse=True)
+            lines.append(_line("warn", "Persistent flow: " + ", ".join(p[1] for p in persistent[:5])))
 
     return '<div class="tab-insights">' + "".join(lines) + "</div>"
 

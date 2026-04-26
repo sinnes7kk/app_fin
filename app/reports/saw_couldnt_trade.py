@@ -174,6 +174,13 @@ PANEL_COLUMNS = [
     "checks_failed",
     "iv_rank",
     "gamma_regime",
+    # Layer 1 — watchlist streak context. Lets the audit panel rank
+    # "saw it for N days running and still couldn't take it" alongside
+    # one-off rejects.
+    "watchlist_streak_days",
+    "watchlist_max_flow_score",
+    "watchlist_mean_flow_score_5d",
+    "watchlist_flow_trend",
 ]
 
 

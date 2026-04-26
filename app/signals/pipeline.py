@@ -2076,15 +2076,24 @@ def run_flow_to_price_pipeline(
     final_results = sorted(final_results, key=lambda x: x["final_score"], reverse=True)
     final_results = apply_directional_balance(final_results)
 
+    # Layer 1 — watchlist streak bookkeeping. Run add_candidates *before*
+    # building the dashboard frames so today's reject is reflected in
+    # streak_days/flow_score_history when we stamp those fields onto
+    # rejection and signal rows. The watchlist-promoted rows already
+    # carry their pre-update streak summary from reevaluate_watchlist.
+    updated_watchlist = add_candidates(still_watching, all_rejected)
+    save_watchlist(updated_watchlist)
+    from app.signals.watchlist import apply_streak_lookup, build_streak_lookup
+    streak_lookup = build_streak_lookup(updated_watchlist)
+    apply_streak_lookup(all_rejected, streak_lookup)
+    apply_streak_lookup(final_results, streak_lookup)
+
     signals_df = results_to_dataframe(final_results)
 
     all_rejected_combined = all_rejected + watch_rejected
     rejected_df = pd.DataFrame(all_rejected_combined) if all_rejected_combined else pd.DataFrame(
         columns=REJECTED_COLUMNS
     )
-
-    updated_watchlist = add_candidates(still_watching, all_rejected)
-    save_watchlist(updated_watchlist)
 
     saved_paths = {}
     if save:
@@ -2227,6 +2236,12 @@ REJECTED_COLUMNS = [
     "stop_price",
     "target_1",
     "rr_ratio",
+    "watchlist_streak_days",
+    "watchlist_max_flow_score",
+    "watchlist_mean_flow_score_5d",
+    "watchlist_flow_trend",
+    "watchlist_first_seen",
+    "watchlist_last_seen",
 ]
 
 SIGNAL_COLUMNS = [
@@ -2265,6 +2280,12 @@ SIGNAL_COLUMNS = [
     "source",
     "checks_passed",
     "checks_failed",
+    "watchlist_streak_days",
+    "watchlist_max_flow_score",
+    "watchlist_mean_flow_score_5d",
+    "watchlist_flow_trend",
+    "watchlist_first_seen",
+    "watchlist_last_seen",
 ]
 
 
