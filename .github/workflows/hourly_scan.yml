@@ -86,6 +86,11 @@ jobs:
             data/grade_stats.json \
             data/flow_stats_meta.json \
             data/zscore_coverage_history.json \
+            data/sector_heat/ \
+            data/sector_heat_history.csv \
+            data/saw_couldnt_trade/ \
+            data/saw_couldnt_trade_history.csv \
+            data/audit_reports/ \
             data/snapshots_archive.csv.gz \
             data/grade_history.csv \
             data/grade_attribution.json \

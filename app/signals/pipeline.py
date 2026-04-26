@@ -403,6 +403,17 @@ def _build_rejection_row(
     if sc:
         for k, v in sc.items():
             row[f"price_{k}"] = v
+    # Surface extension metadata so the dashboard can flag "saw it but
+    # extended" setups distinctly from setups that failed for other
+    # T/A reasons.
+    if "extended" in price_signal:
+        row["extended"] = bool(price_signal.get("extended", False))
+    if "extension_cap" in price_signal:
+        row["extension_cap"] = price_signal.get("extension_cap")
+    if "extension_cap_atr" in price_signal:
+        row["extension_cap_atr"] = price_signal.get("extension_cap_atr")
+    if "extension_soft_promoted" in price_signal:
+        row["extension_soft_promoted"] = bool(price_signal.get("extension_soft_promoted", False))
     if trade_plan:
         row["entry_price"] = trade_plan.get("entry_price")
         row["stop_price"] = trade_plan.get("stop_price")
@@ -559,6 +570,14 @@ def run_price_validation_for_bullish_candidates(
             if sc:
                 for k, v in sc.items():
                     _row[f"price_{k}"] = v
+            if "extended" in price_signal:
+                _row["extended"] = bool(price_signal.get("extended", False))
+            if "extension_cap" in price_signal:
+                _row["extension_cap"] = price_signal.get("extension_cap")
+            if "extension_cap_atr" in price_signal:
+                _row["extension_cap_atr"] = price_signal.get("extension_cap_atr")
+            if "extension_soft_promoted" in price_signal:
+                _row["extension_soft_promoted"] = bool(price_signal.get("extension_soft_promoted", False))
             _attach_flow_components(_row, row)
             accepted.append(_row)
 
@@ -714,6 +733,14 @@ def run_price_validation_for_bearish_candidates(
             if sc:
                 for k, v in sc.items():
                     _row[f"price_{k}"] = v
+            if "extended" in price_signal:
+                _row["extended"] = bool(price_signal.get("extended", False))
+            if "extension_cap" in price_signal:
+                _row["extension_cap"] = price_signal.get("extension_cap")
+            if "extension_cap_atr" in price_signal:
+                _row["extension_cap_atr"] = price_signal.get("extension_cap_atr")
+            if "extension_soft_promoted" in price_signal:
+                _row["extension_soft_promoted"] = bool(price_signal.get("extension_soft_promoted", False))
             _attach_flow_components(_row, row)
             accepted.append(_row)
 
@@ -2079,6 +2106,72 @@ def run_flow_to_price_pipeline(
             print("  [grade-backtest] refreshed data/grade_stats.json")
         except Exception as e:
             print(f"  [grade-backtest] skipped: {e}")
+
+        # Sector-heat aggregator. Read-only side output: one CSV per scan
+        # under data/sector_heat/ plus an append-only history file. v1
+        # is informational only and does not feed back into scoring.
+        try:
+            if not feature_table.empty:
+                from app.features.sector_heat import (
+                    append_sector_heat_history,
+                    compute_sector_heat,
+                )
+                from app.utils.market_calendar import current_trading_day
+
+                snap_date = current_trading_day().isoformat()
+                heat_df = compute_sector_heat(
+                    feature_table,
+                    screener_meta=screener_meta,
+                    snapshot_date=snap_date,
+                )
+                if not heat_df.empty:
+                    out_dir = DATA_ROOT / "sector_heat"
+                    out_dir.mkdir(parents=True, exist_ok=True)
+                    heat_path = out_dir / f"sector_heat_{_run_stamp()}.csv"
+                    heat_df.to_csv(heat_path, index=False)
+
+                    history_path = DATA_ROOT / "sector_heat_history.csv"
+                    append_sector_heat_history(heat_df, history_path)
+
+                    top_bull = (
+                        heat_df[heat_df["direction"] == "bullish"]
+                        .head(3)[["sector", "sector_heat_score", "n_above_thresh", "n_tickers"]]
+                        .to_dict(orient="records")
+                    )
+                    top_bear = (
+                        heat_df[heat_df["direction"] == "bearish"]
+                        .head(3)[["sector", "sector_heat_score", "n_above_thresh", "n_tickers"]]
+                        .to_dict(orient="records")
+                    )
+                    print(f"  [sector-heat] saved {heat_path.name} ({len(heat_df)} rows)")
+                    if top_bull:
+                        print(f"  [sector-heat] top bullish: {top_bull}")
+                    if top_bear:
+                        print(f"  [sector-heat] top bearish: {top_bear}")
+        except Exception as e:
+            print(f"  [sector-heat] skipped: {e}")
+
+        # 'Saw it, couldn't trade it' panel. Read-only audit output —
+        # surfaces high-flow rejects so we can audit and retune the
+        # price-validation gate. Runs after save_run_outputs so the
+        # rejected_*.csv this scan just wrote is included.
+        try:
+            from app.reports.saw_couldnt_trade import emit_daily
+            from app.utils.market_calendar import current_trading_day
+
+            scan_date = current_trading_day().isoformat()
+            panel_path, n_panel = emit_daily(
+                final_signals_dir=DATA_ROOT / "final_signals",
+                output_dir=DATA_ROOT / "saw_couldnt_trade",
+                history_path=DATA_ROOT / "saw_couldnt_trade_history.csv",
+                date_str=scan_date,
+            )
+            if panel_path is not None:
+                print(f"  [saw-couldnt-trade] saved {panel_path.name} ({n_panel} rows)")
+            else:
+                print(f"  [saw-couldnt-trade] no high-flow rejects for {scan_date}")
+        except Exception as e:
+            print(f"  [saw-couldnt-trade] skipped: {e}")
 
     print_api_summary()
 

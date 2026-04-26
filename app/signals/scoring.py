@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pandas as pd
 
+from app import config as _cfg
 from app.rules.continuation_rules import (
     detect_trend,
     find_support_resistance,
@@ -31,8 +32,10 @@ from app.rules.continuation_rules import (
     MIN_ROOM_ATR,
 )
 
-MAX_DISTANCE_FROM_EMA20_ATR = 2.0
-BREAKOUT_MAX_DISTANCE_ATR = 4.0
+MAX_DISTANCE_FROM_EMA20_ATR = getattr(_cfg, "EXTENSION_MAX_DISTANCE_ATR", 2.5)
+BREAKOUT_MAX_DISTANCE_ATR = getattr(_cfg, "EXTENSION_BREAKOUT_MAX_DISTANCE_ATR", 4.0)
+CONSOLIDATION_MAX_DISTANCE_ATR = getattr(_cfg, "EXTENSION_CONSOLIDATION_MAX_DISTANCE_ATR", 3.0)
+SUSTAINED_TREND_MAX_DISTANCE_ATR = getattr(_cfg, "EXTENSION_SUSTAINED_TREND_MAX_DISTANCE_ATR", 5.0)
 
 
 
@@ -100,6 +103,100 @@ def _is_clean_trend(df: pd.DataFrame, is_long: bool, lookback: int = 10) -> bool
             if float(window.iloc[i]["high"]) < float(window.iloc[i - 1]["high"])
         )
     return count >= 6
+
+
+def _is_sustained_trend(df: pd.DataFrame, is_long: bool) -> bool:
+    """True when the stock is in a textbook multi-day directional run.
+
+    Used by the extension-cap selector so a clean grinding trend gets
+    a wider cap (``SUSTAINED_TREND_MAX_DISTANCE_ATR``) rather than the
+    default pullback cap.  Conditions:
+
+    1.  ``_is_clean_trend`` already passes (≥6/10 directional bars).
+    2.  Last close is on the trend side of EMA20 (not pulling back).
+    3.  EMA20 is on the trend side of EMA50 (textbook stack).
+
+    Pure price-action; no flow / sector signals enter here so the helper
+    stays cheap and deterministic.
+    """
+    if df.empty or not _is_clean_trend(df, is_long):
+        return False
+    last = df.iloc[-1]
+    close = last.get("close")
+    ema20 = last.get("ema20")
+    ema50 = last.get("ema50")
+    if pd.isna(close) or pd.isna(ema20) or pd.isna(ema50):
+        return False
+    if is_long:
+        return float(close) >= float(ema20) and float(ema20) >= float(ema50)
+    return float(close) <= float(ema20) and float(ema20) <= float(ema50)
+
+
+def _select_extension_cap(
+    df: pd.DataFrame,
+    is_long: bool,
+    structural_break: bool,
+    consolidation_break: bool,
+) -> tuple[float, str]:
+    """Return ``(max_dist_atr, cap_label)`` for the extension gate.
+
+    Order of precedence (most permissive wins):
+      1. ``sustained_trend`` (5.0) — when price is in a clean multi-day run.
+         Gated on ``USE_SUSTAINED_TREND_EXTENSION``.
+      2. ``structural_break`` (4.0) — first break of a 2+ touch level.
+      3. ``consolidation_break`` (3.0) — first break of a range floor/ceiling.
+      4. ``default`` (2.5) — pullback cap for swing entries.
+
+    The label is surfaced on the result so we can attribute which cap
+    let the trade through (or kept it on watchlist).
+    """
+    if structural_break:
+        return BREAKOUT_MAX_DISTANCE_ATR, "structural_break"
+    use_sustained = getattr(_cfg, "USE_SUSTAINED_TREND_EXTENSION", True)
+    if use_sustained and _is_sustained_trend(df, is_long):
+        return SUSTAINED_TREND_MAX_DISTANCE_ATR, "sustained_trend"
+    if consolidation_break:
+        return CONSOLIDATION_MAX_DISTANCE_ATR, "consolidation_break"
+    return MAX_DISTANCE_FROM_EMA20_ATR, "default"
+
+
+def _resolve_extension_state(
+    not_extended_ok: bool,
+    score: float,
+    extension_cap_label: str,
+) -> tuple[str, bool]:
+    """Map (extension_ok, score, cap) → (state, soft_extension_promoted).
+
+    Encapsulates the soft-gate policy so both long and short scorers stay
+    aligned. When ``USE_SOFT_EXTENSION_GATE`` is True, an extended setup
+    that would otherwise score ≥ 4.0 is promoted to ``WATCHLIST`` rather
+    than dropped to ``REJECT``.  The caller carries the promotion
+    indicator forward so the dashboard can flag the setup as "extended".
+    """
+    soft_gate = getattr(_cfg, "USE_SOFT_EXTENSION_GATE", True)
+
+    if not_extended_ok:
+        if score >= 7.0:
+            state = "SIGNAL"
+        elif score >= 4.0:
+            state = "WATCHLIST"
+        else:
+            state = "REJECT"
+        return state, False
+
+    if not soft_gate:
+        return "REJECT", False
+
+    # Soft-gate path: extension failed but we don't auto-REJECT. The setup
+    # surfaces on the dashboard with an `extended` flag so the human can
+    # decide whether to chase strength.
+    if score >= 4.0:
+        return "WATCHLIST", True
+    if extension_cap_label == "sustained_trend":
+        # Even a low score deserves visibility when the trend is clean and
+        # grinding — that's exactly the "sustained run" miss we tuned for.
+        return "WATCHLIST", True
+    return "REJECT", False
 
 
 def _pattern_score(
@@ -192,6 +289,10 @@ def _build_result(
     checks_failed: list[str],
     components: dict | None = None,
     broken_level: float | None = None,
+    extended: bool = False,
+    extension_cap: str | None = None,
+    extension_cap_atr: float | None = None,
+    extension_soft_promoted: bool = False,
 ) -> dict:
     result = {
         "direction": direction,
@@ -206,7 +307,13 @@ def _build_result(
         "resistance": resistance,
         "structural_support": structural_support,
         "structural_resistance": structural_resistance,
+        "extended": bool(extended),
+        "extension_soft_promoted": bool(extension_soft_promoted),
     }
+    if extension_cap is not None:
+        result["extension_cap"] = extension_cap
+    if extension_cap_atr is not None:
+        result["extension_cap_atr"] = round(float(extension_cap_atr), 2)
     if components:
         result["score_components"] = components
     if broken_level is not None:
@@ -226,6 +333,12 @@ def quick_reject_check(
 
     Returns (should_reject, reject_reason, price_signal_stub, counter_trend).
     Only price extension is a hard gate; trend misalignment is a soft flag.
+
+    Uses ``SUSTAINED_TREND_MAX_DISTANCE_ATR`` (the most permissive cap) so
+    sustained multi-day runs aren't killed before the main scorer can
+    classify them. The main scorer applies the per-pattern cap and the
+    soft-gate policy (``USE_SOFT_EXTENSION_GATE``) to decide REJECT vs
+    WATCHLIST.
     """
     trend = detect_trend(df)
     trend_dir = trend["trend"]
@@ -235,10 +348,21 @@ def quick_reject_check(
     else:
         trend_opposite = trend_dir == "LONG"
 
-    _, ext_sc = _extension_score(df, BREAKOUT_MAX_DISTANCE_ATR)
+    # Use the most permissive cap so the early reject is a true backstop —
+    # not a stricter gate than the main scorer applies.
+    early_cap = max(
+        BREAKOUT_MAX_DISTANCE_ATR,
+        SUSTAINED_TREND_MAX_DISTANCE_ATR,
+    )
+    _, ext_sc = _extension_score(df, early_cap)
     not_extended_ok = ext_sc > 0
 
     if not_extended_ok:
+        return False, None, {}, trend_opposite
+
+    # When the soft gate is enabled, defer the decision to the main scorer
+    # — it will surface the row on WATCHLIST with the `extended` flag set.
+    if getattr(_cfg, "USE_SOFT_EXTENSION_GATE", True):
         return False, None, {}, trend_opposite
 
     stub: dict = {
@@ -256,6 +380,10 @@ def quick_reject_check(
             "momentum": 0.0,
             "confirm_vol": 0.0,
         },
+        "extended": True,
+        "extension_cap": "early_reject",
+        "extension_cap_atr": round(float(early_cap), 2),
+        "extension_soft_promoted": False,
     }
     return True, "price_over_extended", stub, trend_opposite
 
@@ -328,12 +456,11 @@ def score_long_setup(
     elif consolidation_bo:
         _bo_broken_level = range_ceiling
 
-    if structural_bo:
-        max_dist = BREAKOUT_MAX_DISTANCE_ATR
-    elif consolidation_bo:
-        max_dist = 3.0
-    else:
-        max_dist = MAX_DISTANCE_FROM_EMA20_ATR
+    max_dist, extension_cap_label = _select_extension_cap(
+        df, is_long=True,
+        structural_break=structural_bo,
+        consolidation_break=consolidation_bo,
+    )
     not_extended_ok, ext_sc = _extension_score(df, max_dist)
 
     room_ok = has_room_to_target_long(df, levels["structural_resistance"])
@@ -433,14 +560,9 @@ def score_long_setup(
         "confirm_vol": round(vol_conf_sc, 2),
     }
 
-    if not not_extended_ok:
-        state = "REJECT"
-    elif score >= 7.0:
-        state = "SIGNAL"
-    elif score >= 4.0:
-        state = "WATCHLIST"
-    else:
-        state = "REJECT"
+    state, ext_soft_promoted = _resolve_extension_state(
+        not_extended_ok, score, extension_cap_label,
+    )
 
     return _build_result(
         direction="LONG",
@@ -455,6 +577,10 @@ def score_long_setup(
         checks_failed=checks_failed,
         components=components,
         broken_level=_bo_broken_level,
+        extended=not not_extended_ok,
+        extension_cap=extension_cap_label,
+        extension_cap_atr=max_dist,
+        extension_soft_promoted=ext_soft_promoted,
     )
 
 
@@ -491,12 +617,11 @@ def score_short_setup(
     elif consolidation_bd:
         _bd_broken_level = range_floor
 
-    if structural_bd:
-        max_dist = BREAKOUT_MAX_DISTANCE_ATR
-    elif consolidation_bd:
-        max_dist = 3.0
-    else:
-        max_dist = MAX_DISTANCE_FROM_EMA20_ATR
+    max_dist, extension_cap_label = _select_extension_cap(
+        df, is_long=False,
+        structural_break=structural_bd,
+        consolidation_break=consolidation_bd,
+    )
     not_extended_ok, ext_sc = _extension_score(df, max_dist)
 
     room_ok = has_room_to_target_short(df, levels["structural_support"])
@@ -596,14 +721,9 @@ def score_short_setup(
         "confirm_vol": round(vol_conf_sc, 2),
     }
 
-    if not not_extended_ok:
-        state = "REJECT"
-    elif score >= 7.0:
-        state = "SIGNAL"
-    elif score >= 4.0:
-        state = "WATCHLIST"
-    else:
-        state = "REJECT"
+    state, ext_soft_promoted = _resolve_extension_state(
+        not_extended_ok, score, extension_cap_label,
+    )
 
     return _build_result(
         direction="SHORT",
@@ -618,4 +738,8 @@ def score_short_setup(
         checks_failed=checks_failed,
         components=components,
         broken_level=_bd_broken_level,
+        extended=not not_extended_ok,
+        extension_cap=extension_cap_label,
+        extension_cap_atr=max_dist,
+        extension_soft_promoted=ext_soft_promoted,
     )

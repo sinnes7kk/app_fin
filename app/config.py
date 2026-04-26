@@ -61,6 +61,41 @@ RS_LOOKBACK_DAYS = 20
 RS_LONG_MIN = -0.02   # longs must not be lagging SPY by more than 2%
 RS_SHORT_MAX = 0.05   # shorts: demote to watchlist if leading SPY by more than 5%
 
+# ──────────────────────────────────────────────────────────────────────────
+# T/A gating — extension-cap policy.
+#
+# The dashboard is used for decision support (no live broker), so hiding a
+# high-flow setup is more costly than surfacing one we'd size down on. Two
+# levers:
+#
+#   USE_SOFT_EXTENSION_GATE  (Option B)
+#       When True, an "extended" price (close > N×ATR from EMA20) no longer
+#       hard-rejects the setup in score_long_setup / score_short_setup.
+#       Instead the row is promoted to WATCHLIST so it stays visible with
+#       the `extended` flag set on the result. Final SIGNAL state still
+#       requires the gate to pass — the soft path only converts what would
+#       have been a REJECT into a WATCHLIST so the human reviewer can see
+#       it. Score still reflects extension via the continuous component.
+#
+#   USE_SUSTAINED_TREND_EXTENSION  (Option C)
+#       When True, sustained multi-day trends get a wider extension cap
+#       (SUSTAINED_TREND_MAX_DISTANCE_ATR, default 5.0) instead of the
+#       default 2.5 / breakout 4.0. "Sustained" is detected from price
+#       alone (clean trend ≥6/10 directional bars + EMA20 stack on the
+#       trend side + last close on the trend side of EMA20), so the
+#       widening kicks in exactly when the setup is "buy strength, not
+#       wait for a pullback that may never come".
+#
+# Both flags ship True for the dashboard. Disable to revert to the strict
+# pullback-style gating.
+# ──────────────────────────────────────────────────────────────────────────
+USE_SOFT_EXTENSION_GATE = True
+USE_SUSTAINED_TREND_EXTENSION = True
+EXTENSION_MAX_DISTANCE_ATR = 2.5            # default cap (was 2.0)
+EXTENSION_BREAKOUT_MAX_DISTANCE_ATR = 4.0   # SR-breakout cap
+EXTENSION_CONSOLIDATION_MAX_DISTANCE_ATR = 3.0  # range-break cap
+EXTENSION_SUSTAINED_TREND_MAX_DISTANCE_ATR = 5.0  # multi-day clean-trend cap
+
 # Multi-day flow persistence
 FLOW_PERSISTENCE_DAYS = 3    # look back this many calendar days
 FLOW_PERSISTENCE_BONUS = 0.5 # max score bonus for persistent flow (conservative)
