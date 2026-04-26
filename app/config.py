@@ -96,6 +96,35 @@ EXTENSION_BREAKOUT_MAX_DISTANCE_ATR = 4.0   # SR-breakout cap
 EXTENSION_CONSOLIDATION_MAX_DISTANCE_ATR = 3.0  # range-break cap
 EXTENSION_SUSTAINED_TREND_MAX_DISTANCE_ATR = 5.0  # multi-day clean-trend cap
 
+# ──────────────────────────────────────────────────────────────────────────
+# Watchlist persistence — Layer 2 (streak bonus) + Layer 3 (freight train).
+#
+# Layer 2 turns the per-day watchlist streak (see app/signals/watchlist.py)
+# into a final-score bonus so multi-day rising flow can pull a borderline
+# setup over the regime threshold instead of just being a visual hint.
+#
+#   bonus = base × trend_mult, only applied when mean_flow_5d ≥ floor
+#     base       = min((streak_days - MIN + 1) × STEP, MAX_BONUS)
+#                  → 3d=0.25, 4d=0.5, 5d=0.75, 6d+=1.0 with defaults
+#     trend_mult = rising=1.0 / flat=0.5 / falling=0.0 / n/a=0.5
+#
+# Layer 3 marks "freight train" candidates — multi-day, rising-flow,
+# sector-hot setups that we want to surface even when T/A is borderline.
+# v1 stamps a flag on the row (consumed by the dashboard + saw-couldn't-
+# trade panel) and does not auto-promote rejects into the SIGNAL list.
+# ──────────────────────────────────────────────────────────────────────────
+USE_WATCHLIST_STREAK_BONUS = True
+WATCHLIST_STREAK_MIN_DAYS = 3
+WATCHLIST_STREAK_STEP = 0.25
+WATCHLIST_STREAK_MAX_BONUS = 1.0
+WATCHLIST_STREAK_MEAN_FLOW_FLOOR = 0.4
+
+USE_FREIGHT_TRAIN_FLAG = True
+FREIGHT_TRAIN_MIN_STREAK = 4
+FREIGHT_TRAIN_MIN_MEAN_FLOW = 0.5
+FREIGHT_TRAIN_REQUIRE_RISING_TREND = True
+FREIGHT_TRAIN_SECTOR_HEAT_FLOOR = 5.0  # 0-10 scale from app/features/sector_heat.py
+
 # Multi-day flow persistence
 FLOW_PERSISTENCE_DAYS = 3    # look back this many calendar days
 FLOW_PERSISTENCE_BONUS = 0.5 # max score bonus for persistent flow (conservative)

@@ -114,6 +114,259 @@ def apply_streak_lookup(rows: list[dict], lookup: dict[tuple[str, str], dict]) -
                 row.setdefault(k, v)
 
 
+# ---------------------------------------------------------------------------
+# Layer 2 — streak bonus on final_score
+# ---------------------------------------------------------------------------
+
+
+_TREND_MULT = {
+    "rising": 1.0,
+    "flat": 0.5,
+    "falling": 0.0,
+    "n/a": 0.5,
+}
+
+
+def compute_streak_bonus(
+    streak_days: int | None,
+    flow_trend: str | None,
+    mean_flow_5d: float | None,
+    *,
+    min_days: int,
+    step: float,
+    max_bonus: float,
+    mean_flow_floor: float,
+) -> float:
+    """Return the additive ``final_score`` bonus for a watchlist streak.
+
+    Returns 0.0 when any precondition fails (too short a streak, mean flow
+    below the floor, or unknown trend bucket). All thresholds come from
+    config so the formula stays tunable without code changes.
+    """
+    try:
+        days = int(streak_days or 0)
+    except (TypeError, ValueError):
+        return 0.0
+    if days < int(min_days):
+        return 0.0
+    try:
+        mean_flow = float(mean_flow_5d) if mean_flow_5d is not None else 0.0
+    except (TypeError, ValueError):
+        return 0.0
+    if mean_flow < float(mean_flow_floor):
+        return 0.0
+    base = min((days - int(min_days) + 1) * float(step), float(max_bonus))
+    if base <= 0.0:
+        return 0.0
+    mult = _TREND_MULT.get(str(flow_trend or "n/a").lower(), 0.5)
+    bonus = base * mult
+    return round(max(bonus, 0.0), 4)
+
+
+def apply_watchlist_streak_bonus(rows: list[dict]) -> list[dict]:
+    """Add ``streak_bonus`` to ``final_score`` for each row that earned one.
+
+    Reads the ``watchlist_*`` fields stamped on the row by ``apply_streak_lookup``
+    (or by ``reevaluate_watchlist`` for promoted entries) and writes a
+    ``streak_bonus`` field plus the updated ``final_score``. Rows without
+    streak data are left untouched (``streak_bonus`` defaults to 0).
+    """
+    from app import config as _cfg
+
+    if not getattr(_cfg, "USE_WATCHLIST_STREAK_BONUS", True):
+        for r in rows:
+            r.setdefault("streak_bonus", 0.0)
+        return rows
+
+    min_days = getattr(_cfg, "WATCHLIST_STREAK_MIN_DAYS", 3)
+    step = getattr(_cfg, "WATCHLIST_STREAK_STEP", 0.25)
+    max_bonus = getattr(_cfg, "WATCHLIST_STREAK_MAX_BONUS", 1.0)
+    mean_floor = getattr(_cfg, "WATCHLIST_STREAK_MEAN_FLOW_FLOOR", 0.4)
+
+    for r in rows:
+        bonus = compute_streak_bonus(
+            r.get("watchlist_streak_days"),
+            r.get("watchlist_flow_trend"),
+            r.get("watchlist_mean_flow_score_5d"),
+            min_days=min_days,
+            step=step,
+            max_bonus=max_bonus,
+            mean_flow_floor=mean_floor,
+        )
+        r["streak_bonus"] = bonus
+        if bonus > 0.0 and "final_score" in r:
+            try:
+                r["final_score"] = round(float(r["final_score"]) + bonus, 4)
+            except (TypeError, ValueError):
+                pass
+    return rows
+
+
+# ---------------------------------------------------------------------------
+# Layer 3 — freight-train flag
+# ---------------------------------------------------------------------------
+
+
+def build_sector_heat_lookups(sector_heat_df) -> tuple[dict[tuple[str, str], float], dict[tuple[str, str], set[str]]]:
+    """Slice a sector_heat frame into two (sector, direction) lookups.
+
+    Returns a ``(score_by_sector, top_tickers_by_sector)`` pair so callers
+    can answer two questions cheaply:
+
+    * What's the heat score for sector X on the LONG side?
+    * Is ticker T listed among the top contributors for that sector?
+
+    Direction strings are normalised to upper-case (``LONG`` / ``SHORT``)
+    so the keys line up with the per-row ``direction`` column on
+    rejection / signal rows. Pass an empty / ``None`` frame and you'll
+    get back two empty dicts.
+    """
+    score_by: dict[tuple[str, str], float] = {}
+    tops_by: dict[tuple[str, str], set[str]] = {}
+    if sector_heat_df is None:
+        return score_by, tops_by
+    try:
+        empty = bool(sector_heat_df.empty)
+    except AttributeError:
+        return score_by, tops_by
+    if empty:
+        return score_by, tops_by
+
+    side_map = {"bullish": "LONG", "bearish": "SHORT"}
+    for _, row in sector_heat_df.iterrows():
+        sector = row.get("sector")
+        side = str(row.get("direction", "")).lower()
+        direction = side_map.get(side)
+        if not sector or not direction:
+            continue
+        try:
+            score = float(row.get("sector_heat_score") or 0.0)
+        except (TypeError, ValueError):
+            score = 0.0
+        key = (str(sector), direction)
+        score_by[key] = score
+        tops_raw = row.get("top_tickers") or ""
+        if isinstance(tops_raw, str):
+            tickers = {t.strip().upper() for t in tops_raw.split(",") if t.strip()}
+        else:
+            tickers = set()
+        tops_by[key] = tickers
+    return score_by, tops_by
+
+
+def _resolve_sector_for_ticker(
+    ticker: str,
+    screener_meta: dict | None,
+) -> str | None:
+    """Resolve a ticker's sector using the same precedence as sector_heat."""
+    from app.features.sector_heat import _resolve_sector
+    if not ticker:
+        return None
+    broad = None
+    if screener_meta:
+        meta = screener_meta.get(ticker.upper())
+        if isinstance(meta, dict):
+            broad = meta.get("sector")
+    return _resolve_sector(ticker, broad)
+
+
+def is_freight_train_candidate(
+    row: dict,
+    *,
+    sector_heat_score: dict[tuple[str, str], float],
+    sector_top_tickers: dict[tuple[str, str], set[str]],
+    screener_meta: dict | None,
+    min_streak: int,
+    min_mean_flow: float,
+    require_rising: bool,
+    sector_heat_floor: float,
+) -> tuple[bool, str | None]:
+    """Decide whether a row qualifies as a freight-train setup.
+
+    Returns ``(qualifies, reason_str)``. ``reason_str`` summarises *why*
+    in a concise form for the dashboard tooltip / audit trail when
+    ``qualifies`` is True; ``None`` otherwise.
+    """
+    try:
+        streak = int(row.get("watchlist_streak_days") or 0)
+    except (TypeError, ValueError):
+        streak = 0
+    if streak < int(min_streak):
+        return False, None
+    try:
+        mean_flow = float(row.get("watchlist_mean_flow_score_5d") or 0.0)
+    except (TypeError, ValueError):
+        return False, None
+    if mean_flow < float(min_mean_flow):
+        return False, None
+    trend = str(row.get("watchlist_flow_trend") or "").lower()
+    if require_rising and trend != "rising":
+        return False, None
+
+    ticker = str(row.get("ticker") or "").upper().strip()
+    direction = str(row.get("direction") or "").upper().strip()
+    if not ticker or direction not in {"LONG", "SHORT"}:
+        return False, None
+
+    sector = _resolve_sector_for_ticker(ticker, screener_meta)
+    if not sector:
+        return False, None
+    key = (sector, direction)
+    heat = sector_heat_score.get(key, 0.0)
+    in_tops = ticker in sector_top_tickers.get(key, set())
+    if heat < float(sector_heat_floor) and not in_tops:
+        return False, None
+
+    reason = (
+        f"streak={streak}d trend={trend or 'n/a'} "
+        f"mean_flow={mean_flow:.2f} sector={sector} heat={heat:.1f}"
+    )
+    return True, reason
+
+
+def apply_freight_train_flag(
+    rows: list[dict],
+    *,
+    sector_heat_score: dict[tuple[str, str], float],
+    sector_top_tickers: dict[tuple[str, str], set[str]],
+    screener_meta: dict | None,
+) -> int:
+    """Stamp ``freight_train`` + ``freight_train_reason`` onto qualifying rows.
+
+    Returns the number of rows flagged so callers can log the count for
+    visibility. No row is *removed* — this is a labelling pass only.
+    """
+    from app import config as _cfg
+
+    if not getattr(_cfg, "USE_FREIGHT_TRAIN_FLAG", True):
+        for r in rows:
+            r.setdefault("freight_train", False)
+        return 0
+
+    min_streak = getattr(_cfg, "FREIGHT_TRAIN_MIN_STREAK", 4)
+    min_mean = getattr(_cfg, "FREIGHT_TRAIN_MIN_MEAN_FLOW", 0.5)
+    require_rising = getattr(_cfg, "FREIGHT_TRAIN_REQUIRE_RISING_TREND", True)
+    heat_floor = getattr(_cfg, "FREIGHT_TRAIN_SECTOR_HEAT_FLOOR", 5.0)
+
+    flagged = 0
+    for r in rows:
+        ok, reason = is_freight_train_candidate(
+            r,
+            sector_heat_score=sector_heat_score,
+            sector_top_tickers=sector_top_tickers,
+            screener_meta=screener_meta,
+            min_streak=min_streak,
+            min_mean_flow=min_mean,
+            require_rising=require_rising,
+            sector_heat_floor=heat_floor,
+        )
+        r["freight_train"] = bool(ok)
+        if ok:
+            r["freight_train_reason"] = reason
+            flagged += 1
+    return flagged
+
+
 def _backfill_streak(entry: dict) -> dict:
     """Populate streak bookkeeping on legacy entries that pre-date Layer 1.
 

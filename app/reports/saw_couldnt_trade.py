@@ -181,6 +181,11 @@ PANEL_COLUMNS = [
     "watchlist_max_flow_score",
     "watchlist_mean_flow_score_5d",
     "watchlist_flow_trend",
+    # Layer 3 — freight-train flag. Stamped by the pipeline when a row
+    # meets streak + rising trend + mean flow + sector heat criteria;
+    # the dashboard consumes this directly to highlight the row.
+    "freight_train",
+    "freight_train_reason",
 ]
 
 

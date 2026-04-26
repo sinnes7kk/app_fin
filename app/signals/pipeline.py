@@ -2043,6 +2043,25 @@ def run_flow_to_price_pipeline(
             r["iv_rank"] = sm.get("iv_rank")
             r["sector"] = sm.get("sector")
 
+    # Layers 1+2 — watchlist streak bookkeeping + score bonus. Runs *before*
+    # the regime threshold filter so a multi-day rising-flow setup can clear
+    # the bar on a counter-regime day where it would otherwise be cut. We
+    # also stamp streak fields on `all_rejected` here so the rejection rows
+    # the saw-couldn't-trade panel reads carry the streak context.
+    updated_watchlist = add_candidates(still_watching, all_rejected)
+    save_watchlist(updated_watchlist)
+    from app.signals.watchlist import (
+        apply_freight_train_flag,
+        apply_streak_lookup,
+        apply_watchlist_streak_bonus,
+        build_sector_heat_lookups,
+        build_streak_lookup,
+    )
+    streak_lookup = build_streak_lookup(updated_watchlist)
+    apply_streak_lookup(all_rejected, streak_lookup)
+    apply_streak_lookup(final_results, streak_lookup)
+    apply_watchlist_streak_bonus(final_results)
+
     # Directional threshold boost: counter-regime trades need higher conviction
     long_min = MIN_FINAL_SCORE + (1.0 - regime_score) * REGIME_THRESHOLD_BOOST
     short_min = MIN_FINAL_SCORE + regime_score * REGIME_THRESHOLD_BOOST
@@ -2073,20 +2092,45 @@ def run_flow_to_price_pipeline(
     _run_devils_advocate_agent_shadow(final_results)
     _run_orchestrator_shadow(final_results)
 
+    # Layer 3 — freight-train flag. Compute sector heat here once (the
+    # CSV side output downstream re-uses the same frame) and stamp
+    # `freight_train=True` on rejection rows + final results that meet
+    # streak + trend + mean-flow + sector-hot criteria. v1 only labels;
+    # the dashboard + saw-couldn't-trade panel surface the flag, no
+    # auto-promotion of rejects into the SIGNAL list.
+    sector_heat_df = None
+    try:
+        if not feature_table.empty:
+            from app.features.sector_heat import compute_sector_heat
+            from app.utils.market_calendar import current_trading_day
+            sector_heat_df = compute_sector_heat(
+                feature_table,
+                screener_meta=screener_meta,
+                snapshot_date=current_trading_day().isoformat(),
+            )
+    except Exception as e:
+        print(f"  [freight-train] sector heat skipped: {e}")
+        sector_heat_df = None
+    heat_score_by, heat_tops_by = build_sector_heat_lookups(sector_heat_df)
+    n_freight_signals = apply_freight_train_flag(
+        final_results,
+        sector_heat_score=heat_score_by,
+        sector_top_tickers=heat_tops_by,
+        screener_meta=screener_meta,
+    )
+    n_freight_rejects = apply_freight_train_flag(
+        all_rejected,
+        sector_heat_score=heat_score_by,
+        sector_top_tickers=heat_tops_by,
+        screener_meta=screener_meta,
+    )
+    if n_freight_signals or n_freight_rejects:
+        print(
+            f"  [freight-train] flagged signals={n_freight_signals} rejects={n_freight_rejects}"
+        )
+
     final_results = sorted(final_results, key=lambda x: x["final_score"], reverse=True)
     final_results = apply_directional_balance(final_results)
-
-    # Layer 1 — watchlist streak bookkeeping. Run add_candidates *before*
-    # building the dashboard frames so today's reject is reflected in
-    # streak_days/flow_score_history when we stamp those fields onto
-    # rejection and signal rows. The watchlist-promoted rows already
-    # carry their pre-update streak summary from reevaluate_watchlist.
-    updated_watchlist = add_candidates(still_watching, all_rejected)
-    save_watchlist(updated_watchlist)
-    from app.signals.watchlist import apply_streak_lookup, build_streak_lookup
-    streak_lookup = build_streak_lookup(updated_watchlist)
-    apply_streak_lookup(all_rejected, streak_lookup)
-    apply_streak_lookup(final_results, streak_lookup)
 
     signals_df = results_to_dataframe(final_results)
 
@@ -2116,47 +2160,44 @@ def run_flow_to_price_pipeline(
         except Exception as e:
             print(f"  [grade-backtest] skipped: {e}")
 
-        # Sector-heat aggregator. Read-only side output: one CSV per scan
-        # under data/sector_heat/ plus an append-only history file. v1
-        # is informational only and does not feed back into scoring.
+        # Sector-heat aggregator side output. Reuses the frame already
+        # computed for the freight-train pass above; recomputes here
+        # only if that earlier compute failed or the table was empty.
         try:
-            if not feature_table.empty:
-                from app.features.sector_heat import (
-                    append_sector_heat_history,
-                    compute_sector_heat,
-                )
+            heat_df = sector_heat_df
+            if (heat_df is None or heat_df.empty) and not feature_table.empty:
+                from app.features.sector_heat import compute_sector_heat
                 from app.utils.market_calendar import current_trading_day
-
-                snap_date = current_trading_day().isoformat()
                 heat_df = compute_sector_heat(
                     feature_table,
                     screener_meta=screener_meta,
-                    snapshot_date=snap_date,
+                    snapshot_date=current_trading_day().isoformat(),
                 )
-                if not heat_df.empty:
-                    out_dir = DATA_ROOT / "sector_heat"
-                    out_dir.mkdir(parents=True, exist_ok=True)
-                    heat_path = out_dir / f"sector_heat_{_run_stamp()}.csv"
-                    heat_df.to_csv(heat_path, index=False)
+            if heat_df is not None and not heat_df.empty:
+                from app.features.sector_heat import append_sector_heat_history
+                out_dir = DATA_ROOT / "sector_heat"
+                out_dir.mkdir(parents=True, exist_ok=True)
+                heat_path = out_dir / f"sector_heat_{_run_stamp()}.csv"
+                heat_df.to_csv(heat_path, index=False)
 
-                    history_path = DATA_ROOT / "sector_heat_history.csv"
-                    append_sector_heat_history(heat_df, history_path)
+                history_path = DATA_ROOT / "sector_heat_history.csv"
+                append_sector_heat_history(heat_df, history_path)
 
-                    top_bull = (
-                        heat_df[heat_df["direction"] == "bullish"]
-                        .head(3)[["sector", "sector_heat_score", "n_above_thresh", "n_tickers"]]
-                        .to_dict(orient="records")
-                    )
-                    top_bear = (
-                        heat_df[heat_df["direction"] == "bearish"]
-                        .head(3)[["sector", "sector_heat_score", "n_above_thresh", "n_tickers"]]
-                        .to_dict(orient="records")
-                    )
-                    print(f"  [sector-heat] saved {heat_path.name} ({len(heat_df)} rows)")
-                    if top_bull:
-                        print(f"  [sector-heat] top bullish: {top_bull}")
-                    if top_bear:
-                        print(f"  [sector-heat] top bearish: {top_bear}")
+                top_bull = (
+                    heat_df[heat_df["direction"] == "bullish"]
+                    .head(3)[["sector", "sector_heat_score", "n_above_thresh", "n_tickers"]]
+                    .to_dict(orient="records")
+                )
+                top_bear = (
+                    heat_df[heat_df["direction"] == "bearish"]
+                    .head(3)[["sector", "sector_heat_score", "n_above_thresh", "n_tickers"]]
+                    .to_dict(orient="records")
+                )
+                print(f"  [sector-heat] saved {heat_path.name} ({len(heat_df)} rows)")
+                if top_bull:
+                    print(f"  [sector-heat] top bullish: {top_bull}")
+                if top_bear:
+                    print(f"  [sector-heat] top bearish: {top_bear}")
         except Exception as e:
             print(f"  [sector-heat] skipped: {e}")
 
@@ -2242,6 +2283,9 @@ REJECTED_COLUMNS = [
     "watchlist_flow_trend",
     "watchlist_first_seen",
     "watchlist_last_seen",
+    "streak_bonus",
+    "freight_train",
+    "freight_train_reason",
 ]
 
 SIGNAL_COLUMNS = [
@@ -2286,6 +2330,9 @@ SIGNAL_COLUMNS = [
     "watchlist_flow_trend",
     "watchlist_first_seen",
     "watchlist_last_seen",
+    "streak_bonus",
+    "freight_train",
+    "freight_train_reason",
 ]
 
 
