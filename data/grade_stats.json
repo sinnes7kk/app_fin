@@ -1,17 +1,17 @@
 {
   "window_days": 5,
   "history_days": 90,
-  "evaluations": 60,
-  "computed_at": "2026-04-30T22:19:20.763520Z",
-  "as_of": "2026-04-30",
+  "evaluations": 75,
+  "computed_at": "2026-05-01T15:10:51.920333Z",
+  "as_of": "2026-05-01",
   "stats": {
     "A": {
-      "count": 60,
-      "hit_rate": 0.667,
-      "avg_r": 0.39,
+      "count": 75,
+      "hit_rate": 0.627,
+      "avg_r": -0.2,
       "best_r": 14.19,
       "worst_r": -35.09,
-      "avg_excess_return_pct": 0.77
+      "avg_excess_return_pct": -0.4
     },
     "B": {
       "count": 0,
