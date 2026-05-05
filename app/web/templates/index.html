@@ -1969,6 +1969,7 @@
         <div class="backtest-state-row">
           <span id="backtest-state-badge" class="backtest-badge backtest-badge-idle">Idle</span>
           <span id="backtest-state-text" class="muted">Ready to run.</span>
+          <span id="backtest-auth-hint" class="backtest-auth-hint muted" title="Which credential the dispatcher is using"></span>
         </div>
 
         <div class="backtest-mode-row">
@@ -4505,6 +4506,7 @@
       var viewReportBtn = document.getElementById("backtest-view-report-btn");
       var viewRecalBtn = document.getElementById("backtest-view-recal-btn");
       var actionsLink = document.getElementById("backtest-actions-link");
+      var authHint = document.getElementById("backtest-auth-hint");
       var modal = document.getElementById("backtest-report-modal");
       var modalTitle = document.getElementById("backtest-report-modal-title");
       var modalBody = document.getElementById("backtest-report-modal-body");
@@ -4628,11 +4630,22 @@
         historyWrap.innerHTML = html;
       }
 
+      function paintAuthHint(method) {
+        if (!method || method === "none") {
+          authHint.textContent = "no auth — run `gh auth login` or set BACKTEST_GITHUB_TOKEN";
+          authHint.classList.add("backtest-auth-hint-warn");
+        } else {
+          authHint.textContent = "auth: " + method;
+          authHint.classList.remove("backtest-auth-hint-warn");
+        }
+      }
+
       function fetchStatus() {
         return fetch(API_BASE + "/api/backtest-status")
           .then(function (r) { return r.json(); })
           .then(function (j) {
             if (j && j.status) paintStatus(j.status);
+            if (j) paintAuthHint(j.auth_method);
             return j;
           })
           .catch(function (e) {

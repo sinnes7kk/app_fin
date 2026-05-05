@@ -36,11 +36,20 @@ from app.web import backtest_runner as br
 def _setenv(token: str = "fake-token", repo: str = "owner/repo"):
     os.environ["BACKTEST_GITHUB_TOKEN"] = token
     os.environ["BACKTEST_GITHUB_REPO"] = repo
+    # Force PAT path in tests so we don't accidentally invoke a real `gh`
+    # binary on the dev's machine. Tests that exercise the gh path set
+    # BACKTEST_AUTH_METHOD=gh and patch _probe_gh_cli.
+    os.environ["BACKTEST_AUTH_METHOD"] = "token"
+    br._reset_auth_cache_for_tests()
 
 
 def _clearenv():
-    for k in ("BACKTEST_GITHUB_TOKEN", "GITHUB_TOKEN", "BACKTEST_GITHUB_REPO"):
+    for k in (
+        "BACKTEST_GITHUB_TOKEN", "GITHUB_TOKEN", "BACKTEST_GITHUB_REPO",
+        "BACKTEST_AUTH_METHOD",
+    ):
         os.environ.pop(k, None)
+    br._reset_auth_cache_for_tests()
 
 
 def _wait_for(predicate, timeout: float = 3.0) -> bool:
@@ -115,6 +124,131 @@ def test_get_token_resolution_order():
     print("  PASS: test_get_token_resolution_order")
 
 
+# ---- auth method resolution ------------------------------------------
+
+
+def test_auth_method_prefers_gh_when_available():
+    _clearenv()
+    with patch.object(br, "_probe_gh_cli", return_value="/fake/gh"):
+        m = br._resolve_auth_method()
+    assert m == "gh"
+    print("  PASS: test_auth_method_prefers_gh_when_available")
+
+
+def test_auth_method_falls_back_to_token_when_gh_unauthed():
+    _clearenv()
+    os.environ["GITHUB_TOKEN"] = "tok"
+    with patch.object(br, "_probe_gh_cli", return_value=None):
+        m = br._resolve_auth_method()
+    assert m == "token"
+    _clearenv()
+    print("  PASS: test_auth_method_falls_back_to_token_when_gh_unauthed")
+
+
+def test_auth_method_returns_none_when_neither_available():
+    _clearenv()
+    with patch.object(br, "_probe_gh_cli", return_value=None):
+        m = br._resolve_auth_method()
+    assert m is None
+    print("  PASS: test_auth_method_returns_none_when_neither_available")
+
+
+def test_auth_method_env_override_forces_token():
+    _clearenv()
+    os.environ["BACKTEST_AUTH_METHOD"] = "token"
+    os.environ["GITHUB_TOKEN"] = "tok"
+    with patch.object(br, "_probe_gh_cli", return_value="/fake/gh") as p:
+        m = br._resolve_auth_method()
+        # Probe should NOT be invoked since the override forces a method.
+        p.assert_not_called()
+    assert m == "token"
+    _clearenv()
+    print("  PASS: test_auth_method_env_override_forces_token")
+
+
+def test_auth_method_label_user_facing():
+    _clearenv()
+    with patch.object(br, "_probe_gh_cli", return_value="/fake/gh"):
+        assert br.auth_method_label() == "gh CLI"
+    _clearenv()
+    os.environ["GITHUB_TOKEN"] = "x"
+    with patch.object(br, "_probe_gh_cli", return_value=None):
+        assert br.auth_method_label() == "PAT (env var)"
+    _clearenv()
+    with patch.object(br, "_probe_gh_cli", return_value=None):
+        assert br.auth_method_label() == "none"
+    print("  PASS: test_auth_method_label_user_facing")
+
+
+# ---- gh CLI path -----------------------------------------------------
+
+
+def test_dispatch_via_gh_cli_calls_subprocess_with_correct_args():
+    br.reset_status_for_tests()
+    _clearenv()
+    os.environ["BACKTEST_GITHUB_REPO"] = "owner/repo"
+    os.environ["BACKTEST_AUTH_METHOD"] = "gh"
+
+    captured: dict = {}
+
+    def fake_run(args, capture_output=False, text=False, timeout=None, **kw):
+        captured["args"] = args
+        return type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+
+    with patch.object(br, "_probe_gh_cli", return_value="/fake/gh"), \
+         patch.object(br.subprocess, "run", side_effect=fake_run):
+        r = br.start_backtest("replay")
+
+    assert r["ok"] is True, r
+    args = captured["args"]
+    # gh api --method POST /repos/owner/repo/actions/workflows/backtest.yml/dispatches ...
+    assert args[0] == "/fake/gh"
+    assert args[1] == "api"
+    assert "--method" in args and "POST" in args
+    assert any("/dispatches" in a for a in args)
+    # Inputs preserved as raw JSON
+    assert any("ref=" in a and "main" in a for a in args)
+    assert any('inputs={"mode": "replay"}' in a for a in args)
+    _clearenv()
+    print("  PASS: test_dispatch_via_gh_cli_calls_subprocess_with_correct_args")
+
+
+def test_gh_cli_failure_surfaces_clean_error():
+    br.reset_status_for_tests()
+    _clearenv()
+    os.environ["BACKTEST_GITHUB_REPO"] = "owner/repo"
+    os.environ["BACKTEST_AUTH_METHOD"] = "gh"
+
+    def fake_run(args, capture_output=False, text=False, timeout=None, **kw):
+        return type("R", (), {
+            "returncode": 1,
+            "stdout": "",
+            "stderr": '{"message":"Bad credentials"}',
+        })()
+
+    with patch.object(br, "_probe_gh_cli", return_value="/fake/gh"), \
+         patch.object(br.subprocess, "run", side_effect=fake_run):
+        r = br.start_backtest("replay")
+
+    assert r["ok"] is False
+    assert "rc=1" in (r["error"] or "")
+    _clearenv()
+    print("  PASS: test_gh_cli_failure_surfaces_clean_error")
+
+
+def test_no_auth_returns_helpful_error():
+    br.reset_status_for_tests()
+    _clearenv()
+    os.environ["BACKTEST_GITHUB_REPO"] = "owner/repo"
+    with patch.object(br, "_probe_gh_cli", return_value=None):
+        r = br.start_backtest("replay")
+    assert r["ok"] is False
+    assert "no GitHub auth" in (r["error"] or "")
+    assert "gh auth login" in (r["error"] or "")
+    _clearenv()
+    print("  PASS: test_no_auth_returns_helpful_error")
+
+
 # ---- status-file shape -----------------------------------------------
 
 
@@ -158,14 +292,15 @@ def test_start_backtest_rejects_invalid_mode():
     print("  PASS: test_start_backtest_rejects_invalid_mode")
 
 
-def test_start_backtest_fails_without_token():
+def test_start_backtest_fails_without_any_auth():
     br.reset_status_for_tests()
     _clearenv()
     os.environ["BACKTEST_GITHUB_REPO"] = "owner/repo"
-    r = br.start_backtest("both")
-    assert r["ok"] is False and "no GitHub token" in r["error"]
+    with patch.object(br, "_probe_gh_cli", return_value=None):
+        r = br.start_backtest("both")
+    assert r["ok"] is False and "no GitHub auth" in r["error"]
     _clearenv()
-    print("  PASS: test_start_backtest_fails_without_token")
+    print("  PASS: test_start_backtest_fails_without_any_auth")
 
 
 def test_start_backtest_fails_when_repo_unresolvable():
@@ -388,11 +523,19 @@ def main():
         test_repo_override_env_var_wins,
         test_repo_resolution_returns_none_on_unknown_remote,
         test_get_token_resolution_order,
+        test_auth_method_prefers_gh_when_available,
+        test_auth_method_falls_back_to_token_when_gh_unauthed,
+        test_auth_method_returns_none_when_neither_available,
+        test_auth_method_env_override_forces_token,
+        test_auth_method_label_user_facing,
+        test_dispatch_via_gh_cli_calls_subprocess_with_correct_args,
+        test_gh_cli_failure_surfaces_clean_error,
+        test_no_auth_returns_helpful_error,
         test_read_status_default_shape_when_missing,
         test_read_status_normalizes_partial_status_file,
         test_read_status_recovers_from_corrupt_file,
         test_start_backtest_rejects_invalid_mode,
-        test_start_backtest_fails_without_token,
+        test_start_backtest_fails_without_any_auth,
         test_start_backtest_fails_when_repo_unresolvable,
         test_start_backtest_dispatches_and_writes_running_status,
         test_start_backtest_rejects_second_call_while_running,

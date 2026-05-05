@@ -3783,7 +3783,11 @@ def api_run_backtest():
 @app.route("/api/backtest-status")
 def api_backtest_status():
     from app.web import backtest_runner as _br
-    return jsonify({"ok": True, "status": _br.read_status()})
+    return jsonify({
+        "ok": True,
+        "status": _br.read_status(),
+        "auth_method": _br.auth_method_label(),
+    })
 
 
 @app.route("/api/backtest-report")

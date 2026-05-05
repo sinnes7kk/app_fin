@@ -3871,6 +3871,15 @@ body.ref-modal-open {
   margin-top: 0.55rem;
   font-size: 0.78rem;
 }
+.backtest-auth-hint {
+  margin-left: auto;
+  font-size: 0.75rem;
+  letter-spacing: 0.02em;
+  font-family: var(--font-mono, monospace);
+}
+.backtest-auth-hint-warn {
+  color: #d29922;
+}
 .backtest-error {
   margin-top: 0.85rem;
   padding: 0.55rem 0.75rem;

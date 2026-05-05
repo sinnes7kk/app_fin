@@ -25,13 +25,20 @@ Lifecycle of a click
    markdown / panel CSVs into ``data/`` within ~5 min, after which the
    "View latest report" button picks up the fresh file.
 
-Auth
-----
-The dispatcher needs a token with ``actions:write`` on the repo. Set
-one of these env vars (resolved in order):
+Auth (in resolution order — the runner takes the first that works)
+-------------------------------------------------------------------
+1. **gh CLI** — if ``gh`` is installed and ``gh auth status`` reports
+   a logged-in user, the runner shells out to ``gh api`` for both the
+   dispatch and the polling. This is the zero-config path: nothing to
+   set in the env, no PAT to manage. Just run ``gh auth login`` once.
+2. **Personal access token** in env, in this order:
+   ``BACKTEST_GITHUB_TOKEN`` → ``GITHUB_TOKEN``. Token needs the
+   ``actions:write`` fine-grained scope (or classic ``workflow``+``repo``).
 
-    BACKTEST_GITHUB_TOKEN          (preferred, dedicated)
-    GITHUB_TOKEN                   (also accepted)
+The workflow's own ``permissions:`` block (declared in backtest.yml)
+governs what the workflow does *once it starts running* (e.g. commit
+back to main). It cannot grant permission to whatever triggers it
+from outside, which is why this auth layer is needed.
 
 Status file shape (unchanged from the local-only version, with two
 new GitHub-specific fields)::
@@ -85,7 +92,18 @@ STATE_FAILED = "failed"
 _LOCK = threading.Lock()
 
 
-# ---- env / repo resolution -------------------------------------------
+# ---- auth method resolution ------------------------------------------
+#
+# Two paths in priority order:
+#   - "gh"    — shell out to the GitHub CLI; uses its keyring auth
+#   - "token" — direct REST via urllib using a PAT from env
+#
+# Probe results are cached for the lifetime of the process — `gh` install
+# state and PAT presence don't change between requests.
+
+
+_AUTH_METHOD: str | None = None  # "gh" | "token" | None
+_GH_BIN: str | None = None       # absolute path to gh, when found
 
 
 def _get_token() -> str | None:
@@ -94,6 +112,63 @@ def _get_token() -> str | None:
         or os.environ.get("GITHUB_TOKEN")
         or None
     )
+
+
+def _probe_gh_cli() -> str | None:
+    """Return the gh binary path if it's installed AND authenticated."""
+    import shutil
+
+    binp = shutil.which("gh")
+    if not binp:
+        return None
+    try:
+        out = subprocess.run(
+            [binp, "auth", "status"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except Exception:
+        return None
+    # `gh auth status` exits 0 when at least one host is logged in. We
+    # additionally check that the active token is *currently* valid —
+    # gh prints "The token in keyring is invalid." with a non-zero exit
+    # in that case (see the user's stale-keyring scenario).
+    if out.returncode != 0:
+        return None
+    return binp
+
+
+def _resolve_auth_method() -> str | None:
+    """Pick the auth method to use, with caching. Returns "gh" | "token" | None."""
+    global _AUTH_METHOD, _GH_BIN
+    if _AUTH_METHOD is not None:
+        return _AUTH_METHOD
+
+    # Allow the env to force a specific path; useful for tests and for
+    # users who explicitly want to bypass gh and use a PAT.
+    forced = (os.environ.get("BACKTEST_AUTH_METHOD") or "").strip().lower()
+    if forced in ("gh", "token"):
+        _AUTH_METHOD = forced
+        if forced == "gh":
+            _GH_BIN = _probe_gh_cli()
+        return _AUTH_METHOD
+
+    _GH_BIN = _probe_gh_cli()
+    if _GH_BIN:
+        _AUTH_METHOD = "gh"
+        return _AUTH_METHOD
+    if _get_token():
+        _AUTH_METHOD = "token"
+        return _AUTH_METHOD
+    return None
+
+
+def _reset_auth_cache_for_tests() -> None:
+    """Test-only: clear the cached auth probe."""
+    global _AUTH_METHOD, _GH_BIN
+    _AUTH_METHOD = None
+    _GH_BIN = None
 
 
 _REPO_RE = re.compile(
@@ -207,6 +282,14 @@ class GitHubError(RuntimeError):
     pass
 
 
+_NO_AUTH_MSG = (
+    "no GitHub auth available. Either run `gh auth login` (preferred — "
+    "zero-config; the runner uses its keyring) OR set "
+    "BACKTEST_GITHUB_TOKEN / GITHUB_TOKEN to a PAT with the "
+    "'actions:write' fine-grained scope (or classic 'workflow'+'repo')."
+)
+
+
 def _gh_request(
     method: str,
     path: str,
@@ -214,18 +297,72 @@ def _gh_request(
     json_body: dict | None = None,
     timeout: float = 15.0,
 ) -> tuple[int, dict | list | None]:
-    """Tiny urllib-based GitHub REST call. Returns (status_code, body).
+    """Make a GitHub REST call via the active auth method.
 
-    We deliberately avoid a hard dependency on ``requests`` here so the
-    web layer keeps the same dep footprint as the rest of the repo.
+    Routes through the gh CLI when authenticated (no PAT needed),
+    otherwise falls back to direct urllib + Bearer token. Returns
+    (status_code, body).
     """
+    method_choice = _resolve_auth_method()
+    if method_choice == "gh":
+        return _gh_request_via_cli(method, path, json_body=json_body, timeout=timeout)
+    if method_choice == "token":
+        return _gh_request_via_token(method, path, json_body=json_body, timeout=timeout)
+    raise GitHubError(_NO_AUTH_MSG)
+
+
+def _gh_request_via_cli(
+    method: str,
+    path: str,
+    *,
+    json_body: dict | None = None,
+    timeout: float = 15.0,
+) -> tuple[int, dict | list | None]:
+    """Shell out to ``gh api``. The gh CLI handles auth via its keyring."""
+    if not _GH_BIN:
+        raise GitHubError("gh CLI not available")
+    args = [_GH_BIN, "api", "--method", method, path,
+            "-H", "Accept: application/vnd.github+json",
+            "-H", "X-GitHub-Api-Version: 2022-11-28"]
+    if json_body is not None:
+        for k, v in (json_body.items() if isinstance(json_body, dict) else []):
+            # gh api uses -f for string fields and -F for raw fields.
+            # We always want raw JSON to preserve nested objects (e.g.
+            # `inputs={"mode": "both"}`), so we serialize each top-level
+            # key as a JSON value through the --raw-field convention.
+            if isinstance(v, (dict, list)):
+                args += ["--raw-field", f"{k}={json.dumps(v)}"]
+            else:
+                args += ["-f", f"{k}={v}"]
+    try:
+        out = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired as te:
+        raise GitHubError(f"gh api {method} {path} timed out after {timeout}s") from te
+    if out.returncode != 0:
+        # gh prints API errors to stderr in JSON-ish form. Surface tail.
+        msg = (out.stderr or out.stdout or "").strip().splitlines()[-1:] or [""]
+        raise GitHubError(f"gh api {method} {path} → rc={out.returncode}: {msg[0]}")
+    raw = (out.stdout or "").strip()
+    body = None
+    if raw:
+        try:
+            body = json.loads(raw)
+        except Exception:
+            body = None
+    return 200, body
+
+
+def _gh_request_via_token(
+    method: str,
+    path: str,
+    *,
+    json_body: dict | None = None,
+    timeout: float = 15.0,
+) -> tuple[int, dict | list | None]:
+    """urllib-based REST call using a PAT from the env."""
     token = _get_token()
     if not token:
-        raise GitHubError(
-            "no GitHub token in env. Set BACKTEST_GITHUB_TOKEN (preferred) "
-            "or GITHUB_TOKEN. The token needs the 'actions:write' fine-grained "
-            "scope (or classic 'workflow' + 'repo')."
-        )
+        raise GitHubError(_NO_AUTH_MSG)
 
     url = GITHUB_API_BASE + path
     headers = {
@@ -247,7 +384,6 @@ def _gh_request(
             body = json.loads(raw) if raw else None
             return status, body
     except urllib.error.HTTPError as he:
-        # 422 is "workflow not found / ref not found" — surface it cleanly.
         try:
             body = json.loads(he.read().decode("utf-8"))
         except Exception:
@@ -518,6 +654,16 @@ def start_backtest(mode: str) -> dict[str, Any]:
             _last_polled_at=None,
         )
         return {"ok": True, "error": None, "status": new_status}
+
+
+def auth_method_label() -> str:
+    """Human-friendly label for the resolved auth path (for UI hints)."""
+    m = _resolve_auth_method()
+    if m == "gh":
+        return "gh CLI"
+    if m == "token":
+        return "PAT (env var)"
+    return "none"
 
 
 def reset_status_for_tests() -> None:
