@@ -1,17 +1,18 @@
 {
   "window_days": 5,
   "history_days": 90,
-  "evaluations": 90,
-  "computed_at": "2026-05-04T23:19:03.541653Z",
-  "as_of": "2026-05-04",
+  "evaluations": 105,
+  "computed_at": "2026-05-05T16:07:40.240890Z",
+  "as_of": "2026-05-05",
   "stats": {
     "A": {
-      "count": 90,
-      "hit_rate": 0.567,
-      "avg_r": -0.29,
+      "count": 105,
+      "hit_rate": 0.571,
+      "avg_r": -0.59,
       "best_r": 14.19,
       "worst_r": -35.09,
-      "avg_excess_return_pct": -0.58
+      "avg_excess_return_pct": -1.19,
+      "metric_source": "legacy"
     },
     "B": {
       "count": 0,
@@ -19,7 +20,8 @@
       "avg_r": null,
       "best_r": null,
       "worst_r": null,
-      "avg_excess_return_pct": null
+      "avg_excess_return_pct": null,
+      "metric_source": "n/a"
     },
     "C": {
       "count": 0,
@@ -27,7 +29,8 @@
       "avg_r": null,
       "best_r": null,
       "worst_r": null,
-      "avg_excess_return_pct": null
+      "avg_excess_return_pct": null,
+      "metric_source": "n/a"
     }
   },
   "assumed_stop_pct": 0.02,
