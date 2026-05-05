@@ -3758,6 +3758,65 @@ def _git_auto_pull() -> None:
             _log.warning("auto-pull error: %s", exc)
 
 
+# ----------------------------------------------------------------------
+# Backtest runner routes (Tier 2 — replay + recalibration triggered from UI)
+#
+# - POST /api/run-backtest?mode=replay|recal|both
+# - GET  /api/backtest-status
+# - GET  /api/backtest-report?which=replay|recal  (defaults to "replay")
+#
+# The runner spawns the existing CLI scripts as a subprocess in a
+# background thread and writes progress to data/backtest_status.json.
+# See app/web/backtest_runner.py for the contract details.
+# ----------------------------------------------------------------------
+
+
+@app.route("/api/run-backtest", methods=["POST"])
+def api_run_backtest():
+    from app.web import backtest_runner as _br
+
+    mode = (request.args.get("mode") or request.form.get("mode") or "both").strip().lower()
+    result = _br.start_backtest(mode)
+    return jsonify(result), (200 if result.get("ok") else 409)
+
+
+@app.route("/api/backtest-status")
+def api_backtest_status():
+    from app.web import backtest_runner as _br
+    return jsonify({"ok": True, "status": _br.read_status()})
+
+
+@app.route("/api/backtest-report")
+def api_backtest_report():
+    from app.web import backtest_runner as _br
+
+    which = (request.args.get("which") or "replay").strip().lower()
+    if which == "recal":
+        path = _br.latest_recalibration_report()
+    else:
+        path = _br.latest_report_path()
+
+    if not path or not path.exists():
+        return jsonify({
+            "ok": False,
+            "error": f"no {which} report found yet",
+        }), 404
+
+    try:
+        markdown = path.read_text(errors="replace")
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"could not read report: {e!r}"}), 500
+
+    return jsonify({
+        "ok": True,
+        "which": which,
+        "path": str(path.relative_to(_br.ROOT)),
+        "markdown": markdown,
+        "modified_at": datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
+            .replace(microsecond=0).isoformat(),
+    })
+
+
 def main() -> None:
     port = int(os.environ.get("PORT", "5050"))
 

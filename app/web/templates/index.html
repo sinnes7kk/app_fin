@@ -69,6 +69,9 @@
         <button class="nav-item" data-tab="performance">
           <span class="nav-icon">&#9670;</span> Performance
         </button>
+        <button class="nav-item" data-tab="backtest">
+          <span class="nav-icon">&#9881;</span> Backtest
+        </button>
         <button class="nav-item" data-tab="agent-portfolio">
           <span class="nav-icon">&#9881;</span> Agent Shadow
         </button>
@@ -1947,6 +1950,84 @@
       {% endif %}
 
       {% endif %}
+    </section>
+
+    <section id="panel-backtest" class="panel" role="tabpanel">
+      <h1 class="panel-title">Backtest</h1>
+      <p class="muted">
+        Replays every row of <code>data/grade_history.csv</code> bar-by-bar through
+        the production exit logic (T2, ATR/EMA20/hybrid trail, T1 partial, time stop)
+        to produce realistic <strong>realized R</strong> instead of the inflated
+        legacy 5-day close-to-close. Optionally chains into a walk-forward
+        recalibration of conviction-score weights — applied to production only when
+        the OOS Spearman acceptance gate passes.
+      </p>
+
+      <div class="backtest-control-card">
+        <div class="backtest-state-row">
+          <span id="backtest-state-badge" class="backtest-badge backtest-badge-idle">Idle</span>
+          <span id="backtest-state-text" class="muted">Ready to run.</span>
+        </div>
+
+        <div class="backtest-mode-row">
+          <span class="backtest-label">Mode</span>
+          <label class="backtest-radio">
+            <input type="radio" name="backtest-mode" value="replay">
+            Replay only
+            <small class="muted">~2&ndash;5 min, refreshes <code>diagnostic_replay_*.md</code> + per-bucket numbers.</small>
+          </label>
+          <label class="backtest-radio">
+            <input type="radio" name="backtest-mode" value="both" checked>
+            Replay + recalibrate
+            <small class="muted">Adds ~30 sec; refits conviction weights, applies them only if the OOS gate passes.</small>
+          </label>
+          <label class="backtest-radio">
+            <input type="radio" name="backtest-mode" value="recal">
+            Recalibrate only
+            <small class="muted">Skips replay; useful when <code>grade_history_with_replay.csv</code> is fresh.</small>
+          </label>
+        </div>
+
+        <div class="backtest-action-row">
+          <button id="backtest-run-btn" class="btn-accent">Run backtest</button>
+          <button id="backtest-view-report-btn" class="btn-ghost" disabled>View latest report</button>
+          <button id="backtest-view-recal-btn" class="btn-ghost" disabled>View latest recalibration</button>
+        </div>
+
+        <div id="backtest-progress" class="backtest-progress" style="display:none;">
+          <div class="backtest-progress-row">
+            <span class="muted">Step:</span>
+            <strong id="backtest-step">&mdash;</strong>
+            <span class="muted">Rows:</span>
+            <strong id="backtest-rows">&mdash;</strong>
+            <span class="muted">Elapsed:</span>
+            <strong id="backtest-elapsed">&mdash;</strong>
+          </div>
+          <div class="backtest-progress-bar-wrap">
+            <div id="backtest-progress-bar" class="backtest-progress-bar"></div>
+          </div>
+        </div>
+
+        <div id="backtest-error" class="backtest-error" style="display:none;"></div>
+      </div>
+
+      <h3>Last run</h3>
+      <div id="backtest-last-summary" class="backtest-last-summary muted">No runs yet.</div>
+
+      <h3>Run history</h3>
+      <div id="backtest-history-wrap">
+        <p class="muted">No history yet.</p>
+      </div>
+
+      <div id="backtest-report-modal" class="backtest-report-modal" style="display:none;" role="dialog" aria-modal="true">
+        <div class="backtest-report-modal-inner">
+          <div class="backtest-report-modal-head">
+            <h3 id="backtest-report-modal-title">Report</h3>
+            <button class="btn-ghost" id="backtest-report-modal-close">Close</button>
+          </div>
+          <div id="backtest-report-modal-body" class="backtest-report-body"></div>
+        </div>
+      </div>
     </section>
 
     <section id="panel-search" class="panel" role="tabpanel">
@@ -4401,6 +4482,262 @@
       document.addEventListener('keydown', function(e){
         if (e.key === 'Escape' && modal.getAttribute('aria-hidden') === 'false') close();
       });
+    })();
+
+    /* ── Backtest panel (Tier 2 — replay + recalibration trigger) ── */
+    (function () {
+      var runBtn = document.getElementById("backtest-run-btn");
+      if (!runBtn) return;
+      var stateBadge = document.getElementById("backtest-state-badge");
+      var stateText = document.getElementById("backtest-state-text");
+      var progress = document.getElementById("backtest-progress");
+      var progressBar = document.getElementById("backtest-progress-bar");
+      var stepEl = document.getElementById("backtest-step");
+      var rowsEl = document.getElementById("backtest-rows");
+      var elapsedEl = document.getElementById("backtest-elapsed");
+      var errorEl = document.getElementById("backtest-error");
+      var lastSummary = document.getElementById("backtest-last-summary");
+      var historyWrap = document.getElementById("backtest-history-wrap");
+      var viewReportBtn = document.getElementById("backtest-view-report-btn");
+      var viewRecalBtn = document.getElementById("backtest-view-recal-btn");
+      var modal = document.getElementById("backtest-report-modal");
+      var modalTitle = document.getElementById("backtest-report-modal-title");
+      var modalBody = document.getElementById("backtest-report-modal-body");
+      var modalClose = document.getElementById("backtest-report-modal-close");
+
+      var pollTimer = null;
+      var startedAtTs = null;
+
+      var isLocal = location.hostname === "localhost" || location.hostname === "127.0.0.1";
+      var API_BASE = isLocal ? "" : "http://127.0.0.1:5050";
+
+      function escHtml(s) {
+        if (s == null) return "";
+        return String(s)
+          .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+      }
+
+      function fmtDuration(sec) {
+        if (sec == null) return "—";
+        sec = Math.max(0, Math.round(Number(sec)));
+        if (sec < 60) return sec + "s";
+        var m = Math.floor(sec / 60), s = sec % 60;
+        return m + "m " + (s < 10 ? "0" : "") + s + "s";
+      }
+
+      function fmtTs(iso) {
+        if (!iso) return "—";
+        try {
+          return new Date(iso).toLocaleString();
+        } catch (e) { return iso; }
+      }
+
+      function setBadge(state) {
+        var s = (state || "idle").toLowerCase();
+        var labels = {idle: "Idle", running: "Running", completed: "Completed", failed: "Failed"};
+        stateBadge.textContent = labels[s] || s;
+        stateBadge.className = "backtest-badge backtest-badge-" + s;
+      }
+
+      function paintStatus(st) {
+        if (!st) return;
+        setBadge(st.state);
+        if (st.state === "running") {
+          startedAtTs = st.started_at ? Date.parse(st.started_at) : Date.now();
+          progress.style.display = "";
+          stepEl.textContent = st.current_step || "—";
+          if (st.rows_total) {
+            rowsEl.textContent = (st.rows_done || 0) + " / " + st.rows_total;
+            var pct = Math.max(0, Math.min(100, Math.round(100 * (st.rows_done || 0) / st.rows_total)));
+            progressBar.style.width = pct + "%";
+          } else {
+            rowsEl.textContent = "—";
+            progressBar.style.width = "0%";
+          }
+          var elapsed = startedAtTs ? Math.round((Date.now() - startedAtTs) / 1000) : 0;
+          elapsedEl.textContent = fmtDuration(elapsed);
+          stateText.textContent = "Running " + (st.mode ? "(" + st.mode + ") " : "") +
+            "since " + fmtTs(st.started_at);
+          runBtn.disabled = true;
+          errorEl.style.display = "none";
+          errorEl.textContent = "";
+        } else {
+          runBtn.disabled = false;
+          progress.style.display = "none";
+          if (st.state === "completed") {
+            stateText.textContent = "Completed " + fmtTs(st.completed_at) +
+              " — duration " + fmtDuration(st.duration_sec);
+            errorEl.style.display = "none";
+          } else if (st.state === "failed") {
+            stateText.textContent = "Failed " + fmtTs(st.completed_at) +
+              " — duration " + fmtDuration(st.duration_sec);
+            errorEl.textContent = st.error || "(no error message)";
+            errorEl.style.display = "";
+          } else {
+            stateText.textContent = "Ready to run.";
+            errorEl.style.display = "none";
+          }
+        }
+        renderLastSummary(st);
+        renderHistory(st);
+        viewReportBtn.disabled = !(st.report_path);
+        // recal report button just checks for any historic recalibration file
+        viewRecalBtn.disabled = false;
+      }
+
+      function renderLastSummary(st) {
+        if (!st || (!st.headline && !st.completed_at && !st.error)) {
+          lastSummary.innerHTML = '<span class="muted">No runs yet.</span>';
+          return;
+        }
+        var parts = [];
+        parts.push('<strong>' + escHtml(st.mode || "?") + '</strong>');
+        parts.push('· ' + escHtml(fmtTs(st.completed_at || st.started_at)));
+        if (st.duration_sec != null) parts.push('· ' + fmtDuration(st.duration_sec));
+        if (st.headline) parts.push('· <span class="backtest-headline">Grade A row → ' + escHtml(st.headline) + '</span>');
+        if (st.error) parts.push('· <span class="negative">' + escHtml(st.error.split('\n')[0]) + '</span>');
+        lastSummary.innerHTML = parts.join(' ');
+      }
+
+      function renderHistory(st) {
+        var hist = (st && st.history) || [];
+        if (!hist.length) {
+          historyWrap.innerHTML = '<p class="muted">No history yet.</p>';
+          return;
+        }
+        var html = '<table class="data compact"><thead><tr>' +
+          '<th>Started</th><th>Mode</th><th>State</th><th>Duration</th><th>Headline</th>' +
+          '</tr></thead><tbody>';
+        hist.forEach(function (h) {
+          var stateCls = (h.state || "").toLowerCase();
+          html += '<tr>' +
+            '<td>' + escHtml(fmtTs(h.started_at)) + '</td>' +
+            '<td>' + escHtml(h.mode || "—") + '</td>' +
+            '<td><span class="backtest-badge backtest-badge-' + stateCls + '">' +
+              escHtml(h.state || "—") + '</span></td>' +
+            '<td>' + fmtDuration(h.duration_sec) + '</td>' +
+            '<td>' + escHtml(h.headline || h.error || "—") + '</td>' +
+            '</tr>';
+        });
+        html += '</tbody></table>';
+        historyWrap.innerHTML = html;
+      }
+
+      function fetchStatus() {
+        return fetch(API_BASE + "/api/backtest-status")
+          .then(function (r) { return r.json(); })
+          .then(function (j) {
+            if (j && j.status) paintStatus(j.status);
+            return j;
+          })
+          .catch(function (e) {
+            stateText.textContent = "Status fetch failed: " + e;
+          });
+      }
+
+      function startPolling() {
+        stopPolling();
+        pollTimer = setInterval(function () {
+          fetchStatus().then(function (j) {
+            var st = j && j.status;
+            if (st && st.state !== "running") stopPolling();
+          });
+        }, 2000);
+      }
+
+      function stopPolling() {
+        if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+      }
+
+      function getMode() {
+        var radios = document.getElementsByName("backtest-mode");
+        for (var i = 0; i < radios.length; i++) {
+          if (radios[i].checked) return radios[i].value;
+        }
+        return "both";
+      }
+
+      runBtn.addEventListener("click", function () {
+        if (runBtn.disabled) return;
+        runBtn.disabled = true;
+        errorEl.style.display = "none";
+        var mode = getMode();
+        fetch(API_BASE + "/api/run-backtest?mode=" + encodeURIComponent(mode), {method: "POST"})
+          .then(function (r) { return r.json().then(function (j) { return {status: r.status, body: j}; }); })
+          .then(function (resp) {
+            if (!resp.body || !resp.body.ok) {
+              errorEl.textContent = (resp.body && resp.body.error) || ("HTTP " + resp.status);
+              errorEl.style.display = "";
+              if (resp.body && resp.body.status) paintStatus(resp.body.status);
+              runBtn.disabled = false;
+              return;
+            }
+            paintStatus(resp.body.status);
+            startPolling();
+          })
+          .catch(function (e) {
+            errorEl.textContent = "Request failed: " + e;
+            errorEl.style.display = "";
+            runBtn.disabled = false;
+          });
+      });
+
+      function showReport(which, label) {
+        modalTitle.textContent = label;
+        modalBody.innerHTML = '<p class="muted">Loading…</p>';
+        modal.style.display = "";
+        fetch(API_BASE + "/api/backtest-report?which=" + encodeURIComponent(which))
+          .then(function (r) { return r.json().then(function (j) { return {status: r.status, body: j}; }); })
+          .then(function (resp) {
+            if (!resp.body || !resp.body.ok) {
+              modalBody.innerHTML = '<p class="negative">' + escHtml((resp.body && resp.body.error) || ("HTTP " + resp.status)) + '</p>';
+              return;
+            }
+            // Markdown is small; render as <pre> with light formatting.
+            // We deliberately avoid pulling in a markdown library — escaping
+            // and a simple table-row pipe-split is enough for these
+            // diagnostic reports.
+            var md = resp.body.markdown || "";
+            modalBody.innerHTML = '<div class="backtest-report-meta">' +
+              'Source: <code>' + escHtml(resp.body.path) + '</code>' +
+              '<br>Modified: ' + escHtml(resp.body.modified_at) +
+              '</div><pre class="backtest-report-pre">' + escHtml(md) + '</pre>';
+          })
+          .catch(function (e) {
+            modalBody.innerHTML = '<p class="negative">Fetch failed: ' + escHtml(String(e)) + '</p>';
+          });
+      }
+
+      viewReportBtn.addEventListener("click", function () {
+        if (viewReportBtn.disabled) return;
+        showReport("replay", "Latest replay diagnostic");
+      });
+      viewRecalBtn.addEventListener("click", function () {
+        if (viewRecalBtn.disabled) return;
+        showReport("recal", "Latest recalibration diagnostic");
+      });
+      modalClose.addEventListener("click", function () { modal.style.display = "none"; });
+      modal.addEventListener("click", function (e) {
+        if (e.target === modal) modal.style.display = "none";
+      });
+      document.addEventListener("keydown", function (e) {
+        if (e.key === "Escape" && modal.style.display !== "none") modal.style.display = "none";
+      });
+
+      // Initial paint + start polling if a run is already in progress.
+      fetchStatus().then(function (j) {
+        var st = j && j.status;
+        if (st && st.state === "running") startPolling();
+      });
+      // Tick the elapsed counter once a second while running, even if
+      // the server doesn't have new progress to report.
+      setInterval(function () {
+        if (stateBadge.classList.contains("backtest-badge-running") && startedAtTs) {
+          var sec = Math.round((Date.now() - startedAtTs) / 1000);
+          elapsedEl.textContent = fmtDuration(sec);
+        }
+      }, 1000);
     })();
   </script>
 

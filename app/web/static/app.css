@@ -3735,3 +3735,206 @@ body.ref-modal-open {
   font-size: 0.82rem;
   color: rgba(230, 237, 243, 0.6);
 }
+
+/* ── Backtest panel (Tier 2) ─────────────────────────────────────────── */
+.backtest-control-card {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 0.5rem;
+  padding: 1rem 1.25rem;
+  margin: 0.5rem 0 1.25rem;
+}
+.backtest-state-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.85rem;
+}
+.backtest-badge {
+  display: inline-block;
+  padding: 0.18rem 0.6rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  border-radius: 0.3rem;
+  text-transform: uppercase;
+  border: 1px solid transparent;
+}
+.backtest-badge-idle {
+  color: rgba(230, 237, 243, 0.65);
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+.backtest-badge-running {
+  color: #58a6ff;
+  background: rgba(88, 166, 255, 0.13);
+  border-color: rgba(88, 166, 255, 0.3);
+  animation: backtest-pulse 1.6s infinite ease-in-out;
+}
+.backtest-badge-completed {
+  color: #3fb950;
+  background: rgba(63, 185, 80, 0.13);
+  border-color: rgba(63, 185, 80, 0.32);
+}
+.backtest-badge-failed {
+  color: #f85149;
+  background: rgba(248, 81, 73, 0.15);
+  border-color: rgba(248, 81, 73, 0.35);
+}
+@keyframes backtest-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.55; }
+}
+.backtest-mode-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  margin-bottom: 1rem;
+}
+.backtest-label {
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: rgba(230, 237, 243, 0.6);
+}
+.backtest-radio {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  font-size: 0.92rem;
+  cursor: pointer;
+  padding: 0.35rem 0.55rem;
+  border-radius: 0.35rem;
+  transition: background 0.15s;
+}
+.backtest-radio:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+.backtest-radio input[type="radio"] {
+  margin-right: 0.4rem;
+}
+.backtest-radio small {
+  display: block;
+  margin-left: 1.4rem;
+  font-size: 0.78rem;
+  color: rgba(230, 237, 243, 0.55);
+}
+.backtest-action-row {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.5rem;
+}
+.backtest-action-row .btn-accent[disabled],
+.backtest-action-row .btn-ghost[disabled] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.backtest-progress {
+  margin-top: 0.85rem;
+  padding-top: 0.75rem;
+  border-top: 1px dashed rgba(255, 255, 255, 0.08);
+}
+.backtest-progress-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  margin-bottom: 0.45rem;
+  flex-wrap: wrap;
+}
+.backtest-progress-row strong {
+  color: #e6edf3;
+  font-family: var(--font-mono, monospace);
+}
+.backtest-progress-bar-wrap {
+  height: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.backtest-progress-bar {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, #58a6ff 0%, #2f81f7 100%);
+  transition: width 0.3s ease;
+}
+.backtest-error {
+  margin-top: 0.85rem;
+  padding: 0.55rem 0.75rem;
+  background: rgba(248, 81, 73, 0.08);
+  border: 1px solid rgba(248, 81, 73, 0.32);
+  border-radius: 0.35rem;
+  color: #f85149;
+  font-family: var(--font-mono, monospace);
+  font-size: 0.82rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.backtest-last-summary {
+  margin: 0.5rem 0 1.25rem;
+  font-size: 0.92rem;
+}
+.backtest-headline {
+  color: #d29922;
+  font-family: var(--font-mono, monospace);
+}
+#backtest-history-wrap table.data {
+  width: 100%;
+  margin-bottom: 1.25rem;
+}
+.backtest-report-modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 1rem;
+}
+.backtest-report-modal-inner {
+  background: #0f1620;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 0.5rem;
+  width: 100%;
+  max-width: 900px;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+}
+.backtest-report-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+.backtest-report-modal-head h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+.backtest-report-body {
+  padding: 0.85rem 1rem;
+  overflow: auto;
+}
+.backtest-report-meta {
+  font-size: 0.8rem;
+  color: rgba(230, 237, 243, 0.55);
+  margin-bottom: 0.65rem;
+}
+.backtest-report-pre {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.78rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #d6dae4;
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  padding: 0.85rem 1rem;
+  border-radius: 0.35rem;
+  max-height: 70vh;
+  overflow: auto;
+  margin: 0;
+}
