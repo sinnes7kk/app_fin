@@ -2064,7 +2064,9 @@ def _build_flow_tracker_hero(rows: list[dict]) -> dict | None:
         return s if s and s.lower() != "nan" else "—"
 
     for r in rows:
-        if r.get("passes_accumulation"):
+        # passes_activity (was passes_accumulation pre-2026-05-05); fall
+        # back to the old key so a stale row payload still groups correctly.
+        if r.get("passes_activity") or r.get("passes_accumulation"):
             key = (_sector_key(r.get("sector")), str(r.get("direction") or ""))
             sector_groups[key].append(r)
     # Drop the "—" bucket; a cluster of unknown-sector rows isn't a signal.

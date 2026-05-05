@@ -1,10 +1,10 @@
-"""Tests for Wave 0 Flow Tracker mode gating (strong / accumulation / all).
+"""Tests for Flow Tracker mode gating (strong / activity / all).
 
 Validates that ``compute_multi_day_flow`` produces rows with:
-  - per-row ``passes_strong`` / ``passes_accumulation`` / ``passes_all`` flags
-  - an ``accumulation_score`` in [0, 100]
+  - per-row ``passes_strong`` / ``passes_activity`` / ``passes_all`` flags
+  - an ``accumulation_score`` in [0, 100]   (separate per-row metric, unchanged)
   - a ``mode_counts`` tally consistent with the flags
-  - strict subset ordering (strong ⊆ accumulation ⊆ all)
+  - strict subset ordering (strong ⊆ activity ⊆ all)
 
 Run with either:
     python -m pytest tests/test_flow_tracker_modes.py -v
@@ -112,7 +112,7 @@ def test_strong_accumulation_ticker_passes_all_three_modes():
     row = out[0]
     assert row["ticker"] == "STRONG"
     assert row["passes_strong"], "strong row should pass strong gate"
-    assert row["passes_accumulation"], "strong row should also pass accumulation"
+    assert row["passes_activity"], "strong row should also pass activity"
     assert row["passes_all"], "strong row should also pass all"
     # Accumulation score should be in [0, 100] and close to the ceiling on this setup.
     assert 0.0 <= row["accumulation_score"] <= 100.0
@@ -134,11 +134,11 @@ def test_weak_spiky_ticker_passes_only_all():
         return
     row = out[0]
     assert row["passes_strong"] is False
-    assert row["passes_accumulation"] is False
+    assert row["passes_activity"] is False
 
 
-def test_hedging_bullish_excluded_from_accumulation():
-    """Bullish direction with PCR > 0.9 = hedging → excluded from accumulation."""
+def test_hedging_bullish_excluded_from_activity():
+    """Bullish direction with PCR > 0.9 = hedging → excluded from Activity / Strong."""
     days = _days_back(5)
     # Strong bullish mass, but PCR elevated (hedging pattern).
     rows = [_strong_row("HEDGE", d, bull=5_000_000, pcr=1.1) for d in days]
@@ -146,11 +146,11 @@ def test_hedging_bullish_excluded_from_accumulation():
     assert len(out) == 1
     row = out[0]
     assert row["hedging_risk"] is True
-    assert row["passes_accumulation"] is False, (
-        "hedging_risk should exclude row from accumulation"
+    assert row["passes_activity"] is False, (
+        "hedging_risk should exclude row from activity"
     )
     assert row["passes_strong"] is False
-    # Legacy 'all' mode does not exclude hedging; haircut is applied instead.
+    # Permissive 'all' mode does not exclude hedging; haircut is applied instead.
     assert row["passes_all"] is True
 
 
@@ -185,17 +185,19 @@ def test_mode_counts_and_subset_ordering():
     assert out, "synthetic data should produce at least one row"
 
     n_strong = sum(1 for r in out if r["passes_strong"])
-    n_accum = sum(1 for r in out if r["passes_accumulation"])
+    n_activity = sum(1 for r in out if r["passes_activity"])
     n_all = sum(1 for r in out if r["passes_all"])
 
-    assert n_strong <= n_accum <= n_all, (
-        f"subset ordering violated: strong={n_strong}, accum={n_accum}, all={n_all}"
+    assert n_strong <= n_activity <= n_all, (
+        f"subset ordering violated: strong={n_strong}, activity={n_activity}, all={n_all}"
     )
 
     for r in out:
         mc = r["mode_counts"]
         assert mc["strong_accumulation"] == n_strong
-        assert mc["accumulation"] == n_accum
+        assert mc["activity"] == n_activity
+        # Legacy alias preserved for any not-yet-redeployed clients.
+        assert mc["accumulation"] == n_activity
         assert mc["all"] == n_all
 
 
@@ -393,21 +395,22 @@ def test_a4_window_return_does_not_adjust_conviction_score():
     )
 
 
-def test_a6_3d_percentile_gates_accumulation():
-    """Low 3-day percentile should block a ticker from the accumulation mode."""
+def test_a6_3d_percentile_gates_activity():
+    """Low 3-day percentile should block a ticker from the Activity gate."""
     days = _days_back(5)
     # Ticker clears everything else but 3d percentile is very low.
-    low = [_strong_row_with_extras("LOW", d, bull=3_000_000 + i * 200_000, perc_3d=0.2)
+    # Bull amounts sized to clear the $25M Activity cum-premium floor.
+    low = [_strong_row_with_extras("LOW", d, bull=6_000_000 + i * 300_000, perc_3d=0.2)
            for i, d in enumerate(days)]
     # Control: same ticker but perc_3d above the gate.
-    hi = [_strong_row_with_extras("HI", d, bull=3_000_000 + i * 200_000, perc_3d=0.85)
+    hi = [_strong_row_with_extras("HI", d, bull=6_000_000 + i * 300_000, perc_3d=0.85)
           for i, d in enumerate(days)]
     out = _run_with_synthetic(low + hi)
     low_row = next(r for r in out if r["ticker"] == "LOW")
     hi_row = next(r for r in out if r["ticker"] == "HI")
-    assert hi_row["passes_accumulation"] is True
-    assert low_row["passes_accumulation"] is False, (
-        "3d percentile 0.2 should be blocked by A6 gate"
+    assert hi_row["passes_activity"] is True
+    assert low_row["passes_activity"] is False, (
+        "3d percentile 0.2 should be blocked by the percentile gate"
     )
 
 
@@ -516,21 +519,24 @@ def test_c1_horizons_config_has_5d_and_15d():
     )
 
 
-def test_c3_sector_accumulating_count_groups_by_sector_and_direction():
-    """Three Tech names all passing Accumulation should each show
-    ``sector_accumulating_count == 2`` (the other two)."""
+def test_c3_sector_activity_count_groups_by_sector_and_direction():
+    """Three Tech names all passing Activity should each show
+    ``sector_activity_count == 2`` (the other two)."""
     days = _days_back(5)
     rows: list[dict] = []
+    # Bull amounts sized to clear the $25M Activity cum-premium floor.
     for t in ("AAA", "BBB", "CCC"):
         for i, d in enumerate(days):
-            rows.append(_strong_row(t, d, bull=3_000_000 + i * 250_000))
+            rows.append(_strong_row(t, d, bull=6_000_000 + i * 300_000))
     out = _run_with_synthetic(rows)
-    accum = [r for r in out if r.get("passes_accumulation")]
-    assert len(accum) >= 2, f"expected multiple accumulating rows, got {len(accum)}"
-    for r in accum:
-        assert r["sector_accumulating_count"] == len(accum) - 1, (
-            f"{r['ticker']} expected count {len(accum) - 1}, got {r['sector_accumulating_count']}"
+    activity = [r for r in out if r.get("passes_activity")]
+    assert len(activity) >= 2, f"expected multiple activity rows, got {len(activity)}"
+    for r in activity:
+        assert r["sector_activity_count"] == len(activity) - 1, (
+            f"{r['ticker']} expected count {len(activity) - 1}, got {r['sector_activity_count']}"
         )
+        # Legacy alias still wired for backward compat.
+        assert r["sector_accumulating_count"] == r["sector_activity_count"]
 
 
 def test_c3_sector_count_splits_by_direction():
@@ -538,22 +544,21 @@ def test_c3_sector_count_splits_by_direction():
     together — mixed sector = not a one-sided bid."""
     days = _days_back(5)
     rows: list[dict] = []
-    # Bullish names
+    # Bull/bear amounts sized to clear the $25M Activity cum-premium floor.
     for t in ("BULL1", "BULL2"):
         for i, d in enumerate(days):
-            rows.append(_strong_row(t, d, bull=3_000_000 + i * 250_000))
-    # Bearish name (same sector "Tech" via _strong_row) — flip bull/bear
+            rows.append(_strong_row(t, d, bull=6_000_000 + i * 300_000))
     for i, d in enumerate(days):
-        r = _strong_row("BEAR1", d, bull=0.0, bear=3_000_000 + i * 250_000)
+        r = _strong_row("BEAR1", d, bull=0.0, bear=6_000_000 + i * 300_000)
         rows.append(r)
     out = _run_with_synthetic(rows)
-    bulls = [r for r in out if r["direction"] == "BULLISH" and r.get("passes_accumulation")]
-    bears = [r for r in out if r["direction"] == "BEARISH" and r.get("passes_accumulation")]
+    bulls = [r for r in out if r["direction"] == "BULLISH" and r.get("passes_activity")]
+    bears = [r for r in out if r["direction"] == "BEARISH" and r.get("passes_activity")]
     for r in bulls:
         # Each bullish row's sector count should only see OTHER bullish rows.
-        assert r["sector_accumulating_count"] == len(bulls) - 1
+        assert r["sector_activity_count"] == len(bulls) - 1
     for r in bears:
-        assert r["sector_accumulating_count"] == len(bears) - 1
+        assert r["sector_activity_count"] == len(bears) - 1
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -572,7 +577,7 @@ def _hero_row(**overrides) -> dict:
         "conviction_score": 6.5,
         "conviction_grade": "B+",
         "accumulation_score": 60,
-        "passes_accumulation": True,
+        "passes_activity": True,
         "passes_strong": True,
         "dp_aligned": True,
         "window_return_pct": 1.5,
@@ -696,9 +701,9 @@ def _run_with_mode(rows: list[dict], mode: str, lookback_days: int = 5, min_acti
 
 
 def test_swing_radar_mode_hard_gate_drops_nonqualifying_rows():
-    """With ``mode="accumulation"`` the tracker returns only rows that
-    actually pass the accumulation gate — not the legacy "return all,
-    tagged" payload.  A clear accumulation row should be present, a
+    """With ``mode="activity"`` the tracker returns only rows that
+    actually pass the Activity gate — not the legacy "return all,
+    tagged" payload.  A clear heavy-flow row should be present; a
     sparse / weak row should be absent."""
     from app.config import FLOW_TRACKER_HARD_MODE_FILTER
     assert FLOW_TRACKER_HARD_MODE_FILTER, (
@@ -707,46 +712,62 @@ def test_swing_radar_mode_hard_gate_drops_nonqualifying_rows():
 
     days = _days_back(5)
     rows: list[dict] = []
-    # Clean accumulation — 5/5 days, rising, large, one-sided.
+    # Clean activity — 5/5 days, rising, large, plenty of cum premium.
     for i, d in enumerate(days):
         rows.append(_strong_row("CLEAN", d, bull=5_000_000 + i * 1_000_000))
     # Weak — 2/5 days, small, fails intensity + persistence.
     rows.append(_strong_row("WEAK", days[0], bull=400_000))
     rows.append(_strong_row("WEAK", days[1], bull=400_000))
 
-    out = _run_with_mode(rows, mode="accumulation")
+    out = _run_with_mode(rows, mode="activity")
     tickers = {r["ticker"] for r in out}
-    assert "CLEAN" in tickers, "clean accumulation row should survive the mode gate"
+    assert "CLEAN" in tickers, "clean activity row should survive the mode gate"
     assert "WEAK" not in tickers, (
-        "weak row must be dropped by the accumulation hard-gate, not merely tagged"
+        "weak row must be dropped by the activity hard-gate, not merely tagged"
     )
     # Every surviving row must actually pass the requested mode.
     for r in out:
-        assert r["passes_accumulation"], (
+        assert r["passes_activity"], (
             f"{r['ticker']}: swing-radar should only surface rows clearing the gate"
         )
 
 
-def test_swing_radar_accumulation_surfaces_at_least_three_names():
-    """Synthetic sanity: with three clear accumulation setups the radar
+def test_swing_radar_legacy_accumulation_alias_still_works():
+    """The deprecated ``mode="accumulation"`` string must keep routing
+    to the Activity gate so saved URLs / external callers don't break
+    after the 2026-05-05 rename."""
+    days = _days_back(5)
+    rows: list[dict] = []
+    for i, d in enumerate(days):
+        rows.append(_strong_row("CLEAN", d, bull=5_000_000 + i * 1_000_000))
+
+    out_new = _run_with_mode(rows, mode="activity")
+    out_legacy = _run_with_mode(rows, mode="accumulation")
+    assert {r["ticker"] for r in out_new} == {r["ticker"] for r in out_legacy}, (
+        "legacy alias must produce the same surfaced tickers as `activity`"
+    )
+
+
+def test_swing_radar_activity_surfaces_at_least_three_names():
+    """Synthetic sanity: with three clear high-activity setups the radar
     must surface all three.  Guards against an overly-tight
     recalibration starving the panel."""
     days = _days_back(5)
     rows: list[dict] = []
     base_levels = [
-        ("AAA", 4_000_000),
-        ("BBB", 6_000_000),
+        ("AAA", 6_000_000),
+        ("BBB", 7_000_000),
         ("CCC", 8_000_000),
     ]
     for ticker, base_bull in base_levels:
         for i, d in enumerate(days):
             rows.append(_strong_row(ticker, d, bull=base_bull + i * 500_000))
 
-    out = _run_with_mode(rows, mode="accumulation")
+    out = _run_with_mode(rows, mode="activity")
     tickers = {r["ticker"] for r in out}
     for t, _ in base_levels:
-        assert t in tickers, f"{t} should clear the accumulation gate"
-    assert len(out) >= 3, f"accumulation mode should surface ≥ 3 names, got {len(out)}"
+        assert t in tickers, f"{t} should clear the activity gate"
+    assert len(out) >= 3, f"activity mode should surface ≥ 3 names, got {len(out)}"
 
 
 def test_swing_radar_illiquid_gate_filters_thin_tickers():
@@ -805,7 +826,7 @@ if __name__ == "__main__":
     tests = [
         test_strong_accumulation_ticker_passes_all_three_modes,
         test_weak_spiky_ticker_passes_only_all,
-        test_hedging_bullish_excluded_from_accumulation,
+        test_hedging_bullish_excluded_from_activity,
         test_fading_ticker_fails_strong,
         test_mode_counts_and_subset_ordering,
         test_accumulation_score_bounds,
@@ -818,14 +839,14 @@ if __name__ == "__main__":
         # Wave 0.5 Cluster A
         test_a1_dte_multiplier_softens_weekly_flow,
         test_a4_window_return_does_not_adjust_conviction_score,
-        test_a6_3d_percentile_gates_accumulation,
+        test_a6_3d_percentile_gates_activity,
         test_a7_oi_change_contributes_to_score,
         test_nan_scalars_coerce_to_zero,
         test_a1_a2_enrichment_populates_on_row,
         # Wave 0.5 Cluster C
         test_c1_retention_keeps_15d_window,
         test_c1_horizons_config_has_5d_and_15d,
-        test_c3_sector_accumulating_count_groups_by_sector_and_direction,
+        test_c3_sector_activity_count_groups_by_sector_and_direction,
         test_c3_sector_count_splits_by_direction,
         # Wave 1 — "Now What" hero strip.
         test_hero_empty_returns_none,
@@ -836,10 +857,11 @@ if __name__ == "__main__":
         test_hero_setup_passes_all_clean_filters,
         test_hero_setup_rejects_high_iv_and_er_soon_and_falls_back,
         test_hero_setup_rejects_fighting_price_and_missing_dp,
-        # Flow-Tracker-Swing-Radar — mode hard gate, accumulation count,
-        # illiquidity filter.
+        # Flow-Tracker-Swing-Radar — mode hard gate + legacy alias +
+        # activity surface count + illiquidity filter.
         test_swing_radar_mode_hard_gate_drops_nonqualifying_rows,
-        test_swing_radar_accumulation_surfaces_at_least_three_names,
+        test_swing_radar_legacy_accumulation_alias_still_works,
+        test_swing_radar_activity_surfaces_at_least_three_names,
         test_swing_radar_illiquid_gate_filters_thin_tickers,
     ]
     passed, failed = 0, 0

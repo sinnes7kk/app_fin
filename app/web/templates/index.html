@@ -669,10 +669,10 @@
       <h1 class="panel-title">Flow Tracker</h1>
       {# Wave 0 — mode-aware intro copy rendered inline via data attrs so the client-side toggle can swap without a re-render. #}
       <p class="tab-intro" id="ft-intro"
-         data-intro-strong_accumulation="Names with unusual options activity on every day of the last {{ flow_tracker_lookback }}, strongly one-sided, and still rising."
-         data-intro-accumulation="Names with consistent multi-day one-sided options flow — the classic accumulation pattern."
+         data-intro-strong_accumulation="Rare: every active day in the last {{ flow_tracker_lookback }} leans the same direction, rising, and large enough to matter. Empty by design when the market is two-sided."
+         data-intro-activity="Names with sustained multi-day options flow — heavy persistent activity, any direction."
          data-intro-all="All tickers clearing the base multi-day persistence gate over the last {{ flow_tracker_lookback }} trading days.">
-        Names with consistent multi-day one-sided options flow — the classic accumulation pattern.
+        Names with sustained multi-day options flow — heavy persistent activity, any direction.
       </p>
 
       {% if grade_stats_header %}
@@ -683,7 +683,7 @@
       {% endif %}
 
       {% if flow_tracker %}
-      {% set _counts = flow_tracker[0].mode_counts if flow_tracker[0].mode_counts is defined else {'strong_accumulation':0,'accumulation':0,'all':(flow_tracker|length)} %}
+      {% set _counts = flow_tracker[0].mode_counts if flow_tracker[0].mode_counts is defined else {'strong_accumulation':0,'activity':0,'all':(flow_tracker|length)} %}
 
       {# Wave 1 — "Now What" 3-card hero strip.  Computed server-side in
          _build_flow_tracker_hero: highest conviction, biggest sector
@@ -773,14 +773,14 @@
       </div>
       {% endif %}
 
-      {# Wave 0 — mode toggle + live funnel counts.  Persisted in localStorage by
-         the ft-mode-toggle JS block.  Rows below carry passes_{strong,accumulation,all}
+      {# Mode toggle + live funnel counts. Persisted in localStorage by
+         the ft-mode-toggle JS block. Rows below carry passes_{strong,activity,all}
          flags so client-side filtering is O(n). #}
       <div class="ft-mode-toggle-row">
         <div class="ft-mode-toggle" role="tablist" aria-label="Flow Tracker mode">
-          <button type="button" class="ft-mode-btn" data-mode="strong_accumulation" role="tab" title="Every day active, strictly rising, A-tier or better">Strong</button>
-          <button type="button" class="ft-mode-btn" data-mode="accumulation" role="tab" title="Most days active, one-sided, non-fading, B+ or better">Accumulation</button>
-          <button type="button" class="ft-mode-btn" data-mode="all" role="tab" title="Legacy loose gate — every qualifying ticker">All</button>
+          <button type="button" class="ft-mode-btn" data-mode="strong_accumulation" role="tab" title="Rare: every day clearly directional, same side, no flips. Empty by design in two-sided regimes.">Strong</button>
+          <button type="button" class="ft-mode-btn" data-mode="activity" role="tab" title="Sustained heavy multi-day flow, any direction. The day-to-day watch list.">Activity</button>
+          <button type="button" class="ft-mode-btn" data-mode="all" role="tab" title="Permissive baseline — every qualifying ticker">All</button>
         </div>
         {# Wave 0.5 C1 — horizon toggle.  Links navigate with
            ?horizon=5d|15d which drives compute_multi_day_flow's lookback.
@@ -801,7 +801,7 @@
         <div class="ft-funnel-counts" aria-live="polite">
           <span class="ft-funnel-item"><span class="ft-funnel-label">Strong</span> <span id="ft-count-strong">{{ _counts.strong_accumulation }}</span></span>
           <span class="ft-funnel-sep">·</span>
-          <span class="ft-funnel-item"><span class="ft-funnel-label">Accumulation</span> <span id="ft-count-accumulation">{{ _counts.accumulation }}</span></span>
+          <span class="ft-funnel-item"><span class="ft-funnel-label">Activity</span> <span id="ft-count-activity">{{ _counts.activity }}</span></span>
           <span class="ft-funnel-sep">·</span>
           <span class="ft-funnel-item"><span class="ft-funnel-label">All</span> <span id="ft-count-all">{{ _counts.all }}</span></span>
           <span class="ft-funnel-sep">·</span>
@@ -846,7 +846,7 @@
                  id="ft-card-{{ ft.ticker }}"
                  data-ticker="{{ ft.ticker }}"
                  data-passes-strong="{{ '1' if ft.passes_strong else '0' }}"
-                 data-passes-accumulation="{{ '1' if ft.passes_accumulation else '0' }}"
+                 data-passes-activity="{{ '1' if ft.passes_activity else '0' }}"
                  data-passes-all="{{ '1' if ft.passes_all else '0' }}"
                  data-grade="{{ ft.conviction_grade }}"
                  style="cursor:pointer">
@@ -3217,17 +3217,27 @@
       var AUTO_WIDEN_MIN = {{ flow_tracker_auto_widen_min | tojson }};
       var MODE_LABELS = {
         strong_accumulation: "Strong",
-        accumulation: "Accumulation",
+        activity: "Activity",
         all: "All"
       };
-      var MODE_ORDER = ["strong_accumulation", "accumulation", "all"];
+      var MODE_ORDER = ["strong_accumulation", "activity", "all"];
+
+      // Migrate any legacy localStorage value ("accumulation") that
+      // predates the 2026-05-05 rename so the toggle doesn't get stuck
+      // on a mode that no longer exists.
+      try {
+        var __legacy = window.localStorage && window.localStorage.getItem("ft-mode");
+        if (__legacy === "accumulation") {
+          window.localStorage.setItem("ft-mode", "activity");
+        }
+      } catch (_e) { /* private mode / quota — fine to ignore */ }
 
       function countByMode() {
         var cards = listEl.querySelectorAll(".ft-card");
-        var counts = { strong_accumulation: 0, accumulation: 0, all: 0 };
+        var counts = { strong_accumulation: 0, activity: 0, all: 0 };
         cards.forEach(function (c) {
           if (c.getAttribute("data-passes-strong") === "1") counts.strong_accumulation++;
-          if (c.getAttribute("data-passes-accumulation") === "1") counts.accumulation++;
+          if (c.getAttribute("data-passes-activity") === "1") counts.activity++;
           if (c.getAttribute("data-passes-all") === "1") counts.all++;
         });
         return counts;

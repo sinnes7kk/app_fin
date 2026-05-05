@@ -11,6 +11,7 @@ import pandas as pd
 
 from app.utils.market_calendar import current_trading_day
 from app.config import (
+    FLOW_TRACKER_DAY_SKEW_FLOOR,
     FLOW_TRACKER_DTE_BUCKETS,
     FLOW_TRACKER_ETF_EXCLUDE,
     FLOW_TRACKER_HARD_MODE_FILTER,
@@ -52,12 +53,85 @@ def _num(v, default: float = 0.0) -> float:
     return x
 
 
+def _compute_day_persistence(
+    daily_totals: list,
+    skew_floor: float = FLOW_TRACKER_DAY_SKEW_FLOOR,
+) -> tuple[str, float, bool]:
+    """Day-by-day directional read of a ticker's flow window.
+
+    Each entry of ``daily_totals`` is a ``(idx, bull, bear, total)``
+    tuple as built around line 827 of this module's main loop. For
+    each day we compute ``skew = (bull - bear) / (bull + bear)`` and
+    classify it as ``"BULLISH"`` (skew ≥ +floor), ``"BEARISH"``
+    (skew ≤ -floor), or ``"FLAT"`` (in between, treated as noise).
+
+    Returns
+    -------
+    dominant_direction : str
+        ``"BULLISH"`` if more days were clearly bullish than bearish,
+        ``"BEARISH"`` for the converse, ``"NONE"`` if neither.
+    persistence : float
+        Fraction of *all* active days (including flat days) that
+        leaned in the dominant direction. 0.0 if no clearly
+        directional days. Used by ``min_day_persistence`` gates.
+    has_flips : bool
+        True when at least one bullish AND one bearish day appeared
+        in the same window. Used by ``require_no_flips`` to suppress
+        choppy two-sided weeks where the aggregate happens to lean
+        one way.
+
+    A pure-flat window (every day inside the floor) returns
+    ``("NONE", 0.0, False)`` — strict gates will reject it via the
+    ``min_day_persistence`` check, permissive gates ignore it.
+    """
+    if not daily_totals:
+        return "NONE", 0.0, False
+    bull_days = 0
+    bear_days = 0
+    active = 0
+    for entry in daily_totals:
+        # Tolerate either (idx, bull, bear, total) or (bull, bear, total)
+        if len(entry) >= 4:
+            _, bull, bear, total = entry[0], entry[1], entry[2], entry[3]
+        elif len(entry) == 3:
+            bull, bear, total = entry[0], entry[1], entry[2]
+        else:
+            continue
+        b = float(bull or 0.0)
+        be = float(bear or 0.0)
+        tot = float(total or 0.0)
+        if tot <= 0.0:
+            continue
+        active += 1
+        skew = (b - be) / tot
+        if skew >= skew_floor:
+            bull_days += 1
+        elif skew <= -skew_floor:
+            bear_days += 1
+        # else: flat — counted toward `active` but not toward either side
+    if active == 0:
+        return "NONE", 0.0, False
+    if bull_days > bear_days:
+        dominant = "BULLISH"
+        dom_count = bull_days
+    elif bear_days > bull_days:
+        dominant = "BEARISH"
+        dom_count = bear_days
+    else:
+        dominant = "NONE"
+        dom_count = 0
+    persistence = round(dom_count / active, 4) if active else 0.0
+    has_flips = bull_days > 0 and bear_days > 0
+    return dominant, persistence, has_flips
+
+
 def _mode_passes(row: dict, mode_cfg: dict) -> bool:
     """Return True if a scored row clears every gate defined by ``mode_cfg``.
 
     ``row`` must already carry ``active_days``, ``_cum_total`` (or
     ``cumulative_premium``), ``prem_mcap_bps``, ``_consistency_raw``,
-    ``_accel_t_stat``, ``hedging_risk``, ``conviction_grade``.
+    ``_accel_t_stat``, ``hedging_risk``, ``conviction_grade``,
+    ``day_persistence``, ``has_flips``.
     """
     if row.get("active_days", 0) < mode_cfg["min_active_days"]:
         return False
@@ -70,6 +144,14 @@ def _mode_passes(row: dict, mode_cfg: dict) -> bool:
         return False
     if _num(row.get("_consistency_raw")) < mode_cfg["min_consistency"]:
         return False
+    # Day-level persistence + flip gates (added 2026-05-05). Strong sets
+    # both above zero / True; Activity and All leave them as defaults
+    # so existing rows pass-through.
+    min_day_persist = float(mode_cfg.get("min_day_persistence") or 0.0)
+    if min_day_persist > 0.0 and _num(row.get("day_persistence")) < min_day_persist:
+        return False
+    if mode_cfg.get("require_no_flips") and bool(row.get("has_flips")):
+        return False
     if _num(row.get("_accel_t_stat")) < mode_cfg["min_accel_t"]:
         return False
     if mode_cfg["exclude_hedging"] and row.get("hedging_risk"):
@@ -77,7 +159,7 @@ def _mode_passes(row: dict, mode_cfg: dict) -> bool:
     grade = str(row.get("conviction_grade", "C") or "C")
     if _GRADE_RANK.get(grade, 0) < mode_cfg["min_grade_rank"]:
         return False
-    # Wave 0.5 A6 — 3-day percentile gate for accumulation modes only.  Uses
+    # Wave 0.5 A6 — 3-day percentile gate for accumulation-class modes.  Uses
     # the window max so a ticker that hit top 30% unusual activity even once
     # during the window stays in; keeps the gate from blocking tickers whose
     # unusualness cools off on the final day of the window.
@@ -867,6 +949,15 @@ def compute_multi_day_flow(
         gross = sum(t for _, _, _, t in daily_totals)
         consistency_raw = abs(net_signed) / gross if gross > 0 else 0.0
 
+        # --- Day-level directional persistence ---
+        # Aggregate consistency above mixes signal with noise: a 5-day
+        # window where bull/bear is ~52/48 each day and a 5-day window
+        # where 4 days are 70/30 bull and 1 is 70/30 bear can score
+        # similarly.  Day-level persistence asks how many of the active
+        # days were clearly directional, and whether they all leaned
+        # the same way — what Strong actually wants to gate on.
+        dom_dir_day, day_persistence, has_flips = _compute_day_persistence(daily_totals)
+
         # Daily snapshots for sparkline
         daily_snaps: list[dict] = []
         for d in all_dates:
@@ -1078,6 +1169,9 @@ def compute_multi_day_flow(
             "_accel_t_stat": accel_t_stat,
             "_oi_change_norm": oi_change_norm,
             "_cum_total": cum_total,
+            "day_persistence": day_persistence,
+            "dominant_direction_day": dom_dir_day,
+            "has_flips": has_flips,
         })
 
     if not raw_results:
@@ -1201,10 +1295,12 @@ def compute_multi_day_flow(
             prem_mcap_bps=r["prem_mcap_bps"],
         )
 
-        # Wave 0.1 — per-mode pass flags.  Modes are strict subsets of each
-        # other (all ⊇ accumulation ⊇ strong) so the UI can filter client-side.
+        # Per-mode pass flags. Modes are no longer strict subsets after
+        # the 2026-05-05 redesign — Strong demands day-level persistence
+        # that Activity intentionally ignores — so the UI cannot infer
+        # one from the other client-side.
         r["passes_all"] = _mode_passes(r, FLOW_TRACKER_MODES["all"])
-        r["passes_accumulation"] = _mode_passes(r, FLOW_TRACKER_MODES["accumulation"])
+        r["passes_activity"] = _mode_passes(r, FLOW_TRACKER_MODES["activity"])
         r["passes_strong"] = _mode_passes(r, FLOW_TRACKER_MODES["strong_accumulation"])
 
         try:
@@ -1229,16 +1325,19 @@ def compute_multi_day_flow(
     # the UI can still show "3 accumulation, 1 strong" even when the
     # caller requests a narrow mode.
     count_strong = sum(1 for r in raw_results if r["passes_strong"])
-    count_accum = sum(1 for r in raw_results if r["passes_accumulation"])
+    count_activity = sum(1 for r in raw_results if r["passes_activity"])
     count_all = sum(1 for r in raw_results if r["passes_all"])
 
     # Flow-Tracker-Swing-Radar: mode hard-filter before the cap.  Legacy
     # callers (mode=None) keep the old "return all, tag per mode" shape.
+    # ``accumulation`` is kept as a deprecated alias for ``activity`` so
+    # external scripts / saved URLs don't blow up after the rename.
     if mode and FLOW_TRACKER_HARD_MODE_FILTER:
         mode_key = str(mode).lower()
         mode_flag_map = {
             "all": "passes_all",
-            "accumulation": "passes_accumulation",
+            "activity": "passes_activity",
+            "accumulation": "passes_activity",   # legacy alias
             "strong_accumulation": "passes_strong",
             "strong": "passes_strong",
         }
@@ -1249,29 +1348,35 @@ def compute_multi_day_flow(
     if max_results and len(raw_results) > max_results:
         raw_results = raw_results[:max_results]
 
-    # Wave 0.5 C3 — sector accumulation count.  For each qualifying row,
-    # count how many OTHER rows in the same sector AND direction passed
-    # the accumulation mode.  Signals sector-wide bid (e.g. "3 energy
-    # names accumulating bullish").  Excludes the row itself so lonely
-    # sector-leaders show 0, not 1.
+    # Sector activity-cluster count. For each qualifying row, count how
+    # many OTHER rows in the same sector AND direction also passed the
+    # Activity gate. Signals sector-wide flow (e.g. "3 energy names with
+    # heavy bullish flow"). Excludes the row itself so lonely sector
+    # leaders show 0, not 1.
     by_sector_dir: dict[tuple[str, str], int] = {}
     for r in raw_results:
-        if r.get("passes_accumulation"):
+        if r.get("passes_activity"):
             key = (str(r.get("sector") or "—"), str(r.get("direction") or ""))
             by_sector_dir[key] = by_sector_dir.get(key, 0) + 1
 
     for r in raw_results:
         r["total_qualified"] = total_qualified
+        # Mode-counts dict consumed by the UI funnel display. ``accumulation``
+        # is kept as a legacy alias mirroring ``activity`` so any old
+        # client-side code that hasn't been redeployed keeps rendering.
         r["mode_counts"] = {
             "strong_accumulation": count_strong,
-            "accumulation": count_accum,
+            "activity": count_activity,
+            "accumulation": count_activity,   # legacy alias
             "all": count_all,
         }
         key = (str(r.get("sector") or "—"), str(r.get("direction") or ""))
         total_in_sector = by_sector_dir.get(key, 0)
         # Exclude self only when this row is itself counted in the sector tally.
-        r["sector_accumulating_count"] = (
-            total_in_sector - 1 if r.get("passes_accumulation") else total_in_sector
+        r["sector_activity_count"] = (
+            total_in_sector - 1 if r.get("passes_activity") else total_in_sector
         )
+        # Legacy alias — server.py / templates may still read the old name.
+        r["sector_accumulating_count"] = r["sector_activity_count"]
 
     return raw_results

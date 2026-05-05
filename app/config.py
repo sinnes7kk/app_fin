@@ -239,7 +239,7 @@ FLOW_TRACKER_HORIZON_DEFAULT = "5d"
 # one-sidedness + acceleration carry more weight (the actual accumulation
 # signature) at the expense of raw intensity.  Ladder grades stay on the
 # same 0-10 scale so `grade_stats.json` remains compatible.
-FLOW_TRACKER_MODE_DEFAULT = "accumulation"          # UI default on first load
+FLOW_TRACKER_MODE_DEFAULT = "activity"              # UI default on first load
 FLOW_TRACKER_AUTO_WIDEN_MIN = 3                     # auto-widen notice threshold
 # Flow-Tracker-Swing-Radar: when True, ``compute_multi_day_flow`` hard-
 # filters out rows that fail the requested mode (legacy behaviour
@@ -259,46 +259,74 @@ FLOW_TRACKER_WARMUP_DAYS = 3
 FLOW_TRACKER_WARMUP_BANNER_ENABLED = True
 
 FLOW_TRACKER_MODES = {
-    # Flow-Tracker-Swing-Radar + Premium-Taxonomy: thresholds now run
-    # against ``total_bullish_premium + total_bearish_premium`` which
-    # is UW's full-day aggregate.  Means the $/day floors are real
-    # dollar commitments across the window, not a post-narrow-filter
-    # residual.  Mode gates are hard filters: rows failing the gate are
-    # dropped before the 15-row cap so the radar stays tight.
+    # Flow-Tracker bucket redesign (2026-04-30 → 2026-05-05):
+    # the old ``accumulation`` (cons≥0.55) / ``strong_accumulation``
+    # (cons≥0.65) gates fired 0–1 times across 10 trading days of real
+    # screener data because total_{bull,bear}_premium mixes conviction
+    # with routine hedging on both sides. Lowering the threshold would
+    # admit names with barely-biased noise, so we redesigned the modes
+    # around two distinct goals:
+    #
+    #   - ``activity`` (replaces ``accumulation``) drops the directional-
+    #     purity gate entirely and surfaces names with sustained heavy
+    #     premium regardless of the bull/bear split. Useful most days.
+    #     Backed by dollar floors + acceleration only.
+    #
+    #   - ``strong_accumulation`` keeps a strict definition but is now
+    #     primarily gated on day-LEVEL persistence (≥60% of days clearly
+    #     directional, same direction, no flips), with the aggregate
+    #     consistency floor as a secondary check. Allowed to be empty
+    #     in two-sided regimes — that empty state is informative.
+    #
+    # Mode gates are hard filters: rows failing the gate are dropped
+    # before the 15-row cap so the radar stays tight.
     "all": {
         "label": "All",
         "min_active_days": 2,
         "min_cum_premium": 2_000_000,
         "min_prem_mcap_bps": 0.50,
         "min_consistency": 0.0,
+        "min_day_persistence": 0.0,
+        "require_no_flips": False,
         "min_accel_t": -99.0,
         "exclude_hedging": False,
         "min_grade_rank": 0,                        # C and above
         "intro": "All tickers clearing the base multi-day persistence gate.",
     },
-    "accumulation": {
-        "label": "Accumulation",
+    "activity": {
+        "label": "Activity",
         "min_active_days": 4,
-        "min_cum_premium": 10_000_000,
+        "min_cum_premium": 25_000_000,
         "min_prem_mcap_bps": 3.0,
-        "min_consistency": 0.55,
-        "min_accel_t": -0.5,
+        "min_consistency": 0.0,                     # no purity requirement
+        "min_day_persistence": 0.0,
+        "require_no_flips": False,
+        "min_accel_t": 0.0,                         # require flat-or-rising flow
         "exclude_hedging": True,
         "min_grade_rank": 3,                        # B+ and above
-        "intro": "Names with consistent multi-day one-sided options flow — the classic accumulation pattern.",
+        "intro": "Names with sustained multi-day options flow — heavy persistent activity, any direction.",
     },
     "strong_accumulation": {
         "label": "Strong",
         "min_active_days": 5,
         "min_cum_premium": 25_000_000,
         "min_prem_mcap_bps": 5.0,
-        "min_consistency": 0.65,
+        "min_consistency": 0.30,                    # ~65/35 aggregate floor
+        "min_day_persistence": 0.60,                # ≥60% of days clearly directional
+        "require_no_flips": True,                   # no opposite-direction days
         "min_accel_t": 0.5,
         "exclude_hedging": True,
         "min_grade_rank": 4,                        # A- and above
-        "intro": "Names with unusual options activity on every day of the last 5, strongly one-sided, and still rising.",
+        "intro": "Rare: every active day in the window leans the same direction, rising, and large enough to matter. Empty by design when the market is two-sided.",
     },
 }
+
+# Day-level skew floor used by ``_compute_day_persistence`` to classify
+# a single day as "clearly directional". 0.20 = ~60/40 day-level split;
+# anything less and the day is treated as flat (mixed). Strong's
+# ``min_day_persistence`` then asks how many such days share the
+# dominant direction.
+FLOW_TRACKER_DAY_SKEW_FLOOR = 0.20
 
 # Use accumulation-mode weights for conviction scoring on every row (even
 # when the user picks "All" mode) so grades stay comparable across modes
