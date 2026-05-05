@@ -684,6 +684,28 @@ table.data tbody tr:hover { background: rgba(88, 166, 255, 0.07); }
 .badge-otm-far  { color: #d29922; background: rgba(210, 153, 34, 0.15); }
 .badge-otm-deep { color: #f85149; background: rgba(248, 81, 73, 0.15); font-weight: 600; }
 .badge-counter-trend { color: #d29922; background: rgba(210, 153, 34, 0.15); font-weight: 600; }
+.badge-flow-promoted {
+  color: #a371f7;
+  background: rgba(163, 113, 247, 0.15);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  border: 1px solid rgba(163, 113, 247, 0.35);
+}
+
+/* Stage F.4 — grade evolution badge on position cards. */
+.grade-evolution {
+  display: inline-block;
+  padding: 0.1rem 0.35rem;
+  border-radius: 0.25rem;
+  font-family: var(--font-mono, monospace);
+  font-size: 0.78em;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  margin-left: 0.25rem;
+}
+.grade-evolution-good    { color: #3fb950; background: rgba(63, 185, 80, 0.13);  border: 1px solid rgba(63, 185, 80, 0.3); }
+.grade-evolution-neutral { color: #d29922; background: rgba(210, 153, 34, 0.15); border: 1px solid rgba(210, 153, 34, 0.35); }
+.grade-evolution-warn    { color: #f85149; background: rgba(248, 81, 73, 0.15);  border: 1px solid rgba(248, 81, 73, 0.35); }
 
 /* ── Utility ── */
 

@@ -13,7 +13,6 @@ from app.config import (
     DRAWDOWN_HALT_PCT,
     DRAWDOWN_SIZING_MULT,
     DRAWDOWN_THROTTLE_PCT,
-    MAX_HOLD_DAYS,
     MAX_PORTFOLIO_HEAT,
     MAX_POSITIONS,
     MAX_SECTOR_PER_DIRECTION,
@@ -25,6 +24,7 @@ from app.config import (
     ROTATION_HEALTH_MARGIN,
     SIZING_TIERS,
 )
+from app.signals.hold_config import resolve_hold_config
 from app.features.options_context import fetch_options_context
 from app.features.price_features import compute_features, fetch_ohlcv
 from app.features.sector_map import get_sector
@@ -337,6 +337,7 @@ def _build_position(sig: dict, risk_pct: float) -> dict | None:
         "gamma_flip_level_estimate": sig.get("gamma_flip_level_estimate"),
         "iv_rank": sig.get("iv_rank"),
         "iv_current": sig.get("iv_current"),
+        "dominant_dte_bucket": sig.get("dominant_dte_bucket"),
         "partial_pnl_pct": 0.0,
         "risk_pct": risk_pct,
         "risk_dollar": round(actual_risk_dollar, 2),
@@ -556,7 +557,8 @@ def _check_exits(pos: dict, bar: pd.Series) -> tuple[str | None, float, str]:
     else:
         unrealized_r = (pos["entry_price"] - close) / risk if risk > 0 else 0.0
 
-    if pos["days_held"] >= MAX_HOLD_DAYS and unrealized_r < 1.0:
+    max_hold_days, time_stop_min_r = resolve_hold_config(pos.get("dominant_dte_bucket"))
+    if pos["days_held"] >= max_hold_days and unrealized_r < time_stop_min_r:
         return "time_stop", close, ""
 
     return None, 0.0, ""
@@ -637,8 +639,30 @@ def update_positions(portfolio: str = "default") -> dict:
             pos["iv_rank"] = opts_ctx.get("iv_rank")
             pos["iv_current"] = opts_ctx.get("iv_current")
 
-        trail_update = compute_trailing_stops(pos, df, options_ctx=opts_ctx)
+        # Stage F.2 — daily flow-aware enrichment for position health.
+        # Stamps `current_grade`, `current_sector_heat`, `current_unusual_flow_dir`
+        # so the new flow-aware health components (Stage F.1) and the
+        # trailing-stop tightener (Stage F.3) have live data to react to.
+        try:
+            from app.signals.positions_enrichment import (
+                enrich_position_with_live_flow,
+            )
+            enrich_position_with_live_flow(pos)
+        except Exception as fpe:
+            # Never let enrichment break the daily update loop.
+            print(f"  [positions] flow enrichment failed for {ticker}: {fpe}")
+
+        # Stage F.3 — flow-decay-aware trail tightening. The factor (0..1)
+        # is computed from the same flow-aware penalties that drive
+        # health; `compute_trailing_stops` accepts it as `flow_decay_factor`
+        # and tightens the chandelier accordingly when flow has decayed.
+        from app.signals.position_health import _flow_decay_factor
+        flow_factor = _flow_decay_factor(pos)
+        trail_update = compute_trailing_stops(
+            pos, df, options_ctx=opts_ctx, flow_decay_factor=flow_factor,
+        )
         pos.update(trail_update)
+        pos["flow_decay_factor"] = round(flow_factor, 3)
 
         # Fetch live enrichment data for position health scoring
         enrichment: dict = {}

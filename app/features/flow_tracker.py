@@ -28,6 +28,63 @@ from app.config import (
 )
 
 
+def _load_recalibrated_weights() -> dict | None:
+    """Read ``data/conviction_recalibration.json`` if the feature flag is on
+    and the global fit was accepted. Returns the weight dict mapped to the
+    flow-tracker key names (persistence/intensity/...) or None when the
+    legacy weights should be used (flag off, file missing, fit rejected,
+    or OOS Spearman ≤ 0).
+    """
+    try:
+        from app.config import RECALIBRATED_WEIGHTS_PATH, USE_RECALIBRATED_WEIGHTS
+    except Exception:
+        return None
+    if not USE_RECALIBRATED_WEIGHTS:
+        return None
+    try:
+        import json
+        with open(RECALIBRATED_WEIGHTS_PATH) as f:
+            recal = json.load(f)
+    except Exception:
+        return None
+    g = recal.get("global", {}) if isinstance(recal, dict) else {}
+    if not g.get("accept"):
+        return None
+    sp = g.get("oos_spearman")
+    try:
+        if sp is None or float(sp) <= 0:
+            return None
+    except Exception:
+        return None
+    raw = g.get("weights") or {}
+    # Strip the "_proxy" suffix used in the recalibration module so the
+    # keys line up with the flow-tracker formula.
+    mapped: dict[str, float] = {}
+    for k, v in raw.items():
+        key = k.replace("_proxy", "")
+        try:
+            mapped[key] = float(v)
+        except Exception:
+            continue
+    # Sanity: must contain all 6 expected keys with non-negative values.
+    expected = {"persistence", "intensity", "consistency", "accel", "mass", "oi_change"}
+    if not expected.issubset(mapped) or any(v < 0 for v in mapped.values()):
+        return None
+    s = sum(mapped.values())
+    if s <= 0:
+        return None
+    return {k: v / s for k, v in mapped.items()}
+
+
+_RECAL = _load_recalibrated_weights()
+if _RECAL is not None:
+    FLOW_TRACKER_WEIGHTS_ACCUM = {**FLOW_TRACKER_WEIGHTS_ACCUM, **_RECAL}
+    print(f"  [flow-tracker] using recalibrated weights from data/conviction_recalibration.json: "
+          f"persistence={_RECAL['persistence']:.2f} intensity={_RECAL['intensity']:.2f} "
+          f"consistency={_RECAL['consistency']:.2f} accel={_RECAL['accel']:.2f} "
+          f"mass={_RECAL['mass']:.2f} oi_change={_RECAL['oi_change']:.2f}")
+
+
 # Grade rank used for `min_grade_rank` gates in FLOW_TRACKER_MODES.  Higher
 # rank = better grade.  Keep in sync with `grade_explainer.conviction_grade`.
 _GRADE_RANK = {"C": 0, "B-": 1, "B": 2, "B+": 3, "A-": 4, "A": 5, "A+": 6}

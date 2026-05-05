@@ -236,6 +236,111 @@ def _stop_proximity_penalty(pos: dict, close: float, atr: float) -> float:
     return 0.0
 
 
+# ---------------------------------------------------------------------------
+# Stage F.1 — flow-aware health components.
+#
+# These three penalties give the existing trade-management framework an
+# *exit signal* sourced from Flow Tracker / sector heat / unusual flow
+# rather than purely from price action. Rationale: a position that
+# entered on Grade A flow but whose flow has decayed materially is in a
+# worse state than the price chart alone suggests — we want to start
+# tightening the trail / preferring rotation before the price-based
+# trail catches up.
+#
+# All three penalties read from per-position fields stamped by Stage F.2
+# (``update_positions`` enriches each open position daily with
+# ``current_grade``, ``current_sector_heat``, ``current_unusual_flow_dir``).
+# When the enrichment is missing, the penalty is 0 (no opinion).
+# ---------------------------------------------------------------------------
+
+
+_GRADE_RANK = {"C": 0, "B-": 1, "B": 2, "B+": 3, "A-": 4, "A": 5, "A+": 6}
+
+
+def _grade_rank(label: str | None) -> int | None:
+    if not label:
+        return None
+    s = str(label).strip()
+    return _GRADE_RANK.get(s)
+
+
+def _grade_decay_penalty(pos: dict) -> float:
+    """Penalty when current Flow Tracker grade has dropped from entry.
+
+    Compares ``pos['current_grade']`` against ``pos['conviction_grade']``
+    (stamped at entry). 1 tier drop → 0.5 penalty, 2 tiers → 1.0,
+    3+ tiers → 1.5. Caps at 1.5 so a single slow-bleed position can't
+    completely zero out health.
+    """
+    entry_grade = pos.get("conviction_grade") or pos.get("entry_conviction_grade")
+    cur_grade = pos.get("current_grade")
+    er = _grade_rank(entry_grade)
+    cr = _grade_rank(cur_grade)
+    if er is None or cr is None:
+        return 0.0
+    drop = er - cr
+    if drop <= 0:
+        return 0.0
+    return min(0.5 * drop, 1.5)
+
+
+def _sector_heat_reversal_penalty(pos: dict) -> float:
+    """Penalty when sector heat has flipped against the position direction.
+
+    ``pos['current_sector_heat']`` is the live sector-heat aggregate
+    (``-10..+10`` signed scale; positive = bullish basket, negative =
+    bearish basket). For a LONG position, a heat reading of < -2 is a
+    notable reversal. For SHORT, > +2 is.
+    """
+    heat = pos.get("current_sector_heat")
+    if heat is None:
+        return 0.0
+    try:
+        h = float(heat)
+    except (TypeError, ValueError):
+        return 0.0
+    direction = pos.get("direction", "LONG")
+    if direction == "LONG" and h <= -2.0:
+        return min(abs(h) / 5.0, 1.5)  # at h=-7.5 → cap 1.5
+    if direction == "SHORT" and h >= 2.0:
+        return min(h / 5.0, 1.5)
+    return 0.0
+
+
+def _unusual_flow_flip_penalty(pos: dict) -> float:
+    """Penalty when the ticker's unusual options flow has flipped direction.
+
+    ``pos['current_unusual_flow_dir']`` is one of ``"BULLISH"``,
+    ``"BEARISH"`` or ``None`` (insufficient flow). Flip = opposite to
+    position direction. Flat penalty (1.0) since this is binary.
+    """
+    cur = pos.get("current_unusual_flow_dir")
+    if not cur:
+        return 0.0
+    direction = pos.get("direction", "LONG")
+    if direction == "LONG" and str(cur).upper() == "BEARISH":
+        return 1.0
+    if direction == "SHORT" and str(cur).upper() == "BULLISH":
+        return 1.0
+    return 0.0
+
+
+def _flow_decay_factor(pos: dict) -> float:
+    """Compute a 0-1 factor used by Stage F.3 to tighten trailing stops.
+
+    Returns 1.0 = no tightening, 0.0 = maximum tightening (stop moves to
+    its post-T1 / hybrid target). Linear blend of the three flow-aware
+    penalties capped to a sensible range.
+    """
+    total_pen = (
+        _grade_decay_penalty(pos)
+        + _sector_heat_reversal_penalty(pos)
+        + _unusual_flow_flip_penalty(pos)
+    )
+    # Total possible: 1.5 + 1.5 + 1.0 = 4.0. Normalize and invert.
+    return float(max(0.0, min(1.0, 1.0 - total_pen / 4.0)))
+
+
 def _classify_state(health: float) -> str:
     if health >= HEALTH_STRONG_THRESHOLD:
         return "STRONG"
@@ -296,7 +401,12 @@ def compute_position_health(pos: dict, enrichment: dict | None = None) -> dict:
     base = trend + structure + momentum + target_dist + options
     decay = _conviction_decay(pos, close)
     stop_pen = _stop_proximity_penalty(pos, close, atr)
-    health = max(0.0, min(base - decay - stop_pen, 10.0))
+    # Stage F.1 — flow-aware penalties (max 4.0 total, capped per-component).
+    grade_decay_pen = _grade_decay_penalty(pos)
+    sector_pen = _sector_heat_reversal_penalty(pos)
+    unusual_pen = _unusual_flow_flip_penalty(pos)
+    flow_total_pen = grade_decay_pen + sector_pen + unusual_pen
+    health = max(0.0, min(base - decay - stop_pen - flow_total_pen, 10.0))
 
     prev_health = pos.get("health")
     health_at_entry = pos.get("health_at_entry")
@@ -324,5 +434,8 @@ def compute_position_health(pos: dict, enrichment: dict | None = None) -> dict:
             "options": round(options, 3),
             "decay_penalty": round(decay, 2),
             "stop_penalty": round(stop_pen, 2),
+            "grade_decay_penalty": round(grade_decay_pen, 2),
+            "sector_heat_reversal_penalty": round(sector_pen, 2),
+            "unusual_flow_flip_penalty": round(unusual_pen, 2),
         },
     }

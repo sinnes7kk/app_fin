@@ -888,9 +888,13 @@ def _enrich_earnings(results: list[dict]) -> list[dict]:
     """Enrich final signals with earnings proximity data.
 
     Attaches next earnings date and applies a score penalty when earnings
-    fall within the hold window (binary event risk).
+    fall within EARNINGS_RISK_WINDOW_DAYS (binary event risk window,
+    decoupled from per-bucket MAX_HOLD_DAYS — even a leap trade with a
+    25-day intended hold gets the earnings flag if ER is within 5 trading
+    days, because earnings vol is the dominant overnight-gap risk).
     """
-    from app.config import MAX_HOLD_DAYS
+    from app.signals.hold_config import resolve_earnings_window_days
+    er_window = resolve_earnings_window_days()
 
     for r in results:
         er = fetch_earnings(r["ticker"])
@@ -903,7 +907,7 @@ def _enrich_earnings(results: list[dict]) -> list[dict]:
         r["days_until_earnings"] = er["days_until_earnings"]
         r["last_eps_surprise"] = er["last_eps_surprise"]
 
-        if er["days_until_earnings"] is not None and er["days_until_earnings"] <= MAX_HOLD_DAYS:
+        if er["days_until_earnings"] is not None and er["days_until_earnings"] <= er_window:
             r["final_score"] = round(r["final_score"] - EARNINGS_WEIGHT, 4)
             r["earnings_imminent"] = True
         else:
@@ -1580,24 +1584,13 @@ def run_flow_to_price_pipeline(
             # returns for matured rows, and refresh the attribution
             # report.  Guarded individually so a failure in one step
             # doesn't break the rest of the pipeline.
-            try:
-                from app.analytics.grade_history import (
-                    attach_forward_returns,
-                    persist_grade_history,
-                )
-                from app.utils.market_calendar import current_trading_day
-                as_of_today = current_trading_day().isoformat()
-                wrote = persist_grade_history(qualified or [], as_of=as_of_today)
-                attached = attach_forward_returns(window=5)
-                print(f"  [grade-history] wrote={wrote} attached={attached}")
-            except Exception as ge:
-                print(f"  [grade-history] skipped: {ge}")
-
-            try:
-                from app.analytics.grade_attribution import refresh_attribution
-                refresh_attribution()
-            except Exception as ae:
-                print(f"  [grade-attribution] skipped: {ae}")
+            # NOTE: grade persistence intentionally moved to *after* the
+            # enriched snapshot save (see "[grade-history v2] enriched
+            # persist" block further below).  The early `qualified` here
+            # is computed against an unenriched snapshot — it lacks
+            # `dominant_dte_bucket`, `sweep_share`, `multileg_share`,
+            # which would otherwise leak into grade_history.csv as
+            # "unknown".
         except Exception as se:
             print(f"  [sentiment] skipped: {se}")
 
@@ -1994,6 +1987,31 @@ def run_flow_to_price_pipeline(
             )
 
         save_flow_feature_snapshot(feature_table, premium_buckets=premium_buckets)
+
+        # [grade-history v2] enriched persist — re-runs compute_multi_day_flow
+        # against the now-enriched snapshot so the grade_history.csv panel
+        # has full DTE/sweep/multileg coverage instead of leaking ~50%
+        # "unknown" buckets from the early (unenriched) call above.
+        try:
+            from app.analytics.grade_history import (
+                attach_forward_returns,
+                persist_grade_history,
+            )
+            from app.features.flow_tracker import compute_multi_day_flow as _ctf_enriched
+            from app.utils.market_calendar import current_trading_day
+            as_of_today = current_trading_day().isoformat()
+            qualified_enriched = _ctf_enriched()
+            wrote = persist_grade_history(qualified_enriched or [], as_of=as_of_today)
+            attached = attach_forward_returns(window=5)
+            print(f"  [grade-history] wrote={wrote} attached={attached}")
+        except Exception as ge:
+            print(f"  [grade-history] skipped: {ge}")
+
+        try:
+            from app.analytics.grade_attribution import refresh_attribution
+            refresh_attribution()
+        except Exception as ae:
+            print(f"  [grade-attribution] skipped: {ae}")
     except Exception as e:
         print(f"  [flow-tracker] flow-feature merge failed: {e}")
 
@@ -2091,6 +2109,30 @@ def run_flow_to_price_pipeline(
     _run_entry_timing_agent_shadow(final_results)
     _run_devils_advocate_agent_shadow(final_results)
     _run_orchestrator_shadow(final_results)
+
+    # Stage E — auto-promote Flow Tracker Grade A entries that did not
+    # already produce a signal. Synthesizes an ATR-derived trade plan
+    # gated by the EMA20 trend-confirm sanity check (see
+    # app/signals/flow_promote.py docstring for the gate spec).
+    try:
+        from app.features.flow_tracker import compute_multi_day_flow as _ctf_promote
+        from app.signals.flow_promote import promote_flow_tracker_grade_a
+
+        flow_qualified = _ctf_promote()
+        promoted, promote_summary = promote_flow_tracker_grade_a(
+            flow_qualified, final_results,
+        )
+        if promoted:
+            final_results.extend(promoted)
+        if promote_summary.get("promoted") or promote_summary.get("skipped_sanity_gate"):
+            print(
+                f"  [flow-promote] promoted={promote_summary['promoted']} "
+                f"skipped_already={promote_summary['skipped_already_signal']} "
+                f"skipped_gate={promote_summary['skipped_sanity_gate']} "
+                f"skipped_no_ohlcv={promote_summary['skipped_no_ohlcv']}"
+            )
+    except Exception as fpe:
+        print(f"  [flow-promote] skipped: {fpe}")
 
     # Layer 3 — freight-train flag. Compute sector heat here once (the
     # CSV side output downstream re-uses the same frame) and stamp

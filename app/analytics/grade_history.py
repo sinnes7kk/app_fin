@@ -123,10 +123,21 @@ def persist_grade_history(grades: list[dict[str, Any]], as_of: str) -> int:
     ]
 
     new_rows: list[dict[str, Any]] = []
+    null_dte_count = 0
     for g in grades:
         grade = g.get("conviction_grade")
         if not grade:
             continue
+        # Guard against the legacy bug where the early (unenriched) snapshot
+        # path produced rows without dominant_dte_bucket. The enriched
+        # persist call (pipeline.py "[grade-history v2]") fixes the source;
+        # we still write rows with explicit "unknown" rather than null so
+        # downstream filters / per-bucket configs can target the fallback
+        # bucket cleanly.
+        dte_bucket = g.get("dominant_dte_bucket")
+        if not dte_bucket:
+            null_dte_count += 1
+            dte_bucket = "unknown"
         row = {
             "as_of": as_of,
             "ticker": g.get("ticker"),
@@ -149,12 +160,21 @@ def persist_grade_history(grades: list[dict[str, Any]], as_of: str) -> int:
             "latest_oi_change": g.get("latest_oi_change"),
             "perc_3_day_total_latest": g.get("perc_3_day_total_latest"),
             "perc_30_day_total_latest": g.get("perc_30_day_total_latest"),
-            "dominant_dte_bucket": g.get("dominant_dte_bucket"),
+            "dominant_dte_bucket": dte_bucket,
             "premium_source": g.get("premium_source"),
             "forward_excess_return": "",
             "forward_attached_at": "",
         }
         new_rows.append({k: _coerce(v) for k, v in row.items()})
+
+    if null_dte_count and new_rows and null_dte_count / len(new_rows) > 0.20:
+        # Loud warning: > 20% of rows persisted with unknown DTE most likely
+        # means the enriched-snapshot sequencing is broken again.
+        print(
+            f"  [grade-history] WARN: {null_dte_count}/{len(new_rows)} rows "
+            f"persisted with dominant_dte_bucket=unknown; "
+            f"enrichment pipeline may be misordered"
+        )
 
     combined = existing + new_rows
     _write_rows(combined)

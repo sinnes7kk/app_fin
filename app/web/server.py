@@ -1052,7 +1052,18 @@ def _candidates_card_fragments(
             except (TypeError, ValueError):
                 pass
 
-        head = f'<span class="data-card-badges">{direc}{gamma}{ct_badge}{er_badge}</span>'
+        promoted_badge = ""
+        # Stage E.3 — Flow-Tracker auto-promoted signals get a distinct
+        # badge so the human reviewer immediately knows the row came in
+        # via flow_promote.py rather than the standard structural path.
+        src_val = _row_scalar(row, "source")
+        if (str(src_val) == "flow_promoted") or _row_scalar(row, "promoted_from_flow_tracker"):
+            promoted_badge = (
+                '<span class="badge badge-flow-promoted" '
+                'title="Auto-promoted from Flow Tracker Grade A. ATR-derived plan, '
+                'EMA20 trend-confirmed.">Promoted</span>'
+            )
+        head = f'<span class="data-card-badges">{direc}{gamma}{ct_badge}{er_badge}{promoted_badge}</span>'
         pairs: list[tuple[str, str]] = [
             ("Flow", _conviction_span(_row_scalar(row, "flow_score_scaled"))),
             ("Price", _conviction_span(_row_scalar(row, "price_score"))),
@@ -1405,7 +1416,31 @@ def _positions_card_fragments(rows: list[dict]) -> list[str]:
         if heat_pct is not None and heat_pct > 0:
             heat_badge = f'<span class="pos-heat" title="Risk as % of total open notional">{heat_pct:.1f}% heat</span>'
 
-        head = f'<span class="data-card-badges">{direc}{health_badge}{r_market_badge}{heat_badge}</span>'
+        # Stage F.4 — grade evolution badge.
+        # Shows entry → current Flow Tracker grade so the trader sees decay
+        # at a glance. The flow_decay_factor (1.0 = no decay, 0.0 = max
+        # decay) drives a CSS class that colors the badge.
+        grade_evolution_badge = ""
+        entry_g = r.get("entry_grade") or r.get("conviction_grade")
+        cur_g = r.get("current_grade")
+        if entry_g and cur_g and entry_g != cur_g:
+            decay = float(r.get("flow_decay_factor") or 1.0)
+            decay_cls = "good" if decay > 0.85 else "neutral" if decay > 0.6 else "warn"
+            grade_evolution_badge = (
+                f'<span class="grade-evolution grade-evolution-{decay_cls}" '
+                f'title="Flow Tracker grade at entry vs today. Decay factor: {decay:.2f}.">'
+                f'{html_escape(str(entry_g))}→{html_escape(str(cur_g))}</span>'
+            )
+        elif entry_g and cur_g and entry_g == cur_g:
+            grade_evolution_badge = (
+                f'<span class="grade-evolution grade-evolution-good" '
+                f'title="Flow Tracker grade unchanged since entry.">{html_escape(str(entry_g))}</span>'
+            )
+
+        head = (
+            f'<span class="data-card-badges">{direc}{health_badge}{r_market_badge}'
+            f'{heat_badge}{grade_evolution_badge}</span>'
+        )
         pairs: list[tuple[str, str]] = [
             ("Health", _conviction_span(r.get("health"))),
             ("Unreal R", _fmt_card_num(r.get("unrealized_r"), 2)),

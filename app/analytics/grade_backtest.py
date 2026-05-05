@@ -58,6 +58,14 @@ FORWARD_WINDOW = 5
 ASSUMED_STOP_PCT = 0.02  # 2% — rough R-multiple normalizer for swing trades
 MAX_HISTORY_DAYS = 90
 
+# Stage D.4 — when True, the headline `avg_r` reported in `grade_stats.json`
+# is computed from the bar-by-bar replay engine (`app.analytics.trade_replay`)
+# instead of the old `(signed_excess_return / 0.02)`. The replay metric is
+# the trustworthy ground truth (faithful to actual exit logic). We keep the
+# legacy path as a fallback when the replay engine fails (e.g. OHLCV fetch
+# error) so the dashboard never goes blank.
+USE_REPLAY_R_TARGET = True
+
 
 def _archive_source() -> Path:
     """Prefer the append-only archive; fall back to the hot CSV.
@@ -183,11 +191,14 @@ def _forward_excess_return(ticker: str, entry_date: str, window: int = FORWARD_W
 
 
 def _aggregate(rows: list[dict[str, Any]]) -> dict[str, Any]:
-    """Summary stats for a list of {grade, direction, forward_excess_return} rows.
+    """Summary stats for a list of {grade, direction, replay_r OR excess_return} rows.
+
+    When ``replay_r`` is present on the row (preferred path), it is used as
+    the R-multiple directly. Otherwise we fall back to the legacy
+    ``(signed_excess_return / ASSUMED_STOP_PCT)`` formula for back-compat.
 
     Buckets 7-tier grades into their A/B/C family so trailing stats stay
-    statistically stable even as UI tiers refine (A+ / A- still count as
-    A for backtest purposes).
+    statistically stable even as UI tiers refine.
     """
     from app.features.grade_explainer import coarse_grade
 
@@ -202,18 +213,31 @@ def _aggregate(rows: list[dict[str, Any]]) -> dict[str, Any]:
                 "best_r": None,
                 "worst_r": None,
                 "avg_excess_return_pct": None,
+                "metric_source": "n/a",
             }
             continue
 
         signed_rs: list[float] = []
         signed_excess: list[float] = []
+        replay_n = 0
+        legacy_n = 0
         for r in subset:
             sign = 1.0 if r["direction"] == "BULLISH" else -1.0
-            rr = (sign * r["excess_return"]) / ASSUMED_STOP_PCT
+            if r.get("replay_r") is not None:
+                rr = float(r["replay_r"])
+                replay_n += 1
+            else:
+                rr = (sign * r["excess_return"]) / ASSUMED_STOP_PCT
+                legacy_n += 1
             signed_rs.append(rr)
-            signed_excess.append(sign * r["excess_return"])
+            signed_excess.append(sign * r.get("excess_return", 0.0))
 
         wins = sum(1 for r in signed_rs if r > 0)
+        metric_source = (
+            "replay" if replay_n == len(subset)
+            else "mixed" if replay_n > 0
+            else "legacy"
+        )
         out[grade] = {
             "count": len(subset),
             "hit_rate": round(wins / len(subset), 3),
@@ -221,6 +245,7 @@ def _aggregate(rows: list[dict[str, Any]]) -> dict[str, Any]:
             "best_r": round(max(signed_rs), 2),
             "worst_r": round(min(signed_rs), 2),
             "avg_excess_return_pct": round(sum(signed_excess) / len(signed_excess) * 100, 2),
+            "metric_source": metric_source,
         }
     return out
 
@@ -253,21 +278,47 @@ def refresh_grade_stats(
 
     from app.features.grade_explainer import coarse_grade as _cg
 
+    # Stage D.4 — load replay panel once. We prefer realized R from the
+    # bar-by-bar replay engine because the legacy `(excess / 0.02)` metric
+    # is biased high (no trail / no stops, just raw 5d close-to-close).
+    replay_index: dict[tuple[str, str, str], float] = {}
+    if USE_REPLAY_R_TARGET:
+        replay_path = DATA_DIR / "grade_history_with_replay.csv"
+        if replay_path.exists():
+            try:
+                replay_df = pd.read_csv(replay_path)
+                # Build (as_of, ticker, direction) → realized_r lookup.
+                for _, rr in replay_df.iterrows():
+                    if pd.isna(rr.get("replay_realized_r")):
+                        continue
+                    key = (
+                        str(rr.get("as_of") or ""),
+                        str(rr.get("ticker") or "").upper().strip(),
+                        str(rr.get("direction") or "BULLISH").upper(),
+                    )
+                    replay_index[key] = float(rr["replay_realized_r"])
+            except Exception as e:
+                print(f"  [grade-backtest] replay panel load failed: {e}")
+
     for as_of in candidate_dates:
         grades = _historical_grades_as_of(as_of)
         for g in grades:
             if _cg(g.get("conviction_grade")) not in ("A", "B"):
                 continue
-            excess = _forward_excess_return(g["ticker"], as_of, window=forward_window)
+            ticker = g["ticker"]
+            direction = g.get("direction") or "BULLISH"
+            excess = _forward_excess_return(ticker, as_of, window=forward_window)
             if excess is None:
                 continue
+            replay_r = replay_index.get((as_of, ticker.upper(), direction.upper()))
             evaluations.append({
                 "as_of": as_of,
-                "ticker": g["ticker"],
-                "direction": g.get("direction") or "BULLISH",
+                "ticker": ticker,
+                "direction": direction,
                 "grade": g["conviction_grade"],
                 "score": g.get("conviction_score"),
                 "excess_return": excess,
+                "replay_r": replay_r,
             })
 
     stats = _aggregate(evaluations)

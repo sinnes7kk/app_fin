@@ -5,17 +5,16 @@ from __future__ import annotations
 import pandas as pd
 
 from app.config import (
-    ATR_TRAIL_MULT,
     GAMMA_NEGATIVE_TARGET_MULT,
     GAMMA_NEGATIVE_TRAIL_MULT,
     GAMMA_POSITIVE_TARGET_MULT,
     GAMMA_POSITIVE_TRAIL_MULT,
     HYBRID_TRAIL_MULT,
-    MAX_HOLD_DAYS,
     POST_T1_TRAIL_ATR,
     WALL_PROXIMITY_WARNING_ATR,
     WALL_PROXIMITY_WARNING_PCT,
 )
+from app.signals.hold_config import resolve_hold_config, resolve_trail_config
 from app.rules.continuation_rules import (
     measured_move_breakout,
     measured_move_breakdown,
@@ -291,7 +290,8 @@ def build_long_trade_plan(
         "target_1": round(target_1, 2),
         "target_2": round(target_2, 2),
         "rr_ratio": round(rr_ratio, 2),
-        "time_stop_days": MAX_HOLD_DAYS,
+        "time_stop_days": resolve_hold_config(scored_signal.get("dominant_dte_bucket"))[0],
+        "dominant_dte_bucket": scored_signal.get("dominant_dte_bucket"),
         "support": round(support, 2),
         "resistance": round(structural_resistance, 2),
         "reasons": reasons,
@@ -383,7 +383,8 @@ def build_short_trade_plan(
         "target_1": round(target_1, 2),
         "target_2": round(target_2, 2),
         "rr_ratio": round(rr_ratio, 2),
-        "time_stop_days": MAX_HOLD_DAYS,
+        "time_stop_days": resolve_hold_config(scored_signal.get("dominant_dte_bucket"))[0],
+        "dominant_dte_bucket": scored_signal.get("dominant_dte_bucket"),
         "support": round(structural_support, 2),
         "resistance": round(resistance, 2),
         "reasons": reasons,
@@ -430,11 +431,20 @@ def compute_trailing_stops(
     pos: dict,
     df: pd.DataFrame,
     options_ctx: dict | None = None,
+    flow_decay_factor: float = 1.0,
 ) -> dict:
     """Compute all three trailing stop levels for an open position.
 
     When options_ctx is provided, gamma regime scales the ATR multipliers
     and wall proximity blends in tighter trailing behavior.
+
+    ``flow_decay_factor`` is a 0..1 scalar from
+    :func:`app.signals.position_health._flow_decay_factor`. 1.0 means
+    "no flow decay; full normal trail spacing"; 0.0 means "max decay;
+    tighten the chandelier toward the hybrid trail." This lets a position
+    whose flow / sector heat has turned exit faster than the price-only
+    chandelier would, which is exactly the trader's intent: don't keep
+    riding a name where the *reason* for entering has decayed.
     """
     last = df.iloc[-1]
     atr = float(last["atr14"])
@@ -458,7 +468,13 @@ def compute_trailing_stops(
         unrealized_r = (entry - close) / risk if risk > 0 else 0.0
 
     g_mult = _gamma_trail_mult(options_ctx)
-    eff_atr_mult = ATR_TRAIL_MULT * g_mult
+    bucket_trail_mult = resolve_trail_config(pos.get("dominant_dte_bucket"))
+    # Stage F.3 — when flow has decayed, blend the chandelier mult toward
+    # the (tighter) hybrid mult. flow_decay_factor=1.0 → no change;
+    # flow_decay_factor=0.0 → fully tightened to hybrid spacing.
+    decay = max(0.0, min(1.0, float(flow_decay_factor)))
+    blended_atr_mult = bucket_trail_mult * decay + HYBRID_TRAIL_MULT * (1.0 - decay)
+    eff_atr_mult = blended_atr_mult * g_mult
     eff_hybrid_mult = HYBRID_TRAIL_MULT * g_mult
 
     wall = None

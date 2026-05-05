@@ -30,7 +30,66 @@ PARTIAL_TIERS = [
     (8.0, 0.40),
     (7.0, 0.50),  # default: half at T1
 ]
-MAX_HOLD_DAYS = 5
+
+# ──────────────────────────────────────────────────────────────────────────
+# Per-DTE-bucket hold and trail config.
+#
+# `MAX_HOLD_DAYS` (legacy, 5d) was a single global cap that was too tight
+# for `position` (31-90d DTE) trades and too loose for `lottery` (0-7d DTE)
+# trades. The replay backtest (`scripts/build_replay_backtest.py` →
+# `data/diagnostic_replay_*.md`) showed:
+#   - position bucket: median time-to-MFE ~1d, p75 ~3d, but 13.8% of plans
+#     hit T2 with 53.6% P(+2R | +1R) — capping at 5d clipped the runners.
+#   - swing/leap: too few rows to trust the recommendation (LOW confidence).
+#   - unknown: the catch-all from rows without DTE enrichment.
+#
+# These per-bucket constants replace the single global. The legacy aliases
+# `MAX_HOLD_DAYS` and `ATR_TRAIL_MULT` stay defined (resolved against
+# `position` / `unknown` to preserve back-compat) for one release while
+# all call sites migrate to `resolve_hold_config()` /
+# `resolve_trail_config()` from `app/signals/hold_config.py`.
+#
+# `EARNINGS_RISK_WINDOW_DAYS` is decoupled from MAX_HOLD: even if a leap
+# trade has a 25-day hold, we still want to skip / warn on earnings within
+# the next 5 trading days because earnings volatility is the dominant
+# overnight-gap risk regardless of intended hold.
+# ──────────────────────────────────────────────────────────────────────────
+MAX_HOLD_DAYS_BY_BUCKET = {
+    "lottery":  3,    # 0-7 DTE — fast resolution, fast exit
+    "swing":    7,    # 8-30 DTE — LOW confidence; conservative
+    "position": 10,   # 31-90 DTE — HIGH confidence from replay
+    "leap":     15,   # 91+ DTE — LOW confidence; conservative
+    "unknown":  5,    # fallback when DTE enrichment unavailable
+}
+
+ATR_TRAIL_MULT_BY_BUCKET = {
+    "lottery":  1.5,  # tight; lottery-vol expansions are short-lived
+    "swing":    2.1,  # from replay
+    "position": 2.3,  # from replay
+    "leap":     2.1,  # from replay (LOW confidence)
+    "unknown":  2.4,  # from replay
+}
+
+# Time-stop minimum-R to keep a position past its bucket MAX_HOLD. If the
+# position has not reached this many R after MAX_HOLD bars, time-stop
+# fires. Lower for buckets where +0.5R/3d hit-rates are weaker.
+TIME_STOP_MIN_R_BY_BUCKET = {
+    "lottery":  0.5,
+    "swing":    0.5,
+    "position": 1.0,
+    "leap":     0.5,
+    "unknown":  1.0,
+}
+
+# Earnings filter window (decoupled from MAX_HOLD). Skip / warn entries
+# where ER falls within this many trading days regardless of intended hold.
+EARNINGS_RISK_WINDOW_DAYS = 5
+
+# Legacy aliases. Kept so any code still importing `MAX_HOLD_DAYS` or
+# `ATR_TRAIL_MULT` directly keeps working until migrated. New code should
+# use `resolve_hold_config(dominant_dte_bucket)` from
+# `app/signals/hold_config.py` instead.
+MAX_HOLD_DAYS = MAX_HOLD_DAYS_BY_BUCKET["unknown"]
 
 GAMMA_NEGATIVE_TARGET_MULT = 1.15
 GAMMA_POSITIVE_TARGET_MULT = 0.85
@@ -124,6 +183,24 @@ FREIGHT_TRAIN_MIN_STREAK = 4
 FREIGHT_TRAIN_MIN_MEAN_FLOW = 0.5
 FREIGHT_TRAIN_REQUIRE_RISING_TREND = True
 FREIGHT_TRAIN_SECTOR_HEAT_FLOOR = 5.0  # 0-10 scale from app/features/sector_heat.py
+
+# ──────────────────────────────────────────────────────────────────────────
+# Stage E — Flow Tracker auto-promotion.
+#
+# When enabled, ``app/signals/flow_promote.py`` synthesizes an ATR-based
+# trade plan for any Flow Tracker Grade A entry that:
+#   - Has conviction_score >= FLOW_PROMOTE_MIN_SCORE.
+#   - Has close on the right side of EMA20 (long: above; short: below)
+#     when FLOW_PROMOTE_REQUIRE_EMA20_TREND_CONFIRM is True.
+#   - Is NOT already in the main signal list.
+#
+# Promoted signals are tagged with ``promoted_from_flow_tracker=True``
+# and carry ``source="flow_promoted"`` so the dashboard can render a
+# distinct badge and the "auto-promoted" filter chip targets them.
+# ──────────────────────────────────────────────────────────────────────────
+FLOW_PROMOTE_ENABLED = True
+FLOW_PROMOTE_MIN_SCORE = 8.0
+FLOW_PROMOTE_REQUIRE_EMA20_TREND_CONFIRM = True
 
 # Multi-day flow persistence
 FLOW_PERSISTENCE_DAYS = 3    # look back this many calendar days
@@ -345,6 +422,19 @@ FLOW_TRACKER_WEIGHTS_ACCUM = {
     "mass":        0.05,
     "oi_change":   0.05,
 }
+
+# Wire-through for the walk-forward weight refit (Stage D).
+#
+# When ``USE_RECALIBRATED_WEIGHTS`` is True, ``app.features.flow_tracker``
+# checks ``data/conviction_recalibration.json`` at import time. If the
+# global fit reports ``accept=True`` AND its OOS Spearman is positive,
+# the weights from that fit replace ``FLOW_TRACKER_WEIGHTS_ACCUM`` for
+# scoring. Otherwise the legacy weights stay in effect — the scripts/
+# pipeline never silently downgrades to a fit that didn't validate.
+USE_RECALIBRATED_WEIGHTS = True
+RECALIBRATED_WEIGHTS_PATH = (
+    Path(__file__).resolve().parents[1] / "data" / "conviction_recalibration.json"
+)
 FLOW_TRACKER_WEIGHTS_LEGACY = {
     "persistence": 0.30,
     "intensity":   0.30,
