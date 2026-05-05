@@ -3859,6 +3859,18 @@ body.ref-modal-open {
   background: linear-gradient(90deg, #58a6ff 0%, #2f81f7 100%);
   transition: width 0.3s ease;
 }
+.backtest-progress-indeterminate {
+  width: 35%;
+  animation: backtest-indeterminate 1.4s infinite linear;
+}
+@keyframes backtest-indeterminate {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(285%); }
+}
+.backtest-progress-note {
+  margin-top: 0.55rem;
+  font-size: 0.78rem;
+}
 .backtest-error {
   margin-top: 0.85rem;
   padding: 0.55rem 0.75rem;

@@ -1,0 +1,97 @@
+name: Replay backtest + recalibration
+
+on:
+  # Sunday 22:00 UTC ≈ 18:00 ET (during DST), 17:00 ET (in EST).
+  # Refreshes diagnostic_replay_<date>.md, grade_history_with_replay.csv,
+  # and (when accepted by the OOS gate) conviction_recalibration.json.
+  schedule:
+    - cron: "0 22 * * 0"
+
+  # Manual trigger from the Backtest panel in the local dashboard
+  # (POST /api/run-backtest) and from the GitHub Actions UI.
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Which steps to run"
+        required: true
+        default: "both"
+        type: choice
+        options:
+          - replay
+          - recal
+          - both
+
+permissions:
+  contents: write
+
+# Backtest runs are intrinsically serial — they read/write the same
+# data/grade_history_with_replay.csv. Cancel-in-progress is fine here
+# because re-dispatching always wants the latest panel.
+concurrency:
+  group: backtest
+  cancel-in-progress: true
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    env:
+      MODE: ${{ github.event.inputs.mode || 'both' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run replay backtest
+        if: env.MODE == 'replay' || env.MODE == 'both'
+        run: python scripts/build_replay_backtest.py
+
+      - name: Run conviction recalibration
+        if: env.MODE == 'recal' || env.MODE == 'both'
+        run: python scripts/recalibrate_conviction.py
+
+      - name: Commit backtest artifacts
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Explicit allowlist mirrors the hourly_scan.yml pattern. Any
+          # backtest-produced artifact must appear here or it will be
+          # left unstaged and lost.
+          for f in \
+            data/grade_history_with_replay.csv \
+            data/replay_recommended_config.json \
+            data/conviction_recalibration.json \
+            data/diagnostic_replay_*.md \
+            data/diagnostic_recalibration_*.md; do
+            # Tolerate absent files (e.g. recal-only runs don't refresh
+            # diagnostic_replay) — same idiom as hourly_scan.
+            for path in $f; do
+              [ -e "$path" ] && git add "$path" || true
+            done
+          done
+
+          git diff --cached --quiet && echo "No backtest artifacts changed" && exit 0
+
+          git commit -m "auto: backtest ($MODE) $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+          # Same retry pattern as hourly_scan: pull --rebase --autostash
+          # on push rejection, up to 3 attempts.
+          for attempt in 1 2 3; do
+            if git push; then
+              echo "Push succeeded on attempt $attempt"
+              break
+            fi
+            echo "Push failed (attempt $attempt), pulling and retrying..."
+            git pull --rebase --autostash origin main || true
+          done

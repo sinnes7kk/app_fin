@@ -1,38 +1,54 @@
-"""Web-triggered backtest runner.
+"""Web-triggered backtest runner — GitHub Actions edition.
 
-Wires the existing CLI scripts (`scripts/build_replay_backtest.py` and
-`scripts/recalibrate_conviction.py`) so the dashboard can trigger them
-from a button instead of a terminal session.
+The dashboard's "Run backtest" button POSTs to ``/api/run-backtest``;
+this module dispatches the ``backtest.yml`` workflow on GitHub Actions
+via the REST API. We do not run the replay locally — the existing repo
+pattern is "Actions does heavy work, commits to main, local server
+auto-pulls every 5 min" (see ``_git_auto_pull`` in ``server.py`` and
+``.github/workflows/hourly_scan.yml``).
 
-Design notes
-------------
-- **Single source of truth**: the existing CLI scripts. We never
-  reimplement their logic here; we only spawn them as subprocesses.
-- **Status file** (`data/backtest_status.json`) is the only piece of
-  state shared between the spawned subprocess and the Flask routes.
-  Each subprocess writes progress to it; the Flask routes read it.
-- **Concurrency**: a single in-process lock plus a state-machine check
-  on the status file prevents two clicks from racing.
-- **Failure mode**: if the subprocess crashes, we record the last 4 KB
-  of its stderr in the status so the UI can surface it. We never raise
-  back into the Flask request handler.
-- **History**: we keep the last 10 runs inline in the status file so
-  the UI can render a small drift-watch table without a separate store.
+Lifecycle of a click
+--------------------
+1. ``start_backtest(mode)``  → resolves the GitHub repo from the local
+   clone's ``origin`` remote, POSTs the workflow_dispatch with input
+   ``mode``, writes ``state="running"`` + ``started_at`` to the
+   shared status file. Returns ~immediately.
+2. The frontend polls ``/api/backtest-status`` every 2s. Each call
+   eventually triggers ``_sync_with_github()`` (rate-limited to once
+   per ``GITHUB_POLL_INTERVAL_S``), which lists recent runs of
+   ``backtest.yml`` on ``main``, finds the most recent run created
+   ≥ ``started_at``, and updates the status to mirror its GitHub state.
+3. When the run reports ``conclusion`` (success / failure / cancelled /
+   skipped), the local status flips to ``completed`` or ``failed``,
+   the run summary is recorded into ``history``, and polling stops.
+4. The local server's existing auto-pull then syncs the new diagnostic
+   markdown / panel CSVs into ``data/`` within ~5 min, after which the
+   "View latest report" button picks up the fresh file.
 
-Status file shape::
+Auth
+----
+The dispatcher needs a token with ``actions:write`` on the repo. Set
+one of these env vars (resolved in order):
+
+    BACKTEST_GITHUB_TOKEN          (preferred, dedicated)
+    GITHUB_TOKEN                   (also accepted)
+
+Status file shape (unchanged from the local-only version, with two
+new GitHub-specific fields)::
 
     {
       "state": "idle" | "running" | "completed" | "failed",
       "mode": "replay" | "recal" | "both",
-      "started_at": "2026-05-05T09:00:00",
-      "completed_at": "2026-05-05T09:03:24" | null,
-      "duration_sec": 204 | null,
-      "rows_total": 104 | null,
-      "rows_done": 67 | null,
-      "current_step": "replaying" | "recalibrating" | "done",
+      "started_at": "..." | null,
+      "completed_at": "..." | null,
+      "duration_sec": int | null,
+      "current_step": "queued" | "in_progress" | "done" | "failed",
       "error": "..." | null,
-      "report_path": "data/diagnostic_replay_2026-05-05.md" | null,
-      "history": [{...}, ...]
+      "report_path": "data/diagnostic_replay_..." | null,
+      "headline": "..." | null,
+      "external_run_id": int | null,    # GitHub run id
+      "external_run_url": str | null,   # link to the run page
+      "history": [...]
     }
 """
 
@@ -42,9 +58,10 @@ import json
 import os
 import re
 import subprocess
-import sys
 import threading
 import time
+import urllib.error
+import urllib.request
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -52,20 +69,67 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[2]
 DATA_DIR = ROOT / "data"
 STATUS_FILE = DATA_DIR / "backtest_status.json"
-LOG_FILE = DATA_DIR / "backtest_run.log"
 
 VALID_MODES = {"replay", "recal", "both"}
 HISTORY_MAX = 10
+WORKFLOW_FILE = "backtest.yml"
+WORKFLOW_REF = "main"
+GITHUB_POLL_INTERVAL_S = 5.0
+GITHUB_API_BASE = "https://api.github.com"
+
 STATE_IDLE = "idle"
 STATE_RUNNING = "running"
 STATE_COMPLETED = "completed"
 STATE_FAILED = "failed"
 
 _LOCK = threading.Lock()
-_THREAD: threading.Thread | None = None
 
 
-# ---- status file helpers ----------------------------------------------
+# ---- env / repo resolution -------------------------------------------
+
+
+def _get_token() -> str | None:
+    return (
+        os.environ.get("BACKTEST_GITHUB_TOKEN")
+        or os.environ.get("GITHUB_TOKEN")
+        or None
+    )
+
+
+_REPO_RE = re.compile(
+    r"(?:github\.com[:/])([^/]+)/([^/]+?)(?:\.git)?$"
+)
+
+
+def _resolve_repo() -> tuple[str, str] | None:
+    """Read ``origin`` and parse out (owner, repo).
+
+    Supports both HTTPS (``https://github.com/owner/repo.git``) and
+    SSH (``git@github.com:owner/repo.git``) remote URLs.
+    """
+    override = os.environ.get("BACKTEST_GITHUB_REPO")
+    if override and "/" in override:
+        owner, _, repo = override.partition("/")
+        return owner.strip(), repo.strip().removesuffix(".git")
+    try:
+        out = subprocess.run(
+            ["git", "remote", "get-url", "origin"],
+            cwd=str(ROOT),
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if out.returncode != 0:
+            return None
+        m = _REPO_RE.search(out.stdout.strip())
+        if not m:
+            return None
+        return m.group(1), m.group(2)
+    except Exception:
+        return None
+
+
+# ---- status file helpers ---------------------------------------------
 
 
 def _now_iso() -> str:
@@ -79,25 +143,22 @@ def _empty_status() -> dict[str, Any]:
         "started_at": None,
         "completed_at": None,
         "duration_sec": None,
-        "rows_total": None,
-        "rows_done": None,
         "current_step": None,
         "error": None,
         "report_path": None,
         "headline": None,
+        "external_run_id": None,
+        "external_run_url": None,
+        "_last_polled_at": None,
         "history": [],
     }
 
 
-def read_status() -> dict[str, Any]:
-    """Return the current status dict (always a valid shape)."""
+def _read_raw_status() -> dict[str, Any]:
     if not STATUS_FILE.exists():
         return _empty_status()
     try:
         data = json.loads(STATUS_FILE.read_text())
-        # Defensive: stamp any missing keys against the canonical shape so
-        # the UI doesn't have to defend against partial writes from older
-        # versions.
         empty = _empty_status()
         for k, v in empty.items():
             data.setdefault(k, v)
@@ -107,7 +168,6 @@ def read_status() -> dict[str, Any]:
 
 
 def _write_status(status: dict[str, Any]) -> None:
-    """Atomic-ish write so polling reads never see a partial JSON."""
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     tmp = STATUS_FILE.with_suffix(".tmp")
     tmp.write_text(json.dumps(status, indent=2, default=str))
@@ -115,15 +175,13 @@ def _write_status(status: dict[str, Any]) -> None:
 
 
 def _update_status(**fields) -> dict[str, Any]:
-    """Merge ``fields`` into the current status and persist."""
-    cur = read_status()
+    cur = _read_raw_status()
     cur.update(fields)
     _write_status(cur)
     return cur
 
 
 def _record_history(status: dict[str, Any]) -> None:
-    """Append the current run summary to the rolling history list."""
     summary = {
         "started_at": status.get("started_at"),
         "completed_at": status.get("completed_at"),
@@ -132,6 +190,7 @@ def _record_history(status: dict[str, Any]) -> None:
         "state": status.get("state"),
         "headline": status.get("headline"),
         "report_path": status.get("report_path"),
+        "external_run_url": status.get("external_run_url"),
         "error": status.get("error"),
     }
     history = list(status.get("history") or [])
@@ -141,7 +200,84 @@ def _record_history(status: dict[str, Any]) -> None:
     _write_status(status)
 
 
-# ---- runtime helpers --------------------------------------------------
+# ---- GitHub REST helpers ---------------------------------------------
+
+
+class GitHubError(RuntimeError):
+    pass
+
+
+def _gh_request(
+    method: str,
+    path: str,
+    *,
+    json_body: dict | None = None,
+    timeout: float = 15.0,
+) -> tuple[int, dict | list | None]:
+    """Tiny urllib-based GitHub REST call. Returns (status_code, body).
+
+    We deliberately avoid a hard dependency on ``requests`` here so the
+    web layer keeps the same dep footprint as the rest of the repo.
+    """
+    token = _get_token()
+    if not token:
+        raise GitHubError(
+            "no GitHub token in env. Set BACKTEST_GITHUB_TOKEN (preferred) "
+            "or GITHUB_TOKEN. The token needs the 'actions:write' fine-grained "
+            "scope (or classic 'workflow' + 'repo')."
+        )
+
+    url = GITHUB_API_BASE + path
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "Authorization": f"Bearer {token}",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "User-Agent": "vector-alpha-backtest-runner",
+    }
+    data = None
+    if json_body is not None:
+        data = json.dumps(json_body).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+
+    req = urllib.request.Request(url=url, data=data, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            status = resp.getcode()
+            raw = resp.read().decode("utf-8") if status not in (204,) else ""
+            body = json.loads(raw) if raw else None
+            return status, body
+    except urllib.error.HTTPError as he:
+        # 422 is "workflow not found / ref not found" — surface it cleanly.
+        try:
+            body = json.loads(he.read().decode("utf-8"))
+        except Exception:
+            body = {"message": he.reason}
+        raise GitHubError(f"GitHub {method} {path} → {he.code}: {body.get('message') or body}")
+    except urllib.error.URLError as ue:
+        raise GitHubError(f"GitHub {method} {path} network error: {ue}")
+
+
+def _dispatch_workflow(owner: str, repo: str, mode: str) -> None:
+    """POST a workflow_dispatch event with our input."""
+    path = f"/repos/{owner}/{repo}/actions/workflows/{WORKFLOW_FILE}/dispatches"
+    _gh_request("POST", path, json_body={
+        "ref": WORKFLOW_REF,
+        "inputs": {"mode": mode},
+    })
+
+
+def _list_recent_runs(owner: str, repo: str, *, per_page: int = 10) -> list[dict]:
+    path = (
+        f"/repos/{owner}/{repo}/actions/workflows/{WORKFLOW_FILE}/runs"
+        f"?per_page={per_page}&branch={WORKFLOW_REF}"
+    )
+    _, body = _gh_request("GET", path)
+    if not body or not isinstance(body, dict):
+        return []
+    return body.get("workflow_runs") or []
+
+
+# ---- public state-machine helpers ------------------------------------
 
 
 def is_running() -> bool:
@@ -149,7 +285,12 @@ def is_running() -> bool:
 
 
 def latest_report_path() -> Path | None:
-    """Return the most recent ``diagnostic_replay_*.md`` file, if any."""
+    """Most recent ``diagnostic_replay_*.md`` file in data/, if any.
+
+    Surfaces a freshly-pulled GitHub-Actions artifact: the local
+    auto-pull syncs files committed by the workflow into ``data/``,
+    so this just resolves whatever's on disk now.
+    """
     candidates = sorted(
         DATA_DIR.glob("diagnostic_replay_*.md"),
         key=lambda p: p.stat().st_mtime,
@@ -167,74 +308,36 @@ def latest_recalibration_report() -> Path | None:
     return candidates[0] if candidates else None
 
 
-# ---- subprocess execution --------------------------------------------
+# ---- run-state mapping & polling -------------------------------------
 
 
-_PROGRESS_RE = re.compile(r"\[\s*(\d+)\s*/\s*(\d+)\s*\]")
-_REPLAYING_TOTAL_RE = re.compile(r"Replaying\s+(\d+)\s+rows")
+def _map_github_to_local(run: dict) -> tuple[str, str | None]:
+    """Translate (status, conclusion) into (local_state, current_step)."""
+    gh_status = (run.get("status") or "").lower()
+    gh_conclusion = (run.get("conclusion") or "").lower()
 
+    if gh_status == "completed":
+        if gh_conclusion == "success":
+            return STATE_COMPLETED, "done"
+        if gh_conclusion == "":
+            # Race: status flipped before conclusion was written. Treat
+            # as still running; next poll will resolve it.
+            return STATE_RUNNING, "completing"
+        return STATE_FAILED, gh_conclusion or "failed"
 
-def _stream_subprocess(
-    cmd: list[str],
-    *,
-    step_label: str,
-    log_handle,
-) -> tuple[int, str]:
-    """Run ``cmd``, stream stdout to log + status, return (returncode, tail).
-
-    The subprocess is launched with line-buffered stdout. Each line is:
-      - written to the run log
-      - parsed for progress markers like "[12/104] ..." which become
-        ``rows_done``/``rows_total`` in the status file
-      - kept (last 4 KB) so we can return a tail on failure
-    """
-    proc = subprocess.Popen(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        cwd=str(ROOT),
-        bufsize=1,
-        text=True,
-    )
-
-    tail_lines: list[str] = []
-    last_status_write = 0.0
-
-    if proc.stdout is not None:
-        for raw in proc.stdout:
-            line = raw.rstrip("\n")
-            log_handle.write(line + "\n")
-            log_handle.flush()
-            tail_lines.append(line)
-            if len(tail_lines) > 200:
-                tail_lines = tail_lines[-200:]
-
-            now = time.time()
-            updates: dict[str, Any] = {"current_step": step_label}
-
-            m_total = _REPLAYING_TOTAL_RE.search(line)
-            if m_total:
-                updates["rows_total"] = int(m_total.group(1))
-                updates["rows_done"] = 0
-
-            m = _PROGRESS_RE.search(line)
-            if m:
-                updates["rows_done"] = int(m.group(1))
-                if not read_status().get("rows_total"):
-                    updates["rows_total"] = int(m.group(2))
-
-            # Throttle status writes to ~once a second; a bursty
-            # subprocess can otherwise hammer the disk.
-            if (now - last_status_write) >= 0.75 or m_total is not None:
-                _update_status(**updates)
-                last_status_write = now
-
-    proc.wait()
-    return proc.returncode, "\n".join(tail_lines[-40:])
+    if gh_status in ("queued", "waiting", "pending", "requested"):
+        return STATE_RUNNING, "queued"
+    if gh_status in ("in_progress", "running"):
+        return STATE_RUNNING, "in_progress"
+    return STATE_RUNNING, gh_status or "unknown"
 
 
 def _parse_replay_headline() -> str | None:
-    """Best-effort: read the freshest replay report and pull a Grade-A line."""
+    """Best-effort: read the freshest replay report and pull a Grade-A line.
+
+    Same parser as before — works against whatever the auto-pull
+    landed in ``data/``.
+    """
     rp = latest_report_path()
     if not rp:
         return None
@@ -242,8 +345,6 @@ def _parse_replay_headline() -> str | None:
         text = rp.read_text(errors="replace")
     except Exception:
         return None
-    # Section 2 of the report has a per-grade table; grab the row whose
-    # first column (after the leading pipe) is "A" — coarse tier.
     in_table = False
     for line in text.splitlines():
         if line.startswith("| Grade") and "n" in line:
@@ -257,139 +358,168 @@ def _parse_replay_headline() -> str | None:
     return None
 
 
-def _run_chain(mode: str) -> None:
-    """Execute the requested chain. Always updates the status file with
-    ``state="completed"`` or ``state="failed"`` before returning, even
-    if a step explodes — the UI relies on that contract to re-enable
-    the run button.
+def _find_matching_run(runs: list[dict], started_at_iso: str) -> dict | None:
+    """Pick the most recent run whose ``created_at`` is at or after our
+    locally-recorded ``started_at``. We give 60 s of slack to absorb
+    clock skew between the local laptop and GitHub.
     """
-    started_at = _now_iso()
-    started_ts = time.time()
-    _update_status(
-        state=STATE_RUNNING,
-        mode=mode,
-        started_at=started_at,
-        completed_at=None,
-        duration_sec=None,
-        rows_total=None,
-        rows_done=None,
-        current_step="starting",
-        error=None,
-        report_path=None,
-        headline=None,
-    )
+    if not runs:
+        return None
+    started_dt = _parse_iso(started_at_iso)
+    if started_dt is None:
+        return runs[0]
+    threshold = started_dt - 60.0
+    for run in runs:
+        ca = _parse_iso(run.get("created_at"))
+        if ca is None:
+            continue
+        if ca >= threshold:
+            return run
+    return runs[0]
 
-    LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
-    log_handle = open(LOG_FILE, "w")
+
+def _parse_iso(s: str | None) -> float | None:
+    if not s:
+        return None
     try:
-        log_handle.write(f"==== Backtest run mode={mode} started {started_at} ====\n")
-        log_handle.flush()
-        py = sys.executable or "python3"
+        s = s.replace("Z", "+00:00")
+        return datetime.fromisoformat(s).timestamp()
+    except Exception:
+        return None
 
-        if mode in ("replay", "both"):
-            _update_status(current_step="replaying")
-            rc, tail = _stream_subprocess(
-                [py, str(ROOT / "scripts" / "build_replay_backtest.py")],
-                step_label="replaying",
-                log_handle=log_handle,
+
+def _sync_with_github() -> dict[str, Any]:
+    """Refresh the cached status from GitHub if we're currently running.
+
+    Throttled to ``GITHUB_POLL_INTERVAL_S`` per call so a chatty UI
+    doesn't burn through API quota. Always returns a status dict, never
+    raises — GitHub-side errors are recorded into ``status['error']``
+    so the UI can surface them.
+    """
+    cur = _read_raw_status()
+    if cur.get("state") != STATE_RUNNING:
+        return cur
+
+    last_polled = _parse_iso(cur.get("_last_polled_at"))
+    if last_polled is not None and (time.time() - last_polled) < GITHUB_POLL_INTERVAL_S:
+        return cur
+
+    repo = _resolve_repo()
+    if repo is None:
+        cur["error"] = "could not resolve GitHub repo from origin remote"
+        _write_status(cur)
+        return cur
+    owner, name = repo
+
+    try:
+        runs = _list_recent_runs(owner, name)
+    except GitHubError as e:
+        cur["error"] = str(e)
+        cur["_last_polled_at"] = _now_iso()
+        _write_status(cur)
+        return cur
+
+    started_at = cur.get("started_at") or _now_iso()
+    run = _find_matching_run(runs, started_at)
+    if run is None:
+        # Dispatch may not have shown up yet; just record the poll
+        # timestamp and let the next tick try again.
+        cur["_last_polled_at"] = _now_iso()
+        _write_status(cur)
+        return cur
+
+    new_state, step = _map_github_to_local(run)
+    cur["external_run_id"] = run.get("id")
+    cur["external_run_url"] = run.get("html_url")
+    cur["current_step"] = step
+    cur["_last_polled_at"] = _now_iso()
+    cur["state"] = new_state
+
+    if new_state in (STATE_COMPLETED, STATE_FAILED):
+        cur["completed_at"] = _now_iso()
+        started_ts = _parse_iso(cur.get("started_at"))
+        if started_ts is not None:
+            cur["duration_sec"] = max(0, int(time.time() - started_ts))
+        if new_state == STATE_COMPLETED:
+            # The auto-pull is what actually delivers the new files;
+            # if it hasn't run yet, the report path resolves to whatever
+            # was on disk before. Best-effort.
+            rp = latest_report_path()
+            cur["report_path"] = str(rp.relative_to(ROOT)) if rp else None
+            cur["headline"] = _parse_replay_headline()
+            cur["error"] = None
+        else:
+            cur["error"] = (
+                f"workflow failed (conclusion={run.get('conclusion')}). "
+                f"See: {run.get('html_url')}"
             )
-            if rc != 0:
-                _finalize_failure(
-                    started_ts,
-                    f"replay step exited rc={rc}",
-                    tail,
-                )
-                return
-
-        if mode in ("recal", "both"):
-            _update_status(current_step="recalibrating")
-            rc, tail = _stream_subprocess(
-                [py, str(ROOT / "scripts" / "recalibrate_conviction.py")],
-                step_label="recalibrating",
-                log_handle=log_handle,
-            )
-            if rc != 0:
-                _finalize_failure(
-                    started_ts,
-                    f"recalibration step exited rc={rc}",
-                    tail,
-                )
-                return
-
-        # success path
-        rp = latest_report_path()
-        cur = _update_status(
-            state=STATE_COMPLETED,
-            current_step="done",
-            completed_at=_now_iso(),
-            duration_sec=int(time.time() - started_ts),
-            report_path=str(rp.relative_to(ROOT)) if rp else None,
-            headline=_parse_replay_headline(),
-            error=None,
-        )
         _record_history(cur)
-        log_handle.write(f"==== completed {_now_iso()} ====\n")
-    except Exception as e:
-        _finalize_failure(started_ts, f"unexpected: {e!r}", "")
-    finally:
-        try:
-            log_handle.close()
-        except Exception:
-            pass
+    else:
+        _write_status(cur)
+
+    return cur
 
 
-def _finalize_failure(started_ts: float, error_msg: str, tail: str) -> None:
-    cur = _update_status(
-        state=STATE_FAILED,
-        completed_at=_now_iso(),
-        duration_sec=int(time.time() - started_ts),
-        current_step="failed",
-        error=f"{error_msg}\n--- tail ---\n{tail}" if tail else error_msg,
-    )
-    _record_history(cur)
+def read_status() -> dict[str, Any]:
+    """Public read: reflects the latest state, refreshing from GitHub if needed."""
+    return _sync_with_github()
 
 
-# ---- public entrypoint ------------------------------------------------
+# ---- public entrypoint -----------------------------------------------
 
 
 def start_backtest(mode: str) -> dict[str, Any]:
-    """Kick off a backtest in a background thread.
+    """Dispatch the workflow on GitHub Actions.
 
-    Returns a dict with ``ok`` (bool), ``error`` (str|None), and a
-    snapshot of the status the UI should display immediately.
+    Returns a dict with ``ok``, ``error``, and a snapshot of the status
+    the UI should display immediately. Never raises.
     """
-    global _THREAD
     if mode not in VALID_MODES:
-        return {"ok": False, "error": f"invalid mode: {mode}", "status": read_status()}
+        return {"ok": False, "error": f"invalid mode: {mode}", "status": _read_raw_status()}
 
     with _LOCK:
-        # Two layers of defense:
-        #   1) the in-process thread we may have spawned earlier
-        #   2) the status file (covers the case where the previous
-        #      flask process crashed mid-run)
-        if _THREAD is not None and _THREAD.is_alive():
-            return {"ok": False, "error": "backtest already running", "status": read_status()}
-        if is_running():
-            # Likely stale — but be conservative; force the user to ack.
+        cur = read_status()
+        if cur.get("state") == STATE_RUNNING:
             return {
                 "ok": False,
-                "error": "status file shows a run already in progress",
-                "status": read_status(),
+                "error": "a backtest is already in progress on GitHub Actions",
+                "status": cur,
             }
 
-        t = threading.Thread(target=_run_chain, args=(mode,), daemon=True)
-        _THREAD = t
-        t.start()
+        repo = _resolve_repo()
+        if repo is None:
+            return {
+                "ok": False,
+                "error": (
+                    "could not resolve GitHub repo from 'origin' remote. "
+                    "Set BACKTEST_GITHUB_REPO=owner/name to override."
+                ),
+                "status": cur,
+            }
 
-    # Give the thread a short moment to flip the status to running so the
-    # immediate response to the caller already shows the new state.
-    time.sleep(0.05)
-    return {"ok": True, "error": None, "status": read_status()}
+        try:
+            _dispatch_workflow(repo[0], repo[1], mode)
+        except GitHubError as e:
+            return {"ok": False, "error": str(e), "status": cur}
+
+        started_at = _now_iso()
+        new_status = _update_status(
+            state=STATE_RUNNING,
+            mode=mode,
+            started_at=started_at,
+            completed_at=None,
+            duration_sec=None,
+            current_step="queued",
+            error=None,
+            report_path=None,
+            headline=None,
+            external_run_id=None,
+            external_run_url=None,
+            _last_polled_at=None,
+        )
+        return {"ok": True, "error": None, "status": new_status}
 
 
 def reset_status_for_tests() -> None:
-    """Drop the status file. Test-only helper."""
     if STATUS_FILE.exists():
         STATUS_FILE.unlink()
-    global _THREAD
-    _THREAD = None

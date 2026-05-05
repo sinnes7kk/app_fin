@@ -1960,7 +1960,9 @@
         to produce realistic <strong>realized R</strong> instead of the inflated
         legacy 5-day close-to-close. Optionally chains into a walk-forward
         recalibration of conviction-score weights — applied to production only when
-        the OOS Spearman acceptance gate passes.
+        the OOS Spearman acceptance gate passes.<br>
+        <small>Runs on GitHub Actions. Results commit back to <code>main</code>;
+        the local server's auto-pull syncs them within ~5 minutes.</small>
       </p>
 
       <div class="backtest-control-card">
@@ -1990,6 +1992,7 @@
 
         <div class="backtest-action-row">
           <button id="backtest-run-btn" class="btn-accent">Run backtest</button>
+          <a id="backtest-actions-link" class="btn-ghost" target="_blank" rel="noopener" style="display:none;">Open on GitHub Actions ↗</a>
           <button id="backtest-view-report-btn" class="btn-ghost" disabled>View latest report</button>
           <button id="backtest-view-recal-btn" class="btn-ghost" disabled>View latest recalibration</button>
         </div>
@@ -1998,14 +2001,16 @@
           <div class="backtest-progress-row">
             <span class="muted">Step:</span>
             <strong id="backtest-step">&mdash;</strong>
-            <span class="muted">Rows:</span>
-            <strong id="backtest-rows">&mdash;</strong>
             <span class="muted">Elapsed:</span>
             <strong id="backtest-elapsed">&mdash;</strong>
           </div>
           <div class="backtest-progress-bar-wrap">
-            <div id="backtest-progress-bar" class="backtest-progress-bar"></div>
+            <div id="backtest-progress-bar" class="backtest-progress-bar backtest-progress-indeterminate"></div>
           </div>
+          <p class="muted backtest-progress-note">
+            Running on GitHub Actions. After completion, the local auto-pull
+            syncs the new diagnostic + panel files within ~5 min.
+          </p>
         </div>
 
         <div id="backtest-error" class="backtest-error" style="display:none;"></div>
@@ -4493,13 +4498,13 @@
       var progress = document.getElementById("backtest-progress");
       var progressBar = document.getElementById("backtest-progress-bar");
       var stepEl = document.getElementById("backtest-step");
-      var rowsEl = document.getElementById("backtest-rows");
       var elapsedEl = document.getElementById("backtest-elapsed");
       var errorEl = document.getElementById("backtest-error");
       var lastSummary = document.getElementById("backtest-last-summary");
       var historyWrap = document.getElementById("backtest-history-wrap");
       var viewReportBtn = document.getElementById("backtest-view-report-btn");
       var viewRecalBtn = document.getElementById("backtest-view-recal-btn");
+      var actionsLink = document.getElementById("backtest-actions-link");
       var modal = document.getElementById("backtest-report-modal");
       var modalTitle = document.getElementById("backtest-report-modal-title");
       var modalBody = document.getElementById("backtest-report-modal-body");
@@ -4546,19 +4551,11 @@
         if (st.state === "running") {
           startedAtTs = st.started_at ? Date.parse(st.started_at) : Date.now();
           progress.style.display = "";
-          stepEl.textContent = st.current_step || "—";
-          if (st.rows_total) {
-            rowsEl.textContent = (st.rows_done || 0) + " / " + st.rows_total;
-            var pct = Math.max(0, Math.min(100, Math.round(100 * (st.rows_done || 0) / st.rows_total)));
-            progressBar.style.width = pct + "%";
-          } else {
-            rowsEl.textContent = "—";
-            progressBar.style.width = "0%";
-          }
+          stepEl.textContent = st.current_step || "queued";
           var elapsed = startedAtTs ? Math.round((Date.now() - startedAtTs) / 1000) : 0;
           elapsedEl.textContent = fmtDuration(elapsed);
           stateText.textContent = "Running " + (st.mode ? "(" + st.mode + ") " : "") +
-            "since " + fmtTs(st.started_at);
+            "on GitHub Actions since " + fmtTs(st.started_at);
           runBtn.disabled = true;
           errorEl.style.display = "none";
           errorEl.textContent = "";
@@ -4584,6 +4581,13 @@
         viewReportBtn.disabled = !(st.report_path);
         // recal report button just checks for any historic recalibration file
         viewRecalBtn.disabled = false;
+        // GitHub Actions deep link, when we have an external run URL
+        if (st.external_run_url) {
+          actionsLink.href = st.external_run_url;
+          actionsLink.style.display = "";
+        } else {
+          actionsLink.style.display = "none";
+        }
       }
 
       function renderLastSummary(st) {
