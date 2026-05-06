@@ -1,4 +1,4 @@
-# Faithful Replay Backtest — 2026-05-06 05:37
+# Faithful Replay Backtest — 2026-05-06 06:07
 
 Source: `data/grade_history.csv` replayed bar-by-bar via `app/analytics/trade_replay.py`. Production exit logic (T2 hit, ATR trail, EMA20 trail, hybrid trail, T1 partial + post-T1 tighten, time stop) is faithfully reproduced; health-based / gamma / wall exits are skipped (no historical data).
 

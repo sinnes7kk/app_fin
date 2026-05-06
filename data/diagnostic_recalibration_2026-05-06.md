@@ -1,4 +1,4 @@
-# Conviction-Weight Recalibration — 2026-05-06 05:37
+# Conviction-Weight Recalibration — 2026-05-06 06:07
 
 Refit of `FLOW_TRACKER_WEIGHTS_ACCUM` against the bar-by-bar replay `realized_r` target produced by `scripts/build_replay_backtest.py`. Method: chronological 60/40 train-validate split, NNLS fit on the train slice, OOS Spearman rank correlation on the validate slice, weights normalized to sum 1.0.
 
