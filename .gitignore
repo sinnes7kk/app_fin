@@ -48,6 +48,9 @@ data/positions.json
 !data/insider_recent.json
 !data/earnings_cache.json
 !data/grade_history.csv
+# OHLCV disk cache — needed by replay backtest on GitHub runners,
+# where yfinance is rate-limited / blocked. Hourly scan keeps it warm.
+!data/_ohlcv_cache/*.csv
 
 # Ephemeral intra-day accumulation (rebuilt each day)
 data/dark_pool_daily_*.json

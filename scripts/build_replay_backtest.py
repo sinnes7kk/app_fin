@@ -164,16 +164,19 @@ def replay_panel(panel: pd.DataFrame, max_rows: int | None = None) -> pd.DataFra
 
     out_rows: list[dict[str, Any]] = []
     skipped = 0
+    fetch_fail: Counter = Counter()
     for i, r in enumerate(rows, start=1):
         ticker = str(r.get("ticker") or "").upper().strip()
         as_of = str(r.get("as_of") or "")
         direction = str(r.get("direction") or "BULLISH").upper()
         if not ticker or not as_of:
             skipped += 1
+            fetch_fail["missing_id"] += 1
             continue
         df = _load_ohlcv(ticker, lookback_days=120)
         if df is None or df.empty:
             skipped += 1
+            fetch_fail[ticker] += 1
             continue
         try:
             res = replay_trade_plan(
@@ -190,6 +193,29 @@ def replay_panel(panel: pd.DataFrame, max_rows: int | None = None) -> pd.DataFra
             print(f"  [{i}/{len(rows)}] processed (skipped so far: {skipped})", flush=True)
 
     print(f"\nReplay complete: {len(out_rows)} replayed, {skipped} skipped.", flush=True)
+    if fetch_fail:
+        offenders = sorted(
+            ((t, c) for t, c in fetch_fail.items() if t != "missing_id"),
+            key=lambda kv: -kv[1],
+        )
+        if offenders:
+            preview = ", ".join(f"{t}({c})" for t, c in offenders[:15])
+            more = "" if len(offenders) <= 15 else f" … +{len(offenders) - 15} more"
+            print(
+                f"OHLCV fetch failures: {len(offenders)} tickers — {preview}{more}",
+                flush=True,
+            )
+            print(
+                "  hint: cache lives in data/_ohlcv_cache/. If this list is large, "
+                "yfinance is likely rate-limited on this runner — pre-warm the cache "
+                "locally and commit, or let hourly_scan keep it fresh.",
+                flush=True,
+            )
+        if fetch_fail.get("missing_id"):
+            print(
+                f"  ({fetch_fail['missing_id']} rows skipped due to missing ticker/as_of)",
+                flush=True,
+            )
     return pd.DataFrame(out_rows)
 
 
