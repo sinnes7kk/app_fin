@@ -9,30 +9,30 @@
     "observed_mean_r": -0.3994142857142857
   },
   "position": {
-    "n": 65,
+    "n": 74,
     "MAX_HOLD_DAYS": 10,
     "TIME_STOP_MIN_R": 1.0,
     "ATR_TRAIL_MULT": 2.3,
     "confidence": "high",
     "observed_median_d_to_mfe": 1.0,
-    "observed_mean_r": 0.40462380952380955
+    "observed_mean_r": 0.40003692307692307
   },
   "leap": {
-    "n": 9,
+    "n": 11,
     "MAX_HOLD_DAYS": 15,
     "TIME_STOP_MIN_R": 0.5,
-    "ATR_TRAIL_MULT": 2.1,
+    "ATR_TRAIL_MULT": 2.0,
     "confidence": "low",
     "observed_median_d_to_mfe": 1.0,
-    "observed_mean_r": -0.20971250000000002
+    "observed_mean_r": -0.16023333333333334
   },
   "unknown": {
-    "n": 82,
+    "n": 86,
     "MAX_HOLD_DAYS": 5,
     "TIME_STOP_MIN_R": 1.0,
-    "ATR_TRAIL_MULT": 2.4,
+    "ATR_TRAIL_MULT": 2.3,
     "confidence": "high",
     "observed_median_d_to_mfe": 1.0,
-    "observed_mean_r": 0.4140380281690141
+    "observed_mean_r": 0.3901602739726027
   }
 }
