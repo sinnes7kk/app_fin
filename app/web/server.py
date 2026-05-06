@@ -3440,8 +3440,38 @@ def index():
         "hottest_chains": _hottest_chains_data,
         # Insider data for candidate enrichment
         "insider_by_ticker": _insider_by_ticker,
+        # GitHub repo identity for the Backtest panel — surfaced so the
+        # static-dashboard build (which has no Flask runtime) can still
+        # deep-link to GitHub Actions and fetch run status from the
+        # public REST API. Resolved from the local clone's origin
+        # remote; falls back to env override or empty string (UI shows
+        # a warning in that case).
+        "backtest_repo": _resolve_backtest_repo(),
+        "backtest_workflow_file": "backtest.yml",
     }
     return render_template("index.html", **ctx)
+
+
+def _resolve_backtest_repo() -> str:
+    """Return ``owner/repo`` for the dashboard, or an empty string.
+
+    Mirrors the resolution logic in app/web/backtest_runner._resolve_repo
+    but returns a single ``owner/repo`` string suitable for direct use
+    in template URLs and JS const initialization. Read-only operation;
+    safe to call on every request.
+    """
+    override = os.environ.get("BACKTEST_GITHUB_REPO")
+    if override and "/" in override:
+        owner, _, repo = override.partition("/")
+        return f"{owner.strip()}/{repo.strip().removesuffix('.git')}"
+    try:
+        from app.web.backtest_runner import _resolve_repo
+        r = _resolve_repo()
+        if r is not None:
+            return f"{r[0]}/{r[1]}"
+    except Exception:
+        pass
+    return ""
 
 
 @app.route("/api/alerts")

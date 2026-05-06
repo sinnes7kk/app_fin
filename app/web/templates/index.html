@@ -1952,7 +1952,9 @@
       {% endif %}
     </section>
 
-    <section id="panel-backtest" class="panel" role="tabpanel">
+    <section id="panel-backtest" class="panel" role="tabpanel"
+             data-backtest-repo="{{ backtest_repo or '' }}"
+             data-backtest-workflow="{{ backtest_workflow_file or 'backtest.yml' }}">
       <h1 class="panel-title">Backtest</h1>
       <p class="muted">
         Replays every row of <code>data/grade_history.csv</code> bar-by-bar through
@@ -1961,68 +1963,40 @@
         legacy 5-day close-to-close. Optionally chains into a walk-forward
         recalibration of conviction-score weights — applied to production only when
         the OOS Spearman acceptance gate passes.<br>
-        <small>Runs on GitHub Actions. Results commit back to <code>main</code>;
-        the local server's auto-pull syncs them within ~5 minutes.</small>
+        <small>Runs entirely on GitHub Actions. No local server needed.
+        Auto-runs every Sunday at 22:00 UTC; click below to trigger an
+        ad-hoc run.</small>
       </p>
 
       <div class="backtest-control-card">
         <div class="backtest-state-row">
-          <span id="backtest-state-badge" class="backtest-badge backtest-badge-idle">Idle</span>
-          <span id="backtest-state-text" class="muted">Ready to run.</span>
-          <span id="backtest-auth-hint" class="backtest-auth-hint muted" title="Which credential the dispatcher is using"></span>
-        </div>
-
-        <div class="backtest-mode-row">
-          <span class="backtest-label">Mode</span>
-          <label class="backtest-radio">
-            <input type="radio" name="backtest-mode" value="replay">
-            Replay only
-            <small class="muted">~2&ndash;5 min, refreshes <code>diagnostic_replay_*.md</code> + per-bucket numbers.</small>
-          </label>
-          <label class="backtest-radio">
-            <input type="radio" name="backtest-mode" value="both" checked>
-            Replay + recalibrate
-            <small class="muted">Adds ~30 sec; refits conviction weights, applies them only if the OOS gate passes.</small>
-          </label>
-          <label class="backtest-radio">
-            <input type="radio" name="backtest-mode" value="recal">
-            Recalibrate only
-            <small class="muted">Skips replay; useful when <code>grade_history_with_replay.csv</code> is fresh.</small>
-          </label>
+          <span id="backtest-latest-badge" class="backtest-badge backtest-badge-idle">No runs yet</span>
+          <span id="backtest-state-text" class="muted">Loading…</span>
         </div>
 
         <div class="backtest-action-row">
-          <button id="backtest-run-btn" class="btn-accent">Run backtest</button>
-          <a id="backtest-actions-link" class="btn-ghost" target="_blank" rel="noopener" style="display:none;">Open on GitHub Actions ↗</a>
-          <button id="backtest-view-report-btn" class="btn-ghost" disabled>View latest report</button>
-          <button id="backtest-view-recal-btn" class="btn-ghost" disabled>View latest recalibration</button>
+          <a id="backtest-run-btn" class="btn-accent" target="_blank" rel="noopener">
+            Run backtest on GitHub Actions ↗
+          </a>
+          <button class="btn-ghost" id="backtest-refresh-btn" type="button">Refresh status</button>
+          <button class="btn-ghost" id="backtest-view-report-btn" type="button" disabled>View latest replay report</button>
+          <button class="btn-ghost" id="backtest-view-recal-btn" type="button" disabled>View latest recalibration</button>
         </div>
 
-        <div id="backtest-progress" class="backtest-progress" style="display:none;">
-          <div class="backtest-progress-row">
-            <span class="muted">Step:</span>
-            <strong id="backtest-step">&mdash;</strong>
-            <span class="muted">Elapsed:</span>
-            <strong id="backtest-elapsed">&mdash;</strong>
-          </div>
-          <div class="backtest-progress-bar-wrap">
-            <div id="backtest-progress-bar" class="backtest-progress-bar backtest-progress-indeterminate"></div>
-          </div>
-          <p class="muted backtest-progress-note">
-            Running on GitHub Actions. After completion, the local auto-pull
-            syncs the new diagnostic + panel files within ~5 min.
-          </p>
-        </div>
+        <p class="muted backtest-progress-note">
+          The button opens GitHub Actions in a new tab. Click the green
+          <strong>Run workflow</strong> button there, choose a mode
+          (<code>replay</code> / <code>recal</code> / <code>both</code>), and
+          confirm. Results commit back to <code>main</code>; this panel
+          reflects them on the next refresh.
+        </p>
 
         <div id="backtest-error" class="backtest-error" style="display:none;"></div>
       </div>
 
-      <h3>Last run</h3>
-      <div id="backtest-last-summary" class="backtest-last-summary muted">No runs yet.</div>
-
-      <h3>Run history</h3>
+      <h3>Recent runs</h3>
       <div id="backtest-history-wrap">
-        <p class="muted">No history yet.</p>
+        <p class="muted">Loading recent runs from GitHub…</p>
       </div>
 
       <div id="backtest-report-modal" class="backtest-report-modal" style="display:none;" role="dialog" aria-modal="true">
@@ -4490,33 +4464,32 @@
       });
     })();
 
-    /* ── Backtest panel (Tier 2 — replay + recalibration trigger) ── */
+    /* ── Backtest panel — GitHub-first (no local server required) ──
+       The "Run backtest" button is a deep link to the workflow's
+       Run-workflow page on GitHub. Status comes from the public
+       Workflow Runs REST API (no auth needed for public repos);
+       reports come from raw.githubusercontent.com on the main branch.
+       Anonymous GitHub API rate limit is 60 req/hour — we make at most
+       2 calls per panel load + 1 per "Refresh"/"View report" click,
+       so a normal session burns <10 calls. */
     (function () {
+      var panel = document.getElementById("panel-backtest");
+      if (!panel) return;
+      var REPO = panel.getAttribute("data-backtest-repo") || "";
+      var WORKFLOW_FILE = panel.getAttribute("data-backtest-workflow") || "backtest.yml";
+
       var runBtn = document.getElementById("backtest-run-btn");
-      if (!runBtn) return;
-      var stateBadge = document.getElementById("backtest-state-badge");
+      var refreshBtn = document.getElementById("backtest-refresh-btn");
+      var latestBadge = document.getElementById("backtest-latest-badge");
       var stateText = document.getElementById("backtest-state-text");
-      var progress = document.getElementById("backtest-progress");
-      var progressBar = document.getElementById("backtest-progress-bar");
-      var stepEl = document.getElementById("backtest-step");
-      var elapsedEl = document.getElementById("backtest-elapsed");
       var errorEl = document.getElementById("backtest-error");
-      var lastSummary = document.getElementById("backtest-last-summary");
       var historyWrap = document.getElementById("backtest-history-wrap");
       var viewReportBtn = document.getElementById("backtest-view-report-btn");
       var viewRecalBtn = document.getElementById("backtest-view-recal-btn");
-      var actionsLink = document.getElementById("backtest-actions-link");
-      var authHint = document.getElementById("backtest-auth-hint");
       var modal = document.getElementById("backtest-report-modal");
       var modalTitle = document.getElementById("backtest-report-modal-title");
       var modalBody = document.getElementById("backtest-report-modal-body");
       var modalClose = document.getElementById("backtest-report-modal-close");
-
-      var pollTimer = null;
-      var startedAtTs = null;
-
-      var isLocal = location.hostname === "localhost" || location.hostname === "127.0.0.1";
-      var API_BASE = isLocal ? "" : "http://127.0.0.1:5050";
 
       function escHtml(s) {
         if (s == null) return "";
@@ -4526,7 +4499,7 @@
       }
 
       function fmtDuration(sec) {
-        if (sec == null) return "—";
+        if (sec == null || isNaN(sec)) return "—";
         sec = Math.max(0, Math.round(Number(sec)));
         if (sec < 60) return sec + "s";
         var m = Math.floor(sec / 60), s = sec % 60;
@@ -4540,199 +4513,207 @@
         } catch (e) { return iso; }
       }
 
-      function setBadge(state) {
-        var s = (state || "idle").toLowerCase();
-        var labels = {idle: "Idle", running: "Running", completed: "Completed", failed: "Failed"};
-        stateBadge.textContent = labels[s] || s;
-        stateBadge.className = "backtest-badge backtest-badge-" + s;
+      function ghStatusToLocal(run) {
+        // Map GitHub workflow run status+conclusion → our 4-tier badge.
+        var st = (run.status || "").toLowerCase();
+        var cc = (run.conclusion || "").toLowerCase();
+        if (st !== "completed") {
+          if (st === "queued" || st === "waiting" || st === "pending") return "queued";
+          return "running";
+        }
+        if (cc === "success") return "completed";
+        if (cc === "skipped" || cc === "cancelled") return "cancelled";
+        return "failed";
       }
 
-      function paintStatus(st) {
-        if (!st) return;
-        setBadge(st.state);
-        if (st.state === "running") {
-          startedAtTs = st.started_at ? Date.parse(st.started_at) : Date.now();
-          progress.style.display = "";
-          stepEl.textContent = st.current_step || "queued";
-          var elapsed = startedAtTs ? Math.round((Date.now() - startedAtTs) / 1000) : 0;
-          elapsedEl.textContent = fmtDuration(elapsed);
-          stateText.textContent = "Running " + (st.mode ? "(" + st.mode + ") " : "") +
-            "on GitHub Actions since " + fmtTs(st.started_at);
-          runBtn.disabled = true;
-          errorEl.style.display = "none";
-          errorEl.textContent = "";
-        } else {
-          runBtn.disabled = false;
-          progress.style.display = "none";
-          if (st.state === "completed") {
-            stateText.textContent = "Completed " + fmtTs(st.completed_at) +
-              " — duration " + fmtDuration(st.duration_sec);
-            errorEl.style.display = "none";
-          } else if (st.state === "failed") {
-            stateText.textContent = "Failed " + fmtTs(st.completed_at) +
-              " — duration " + fmtDuration(st.duration_sec);
-            errorEl.textContent = st.error || "(no error message)";
-            errorEl.style.display = "";
-          } else {
-            stateText.textContent = "Ready to run.";
-            errorEl.style.display = "none";
-          }
-        }
-        renderLastSummary(st);
-        renderHistory(st);
-        viewReportBtn.disabled = !(st.report_path);
-        // recal report button just checks for any historic recalibration file
-        viewRecalBtn.disabled = false;
-        // GitHub Actions deep link, when we have an external run URL
-        if (st.external_run_url) {
-          actionsLink.href = st.external_run_url;
-          actionsLink.style.display = "";
-        } else {
-          actionsLink.style.display = "none";
-        }
+      function badgeLabel(local) {
+        return ({
+          queued: "Queued",
+          running: "Running",
+          completed: "Completed",
+          failed: "Failed",
+          cancelled: "Cancelled",
+          idle: "No runs yet",
+        })[local] || local;
       }
 
-      function renderLastSummary(st) {
-        if (!st || (!st.headline && !st.completed_at && !st.error)) {
-          lastSummary.innerHTML = '<span class="muted">No runs yet.</span>';
+      function setBadge(local) {
+        latestBadge.textContent = badgeLabel(local);
+        latestBadge.className = "backtest-badge backtest-badge-" + local;
+      }
+
+      function setupRunButton() {
+        if (!REPO) {
+          runBtn.removeAttribute("href");
+          runBtn.classList.add("disabled");
+          runBtn.setAttribute("aria-disabled", "true");
+          runBtn.title = "Could not resolve GitHub repo. Set BACKTEST_GITHUB_REPO in the env when running the local server, or rebuild the static site after fixing the origin remote.";
+          stateText.textContent = "Backtest panel disabled: GitHub repo unknown.";
           return;
         }
-        var parts = [];
-        parts.push('<strong>' + escHtml(st.mode || "?") + '</strong>');
-        parts.push('· ' + escHtml(fmtTs(st.completed_at || st.started_at)));
-        if (st.duration_sec != null) parts.push('· ' + fmtDuration(st.duration_sec));
-        if (st.headline) parts.push('· <span class="backtest-headline">Grade A row → ' + escHtml(st.headline) + '</span>');
-        if (st.error) parts.push('· <span class="negative">' + escHtml(st.error.split('\n')[0]) + '</span>');
-        lastSummary.innerHTML = parts.join(' ');
+        runBtn.href = "https://github.com/" + REPO + "/actions/workflows/" + WORKFLOW_FILE;
       }
 
-      function renderHistory(st) {
-        var hist = (st && st.history) || [];
-        if (!hist.length) {
-          historyWrap.innerHTML = '<p class="muted">No history yet.</p>';
+      function durationOfRun(run) {
+        // GitHub returns created_at and updated_at in ISO-8601. For
+        // running jobs, updated_at is the latest heartbeat — gives a
+        // close-enough running duration. For completed jobs it's the
+        // exit time.
+        var s = Date.parse(run.run_started_at || run.created_at);
+        var e = Date.parse(run.updated_at || "");
+        if (!s || !e) return null;
+        return Math.max(0, Math.round((e - s) / 1000));
+      }
+
+      function paintLatest(runs) {
+        var run = runs && runs[0];
+        if (!run) {
+          setBadge("idle");
+          stateText.textContent = "No runs yet — click the button above to trigger one.";
+          return;
+        }
+        var local = ghStatusToLocal(run);
+        setBadge(local);
+        var dur = durationOfRun(run);
+        var when = fmtTs(run.run_started_at || run.created_at);
+        var dispMode = (run.event === "workflow_dispatch") ? "manual" : run.event;
+        var parts = [
+          "Latest: <strong>" + escHtml(badgeLabel(local)) + "</strong>",
+          when,
+          "duration " + fmtDuration(dur),
+          "(" + escHtml(dispMode) + ")",
+        ];
+        if (run.html_url) {
+          parts.push('<a href="' + escHtml(run.html_url) + '" target="_blank" rel="noopener" class="backtest-link">view on GitHub Actions ↗</a>');
+        }
+        stateText.innerHTML = parts.join(" · ");
+      }
+
+      function renderRecentRuns(runs) {
+        if (!runs || !runs.length) {
+          historyWrap.innerHTML = '<p class="muted">No recent runs found.</p>';
           return;
         }
         var html = '<table class="data compact"><thead><tr>' +
-          '<th>Started</th><th>Mode</th><th>State</th><th>Duration</th><th>Headline</th>' +
+          '<th>Started</th><th>Trigger</th><th>State</th><th>Duration</th><th>Commit</th><th>Link</th>' +
           '</tr></thead><tbody>';
-        hist.forEach(function (h) {
-          var stateCls = (h.state || "").toLowerCase();
+        runs.forEach(function (run) {
+          var local = ghStatusToLocal(run);
+          var sha = (run.head_sha || "").substring(0, 7);
+          var msg = (run.head_commit && run.head_commit.message) || "";
+          msg = msg.split("\n")[0];
+          if (msg.length > 60) msg = msg.substring(0, 57) + "…";
           html += '<tr>' +
-            '<td>' + escHtml(fmtTs(h.started_at)) + '</td>' +
-            '<td>' + escHtml(h.mode || "—") + '</td>' +
-            '<td><span class="backtest-badge backtest-badge-' + stateCls + '">' +
-              escHtml(h.state || "—") + '</span></td>' +
-            '<td>' + fmtDuration(h.duration_sec) + '</td>' +
-            '<td>' + escHtml(h.headline || h.error || "—") + '</td>' +
+            '<td>' + escHtml(fmtTs(run.run_started_at || run.created_at)) + '</td>' +
+            '<td>' + escHtml(run.event || "—") + '</td>' +
+            '<td><span class="backtest-badge backtest-badge-' + local + '">' +
+              escHtml(badgeLabel(local)) + '</span></td>' +
+            '<td>' + fmtDuration(durationOfRun(run)) + '</td>' +
+            '<td><code>' + escHtml(sha) + '</code> ' + escHtml(msg) + '</td>' +
+            '<td><a href="' + escHtml(run.html_url || "") + '" target="_blank" rel="noopener">↗</a></td>' +
             '</tr>';
         });
         html += '</tbody></table>';
         historyWrap.innerHTML = html;
       }
 
-      function paintAuthHint(method) {
-        if (!method || method === "none") {
-          authHint.textContent = "no auth — run `gh auth login` or set BACKTEST_GITHUB_TOKEN";
-          authHint.classList.add("backtest-auth-hint-warn");
-        } else {
-          authHint.textContent = "auth: " + method;
-          authHint.classList.remove("backtest-auth-hint-warn");
-        }
-      }
-
-      function fetchStatus() {
-        return fetch(API_BASE + "/api/backtest-status")
-          .then(function (r) { return r.json(); })
-          .then(function (j) {
-            if (j && j.status) paintStatus(j.status);
-            if (j) paintAuthHint(j.auth_method);
-            return j;
+      function fetchRuns() {
+        if (!REPO) return Promise.resolve([]);
+        var url = "https://api.github.com/repos/" + REPO + "/actions/workflows/" +
+          WORKFLOW_FILE + "/runs?per_page=10&branch=main";
+        return fetch(url, {headers: {"Accept": "application/vnd.github+json"}})
+          .then(function (r) {
+            if (!r.ok) {
+              throw new Error("GitHub API HTTP " + r.status +
+                (r.status === 403 ? " (rate-limited; retry in an hour)" : ""));
+            }
+            return r.json();
           })
-          .catch(function (e) {
-            stateText.textContent = "Status fetch failed: " + e;
-          });
+          .then(function (j) { return (j && j.workflow_runs) || []; });
       }
 
-      function startPolling() {
-        stopPolling();
-        pollTimer = setInterval(function () {
-          fetchStatus().then(function (j) {
-            var st = j && j.status;
-            if (st && st.state !== "running") stopPolling();
-          });
-        }, 2000);
-      }
-
-      function stopPolling() {
-        if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
-      }
-
-      function getMode() {
-        var radios = document.getElementsByName("backtest-mode");
-        for (var i = 0; i < radios.length; i++) {
-          if (radios[i].checked) return radios[i].value;
-        }
-        return "both";
-      }
-
-      runBtn.addEventListener("click", function () {
-        if (runBtn.disabled) return;
-        runBtn.disabled = true;
+      function refresh() {
+        if (!REPO) { setupRunButton(); return; }
         errorEl.style.display = "none";
-        var mode = getMode();
-        fetch(API_BASE + "/api/run-backtest?mode=" + encodeURIComponent(mode), {method: "POST"})
-          .then(function (r) { return r.json().then(function (j) { return {status: r.status, body: j}; }); })
-          .then(function (resp) {
-            if (!resp.body || !resp.body.ok) {
-              errorEl.textContent = (resp.body && resp.body.error) || ("HTTP " + resp.status);
-              errorEl.style.display = "";
-              if (resp.body && resp.body.status) paintStatus(resp.body.status);
-              runBtn.disabled = false;
-              return;
-            }
-            paintStatus(resp.body.status);
-            startPolling();
+        errorEl.textContent = "";
+        stateText.textContent = "Loading…";
+        fetchRuns()
+          .then(function (runs) {
+            paintLatest(runs);
+            renderRecentRuns(runs);
+            // Latest report buttons enable based on whether a successful
+            // run exists in the history. The actual files (committed by
+            // that successful run) are fetched lazily when clicked.
+            var hasSuccess = runs.some(function (r) {
+              return ghStatusToLocal(r) === "completed";
+            });
+            viewReportBtn.disabled = !hasSuccess;
+            viewRecalBtn.disabled = !hasSuccess;
           })
           .catch(function (e) {
-            errorEl.textContent = "Request failed: " + e;
+            errorEl.textContent = "Could not load run status: " + e.message;
             errorEl.style.display = "";
-            runBtn.disabled = false;
-          });
-      });
-
-      function showReport(which, label) {
-        modalTitle.textContent = label;
-        modalBody.innerHTML = '<p class="muted">Loading…</p>';
-        modal.style.display = "";
-        fetch(API_BASE + "/api/backtest-report?which=" + encodeURIComponent(which))
-          .then(function (r) { return r.json().then(function (j) { return {status: r.status, body: j}; }); })
-          .then(function (resp) {
-            if (!resp.body || !resp.body.ok) {
-              modalBody.innerHTML = '<p class="negative">' + escHtml((resp.body && resp.body.error) || ("HTTP " + resp.status)) + '</p>';
-              return;
-            }
-            // Markdown is small; render as <pre> with light formatting.
-            // We deliberately avoid pulling in a markdown library — escaping
-            // and a simple table-row pipe-split is enough for these
-            // diagnostic reports.
-            var md = resp.body.markdown || "";
-            modalBody.innerHTML = '<div class="backtest-report-meta">' +
-              'Source: <code>' + escHtml(resp.body.path) + '</code>' +
-              '<br>Modified: ' + escHtml(resp.body.modified_at) +
-              '</div><pre class="backtest-report-pre">' + escHtml(md) + '</pre>';
-          })
-          .catch(function (e) {
-            modalBody.innerHTML = '<p class="negative">Fetch failed: ' + escHtml(String(e)) + '</p>';
+            stateText.textContent = "Status unavailable.";
           });
       }
 
+      function findLatestArtifact(prefix) {
+        // List data/ via contents API, find the freshest matching file.
+        var url = "https://api.github.com/repos/" + REPO + "/contents/data?ref=main";
+        return fetch(url, {headers: {"Accept": "application/vnd.github+json"}})
+          .then(function (r) {
+            if (!r.ok) throw new Error("GitHub contents API HTTP " + r.status);
+            return r.json();
+          })
+          .then(function (files) {
+            if (!Array.isArray(files)) throw new Error("unexpected /contents/data response");
+            var re = new RegExp("^" + prefix + "_\\d{4}-\\d{2}-\\d{2}\\.md$");
+            var matches = files.filter(function (f) { return f.type === "file" && re.test(f.name); });
+            if (!matches.length) throw new Error("no " + prefix + " markdown found in data/");
+            // Sort by name descending — filenames are ISO-dated, so this
+            // gives us the latest deterministically without an extra
+            // metadata call.
+            matches.sort(function (a, b) { return b.name.localeCompare(a.name); });
+            return matches[0];
+          });
+      }
+
+      function showReport(prefix, label) {
+        if (!REPO) {
+          alert("Backtest panel: GitHub repo not configured");
+          return;
+        }
+        modalTitle.textContent = label;
+        modalBody.innerHTML = '<p class="muted">Loading from GitHub…</p>';
+        modal.style.display = "";
+        findLatestArtifact(prefix)
+          .then(function (file) {
+            return fetch(file.download_url).then(function (r) {
+              if (!r.ok) throw new Error("raw.githubusercontent " + r.status);
+              return r.text().then(function (md) { return {file: file, md: md}; });
+            });
+          })
+          .then(function (data) {
+            modalBody.innerHTML = '<div class="backtest-report-meta">' +
+              'Source: <code>data/' + escHtml(data.file.name) + '</code>' +
+              '<br>SHA: <code>' + escHtml((data.file.sha || "").substring(0, 7)) + '</code>' +
+              '</div><pre class="backtest-report-pre">' + escHtml(data.md) + '</pre>';
+          })
+          .catch(function (e) {
+            modalBody.innerHTML = '<p class="negative">Fetch failed: ' + escHtml(e.message) + '</p>';
+          });
+      }
+
+      // Wire up
+      setupRunButton();
+      refreshBtn.addEventListener("click", refresh);
       viewReportBtn.addEventListener("click", function () {
         if (viewReportBtn.disabled) return;
-        showReport("replay", "Latest replay diagnostic");
+        showReport("diagnostic_replay", "Latest replay diagnostic");
       });
       viewRecalBtn.addEventListener("click", function () {
         if (viewRecalBtn.disabled) return;
-        showReport("recal", "Latest recalibration diagnostic");
+        showReport("diagnostic_recalibration", "Latest recalibration diagnostic");
       });
       modalClose.addEventListener("click", function () { modal.style.display = "none"; });
       modal.addEventListener("click", function (e) {
@@ -4742,19 +4723,20 @@
         if (e.key === "Escape" && modal.style.display !== "none") modal.style.display = "none";
       });
 
-      // Initial paint + start polling if a run is already in progress.
-      fetchStatus().then(function (j) {
-        var st = j && j.status;
-        if (st && st.state === "running") startPolling();
-      });
-      // Tick the elapsed counter once a second while running, even if
-      // the server doesn't have new progress to report.
-      setInterval(function () {
-        if (stateBadge.classList.contains("backtest-badge-running") && startedAtTs) {
-          var sec = Math.round((Date.now() - startedAtTs) / 1000);
-          elapsedEl.textContent = fmtDuration(sec);
+      // Lazy initial load — only fetch when the panel is first shown.
+      // The sidebar tab system fires no event when a tab activates, so
+      // we observe for visibility instead.
+      var firstShown = false;
+      function maybeLoad() {
+        if (firstShown) return;
+        if (panel.classList.contains("active")) {
+          firstShown = true;
+          refresh();
         }
-      }, 1000);
+      }
+      maybeLoad();
+      var observer = new MutationObserver(maybeLoad);
+      observer.observe(panel, {attributes: true, attributeFilter: ["class"]});
     })();
   </script>
 
