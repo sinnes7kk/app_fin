@@ -94,7 +94,9 @@ jobs:
             data/snapshots_archive.csv.gz \
             data/grade_history.csv \
             data/grade_attribution.json \
-            data/_ohlcv_cache/; do
+            data/_ohlcv_cache/ \
+            data/feature_lab.csv \
+            data/feature_lab_cache/; do
             # Tolerate `git add` exit-1 for paths that happen to be
             # gitignored — `set -e` would otherwise kill the whole
             # step (see 2026-04-21 failure for grade_history.csv).

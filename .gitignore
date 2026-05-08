@@ -51,6 +51,11 @@ data/positions.json
 # OHLCV disk cache — needed by replay backtest on GitHub runners,
 # where yfinance is rate-limited / blocked. Hourly scan keeps it warm.
 !data/_ohlcv_cache/*.csv
+# Feature-lab shadow log + per-day UW endpoint cache. Both are cheap
+# enough to track in git so the recalibration / feature_lab_report
+# scripts can read them on GitHub runners without hitting UW again.
+!data/feature_lab.csv
+!data/feature_lab_cache/**/*.json
 
 # Ephemeral intra-day accumulation (rebuilt each day)
 data/dark_pool_daily_*.json

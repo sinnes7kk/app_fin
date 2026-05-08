@@ -1664,6 +1664,67 @@ dl.detail-grid dd {
   color: var(--warn);
 }
 
+/* Feature-lab badges — informational research-backed signals.
+   Subtle styling so they don't compete with primary score badges. */
+.badge-lab {
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  border: 1px solid transparent;
+}
+.lab-gex-pos {
+  background: rgba(63, 185, 80, 0.10);
+  color: var(--good);
+  border-color: rgba(63, 185, 80, 0.25);
+}
+.lab-gex-neg {
+  background: rgba(248, 81, 73, 0.10);
+  color: var(--bad);
+  border-color: rgba(248, 81, 73, 0.25);
+}
+.lab-skew-put {
+  background: rgba(248, 81, 73, 0.08);
+  color: #f5a3a3;
+}
+.lab-skew-call {
+  background: rgba(63, 185, 80, 0.08);
+  color: #a3e6b0;
+}
+.lab-vrp-rich {
+  background: rgba(125, 95, 220, 0.10);
+  color: #b09bff;
+}
+.lab-vrp-cheap {
+  background: rgba(80, 165, 220, 0.10);
+  color: #8ad3ff;
+}
+.lab-term-back {
+  background: rgba(248, 81, 73, 0.10);
+  color: var(--bad);
+  font-weight: 700;
+}
+.lab-term-cont {
+  background: rgba(125, 125, 125, 0.10);
+  color: var(--text-muted);
+}
+.lab-otm-call {
+  background: rgba(255, 152, 0, 0.10);
+  color: var(--warn);
+}
+.lab-otm-put {
+  background: rgba(255, 152, 0, 0.10);
+  color: var(--warn);
+}
+.lab-maxpain {
+  background: rgba(210, 153, 34, 0.10);
+  color: var(--warn);
+}
+.lab-prem-mom {
+  background: rgba(63, 185, 80, 0.12);
+  color: var(--good);
+  font-weight: 700;
+}
+
 /* Multi-day DP summary chart */
 .dp-aggregate-chart {
   width: 100%;

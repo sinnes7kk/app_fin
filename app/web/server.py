@@ -525,6 +525,77 @@ def _enrich_flow_tracker_earnings(flow_tracker: list[dict]) -> list[dict]:
     return flow_tracker
 
 
+# Columns we surface on the dashboard. Subset of feature_lab.csv —
+# the ones that carry the most actionable signal for manual decisions.
+_LAB_DASHBOARD_COLS = (
+    "vrp_proxy",
+    "far_otm_call_share",
+    "far_otm_put_share",
+    "dollar_delta_weighted_flow",
+    "sector_relative_pct",
+    "prem_momentum_z3d",
+    "realized_vol_regime",
+    "gex_total",
+    "iv_skew_25d",
+    "term_slope_30_90",
+    "expiry_concentration_top1",
+    "max_pain_dist_pct",
+    "dealer_net_gamma_at_spot",
+)
+
+
+def _enrich_flow_tracker_lab(flow_tracker: list[dict]) -> list[dict]:
+    """Attach the feature_lab columns to each row.
+
+    Reads ``data/feature_lab.csv`` (latest as_of slice) and joins via
+    ticker + direction. Stamps the columns under ``ft["lab"]`` so the
+    template can render them in a dedicated badge row.
+
+    Logged-only — these values do *not* feed any score or filter; they
+    are surfaced only for manual trading decisions and to make the
+    feature-lab data visible while we collect 4-6 weeks of panel data.
+    """
+    if not flow_tracker:
+        return flow_tracker
+
+    lab_path = Path(__file__).resolve().parents[2] / "data" / "feature_lab.csv"
+    if not lab_path.is_file():
+        for ft in flow_tracker:
+            ft.setdefault("lab", {})
+        return flow_tracker
+
+    try:
+        lab_df = pd.read_csv(lab_path)
+    except Exception:
+        for ft in flow_tracker:
+            ft.setdefault("lab", {})
+        return flow_tracker
+
+    if lab_df.empty or "as_of" not in lab_df.columns:
+        for ft in flow_tracker:
+            ft.setdefault("lab", {})
+        return flow_tracker
+
+    latest_as_of = lab_df["as_of"].max()
+    latest = lab_df[lab_df["as_of"] == latest_as_of]
+    lookup: dict[tuple[str, str], dict] = {}
+    for _, r in latest.iterrows():
+        key = (str(r.get("ticker") or "").upper(), str(r.get("direction") or "").upper())
+        lookup[key] = {
+            c: (None if pd.isna(r.get(c)) else r.get(c))
+            for c in _LAB_DASHBOARD_COLS
+            if c in latest.columns
+        }
+
+    for ft in flow_tracker:
+        key = (
+            str(ft.get("ticker") or "").upper(),
+            str(ft.get("direction") or "").upper(),
+        )
+        ft["lab"] = lookup.get(key, {})
+    return flow_tracker
+
+
 def _dir_badge_html(direction) -> str:
     d = str(direction or "").strip().upper()
     return _BADGE_MAP.get(d, html_escape(str(direction or "—")))
@@ -2240,6 +2311,7 @@ def _build_flow_tracker(
     rows = _enrich_flow_tracker_earnings(rows)
     rows = _enrich_flow_tracker_delta(rows, flow)
     rows = _enrich_flow_tracker_ztier(rows)
+    rows = _enrich_flow_tracker_lab(rows)
     rows = _enrich_flow_tracker_decision(rows, risk_regime=risk_regime)
 
     # Flow-Tracker-Swing-Radar: drop illiquid tickers from the radar so

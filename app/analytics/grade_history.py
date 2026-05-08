@@ -67,6 +67,15 @@ HISTORY_COLS = [
     # Categorical / tag
     "dominant_dte_bucket",
     "premium_source",
+    # Promotion outcome — filled in later by stamp_promotion_outcomes() once
+    # the pipeline knows which graded rows survived price-validation /
+    # extension / regime gates and which were rejected. Keeping these as
+    # explicit columns on grade_history.csv lets recalibration & feature
+    # importance fits run two side-by-side panels (all rows vs. promoted-
+    # only) and avoids survivorship bias when the rejected rows actually
+    # *outperform*.
+    "is_promoted",
+    "reject_reason",
     # Outcome — filled in later by attach_forward_returns().
     "forward_excess_return",
     "forward_attached_at",
@@ -162,6 +171,8 @@ def persist_grade_history(grades: list[dict[str, Any]], as_of: str) -> int:
             "perc_30_day_total_latest": g.get("perc_30_day_total_latest"),
             "dominant_dte_bucket": dte_bucket,
             "premium_source": g.get("premium_source"),
+            "is_promoted": "",
+            "reject_reason": "",
             "forward_excess_return": "",
             "forward_attached_at": "",
         }
@@ -229,6 +240,72 @@ def attach_forward_returns(window: int = 5) -> int:
         _write_rows(rows)
 
     return attached
+
+
+def stamp_promotion_outcomes(
+    as_of: str,
+    promoted: list[dict[str, Any]],
+    rejected: list[dict[str, Any]],
+) -> int:
+    """Stamp ``is_promoted`` and ``reject_reason`` onto today's grade_history rows.
+
+    Called from the pipeline after final_results / all_rejected are known.
+    Matches by ``(as_of, ticker, direction)``.  Rows for tickers in
+    ``promoted`` get ``is_promoted=true`` and an empty ``reject_reason``;
+    rows in ``rejected`` get ``is_promoted=false`` and the matching
+    ``reject_reason`` string from the rejection row.  Rows in neither
+    list (e.g. graded but never reached the price-validation stage) are
+    left with ``is_promoted=false`` and ``reject_reason="not_evaluated"``
+    so feature-importance fits can still distinguish them.
+
+    Returns the number of rows stamped.  Idempotent: re-running on the
+    same as_of overwrites prior values, which is what we want when the
+    hourly scan re-runs through the day.
+    """
+    rows = _load_rows()
+    if not rows:
+        return 0
+
+    promoted_keys = {
+        (str(p.get("ticker") or "").upper().strip(),
+         str(p.get("direction") or "").upper().strip())
+        for p in promoted
+    }
+    rejected_lookup: dict[tuple[str, str], str] = {}
+    for r in rejected:
+        key = (
+            str(r.get("ticker") or "").upper().strip(),
+            str(r.get("direction") or "").upper().strip(),
+        )
+        if not key[0] or not key[1]:
+            continue
+        rejected_lookup[key] = str(r.get("reject_reason") or "rejected")
+
+    stamped = 0
+    changed = False
+    for row in rows:
+        if str(row.get("as_of", "")) != str(as_of):
+            continue
+        key = (
+            str(row.get("ticker") or "").upper().strip(),
+            str(row.get("direction") or "").upper().strip(),
+        )
+        if key in promoted_keys:
+            new_promoted, new_reason = "true", ""
+        elif key in rejected_lookup:
+            new_promoted, new_reason = "false", rejected_lookup[key]
+        else:
+            new_promoted, new_reason = "false", "not_evaluated"
+        if (str(row.get("is_promoted") or "") != new_promoted
+                or str(row.get("reject_reason") or "") != new_reason):
+            row["is_promoted"] = new_promoted
+            row["reject_reason"] = new_reason
+            changed = True
+        stamped += 1
+
+    if changed:
+        _write_rows(rows)
+    return stamped
 
 
 def load_history(with_returns_only: bool = False) -> list[dict[str, Any]]:

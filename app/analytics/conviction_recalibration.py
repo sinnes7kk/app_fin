@@ -95,6 +95,15 @@ LEGACY_WEIGHTS = {
     "oi_change_proxy":   0.05,
 }
 
+# Acceptance thresholds for the walk-forward fit. Below MIN_N_FOR_TIGHT_THRESHOLD
+# we keep the loose original rule (positive AND >= legacy) since any positive
+# OOS lift on a small sample is worth taking. Once we cross the tight threshold
+# the bar rises to a meaningful Spearman *and* a meaningful lift over legacy,
+# so we don't churn weights on noise around 0.
+OOS_SPEARMAN_MIN_ACCEPT: float = 0.10
+OOS_LIFT_OVER_LEGACY: float = 0.05
+MIN_N_FOR_TIGHT_THRESHOLD: int = 60
+
 # Floors/ceils used to log-normalize prem_mcap_bps and cumulative_premium —
 # match the production formula (`_INTENSITY_FLOOR/_CEIL`, `_MASS_FLOOR/_CEIL`)
 # in app/features/flow_tracker.py.
@@ -114,6 +123,9 @@ class FitResult:
     accept: bool = False
     confidence: str = "low"
     reason: str = ""
+    threshold_regime: str = "loose"
+    accept_threshold: float = 0.0
+    accept_lift_threshold: float = 0.0
 
 
 # ---- proxy construction ----------------------------------------------
@@ -262,11 +274,35 @@ def fit_walk_forward(
     sp_new = _spearman(val_pred_new, y_val)
     sp_legacy = _spearman(val_pred_legacy, y_val)
 
-    accept = (
-        not math.isnan(sp_new)
-        and sp_new > 0
-        and (math.isnan(sp_legacy) or sp_new >= sp_legacy)
-    )
+    # Sample-size-aware acceptance: tight regime kicks in once we have
+    # enough training data that a small positive Spearman could be noise.
+    if n_train >= MIN_N_FOR_TIGHT_THRESHOLD:
+        threshold_regime = "tight"
+        min_accept = OOS_SPEARMAN_MIN_ACCEPT
+        min_lift = OOS_LIFT_OVER_LEGACY
+        legacy_floor = (
+            (sp_legacy + min_lift) if not math.isnan(sp_legacy) else min_accept
+        )
+        accept = (
+            not math.isnan(sp_new)
+            and sp_new >= min_accept
+            and sp_new >= legacy_floor
+        )
+        reason_reject = (
+            f"tight_threshold_unmet (need spearman>={min_accept:.2f} and "
+            f"lift>={min_lift:.2f}, got new={sp_new:.3f}, legacy={sp_legacy:.3f})"
+        )
+    else:
+        threshold_regime = "loose"
+        min_accept = 0.0
+        min_lift = 0.0
+        accept = (
+            not math.isnan(sp_new)
+            and sp_new > 0
+            and (math.isnan(sp_legacy) or sp_new >= sp_legacy)
+        )
+        reason_reject = "oos_spearman_not_better_than_legacy"
+
     confidence = (
         "high" if n_train >= 60
         else "medium" if n_train >= 30
@@ -282,7 +318,10 @@ def fit_walk_forward(
             oos_spearman_legacy=sp_legacy,
             accept=False,
             confidence=confidence,
-            reason="oos_spearman_not_better_than_legacy",
+            reason=reason_reject,
+            threshold_regime=threshold_regime,
+            accept_threshold=min_accept,
+            accept_lift_threshold=min_lift,
         )
 
     return FitResult(
@@ -294,6 +333,9 @@ def fit_walk_forward(
         accept=True,
         confidence=confidence,
         reason="ok",
+        threshold_regime=threshold_regime,
+        accept_threshold=min_accept,
+        accept_lift_threshold=min_lift,
     )
 
 
@@ -320,6 +362,9 @@ def fit_global_and_per_bucket(panel: pd.DataFrame) -> dict[str, Any]:
                 "accept": False,
                 "confidence": "low",
                 "reason": "no_rows_in_bucket",
+                "threshold_regime": "loose",
+                "accept_threshold": 0.0,
+                "accept_lift_threshold": 0.0,
             }
             continue
         out["per_bucket"][b] = fit_walk_forward(sub).__dict__

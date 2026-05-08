@@ -19,6 +19,7 @@ on:
         options:
           - replay
           - recal
+          - feature_lab
           - both
 
 permissions:
@@ -60,6 +61,10 @@ jobs:
         if: env.MODE == 'recal' || env.MODE == 'both'
         run: python scripts/recalibrate_conviction.py
 
+      - name: Run feature-lab Spearman ranking
+        if: env.MODE == 'feature_lab' || env.MODE == 'both'
+        run: python scripts/feature_lab_report.py
+
       - name: Commit backtest artifacts
         run: |
           git config user.name "github-actions[bot]"
@@ -73,7 +78,8 @@ jobs:
             data/replay_recommended_config.json \
             data/conviction_recalibration.json \
             data/diagnostic_replay_*.md \
-            data/diagnostic_recalibration_*.md; do
+            data/diagnostic_recalibration_*.md \
+            data/diagnostic_feature_lab_*.md; do
             # Tolerate absent files (e.g. recal-only runs don't refresh
             # diagnostic_replay) — same idiom as hourly_scan.
             for path in $f; do

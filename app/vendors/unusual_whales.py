@@ -1296,3 +1296,284 @@ def fetch_contract_greeks(
     cache[contract_id] = result
     _persist_greek_cache(cache_date)
     return result
+
+
+# ---------------------------------------------------------------------------
+# Feature-lab endpoints (research-backed signals not yet used in production)
+#
+# These are gated to top-N candidates per scan in
+# ``app/features/feature_lab_uw.py`` so the extra UW load is bounded
+# (~30 tickers × 6 endpoints = ~180 calls per hourly scan).  Each fetcher
+# fails soft — returns ``None`` on any error and lets the caller treat the
+# corresponding feature_lab columns as missing.
+# ---------------------------------------------------------------------------
+
+
+def _safe_get_dict(payload: object) -> dict | None:
+    if isinstance(payload, dict):
+        data = payload.get("data") if "data" in payload else payload
+        if isinstance(data, dict):
+            return data
+        if isinstance(data, list) and data and isinstance(data[0], dict):
+            return data[-1]  # latest
+    elif isinstance(payload, list) and payload and isinstance(payload[0], dict):
+        return payload[-1]
+    return None
+
+
+def _safe_get_list(payload: object) -> list[dict]:
+    if isinstance(payload, dict):
+        data = payload.get("data")
+        if isinstance(data, list):
+            return [r for r in data if isinstance(r, dict)]
+        if isinstance(data, dict):
+            return [data]
+    elif isinstance(payload, list):
+        return [r for r in payload if isinstance(r, dict)]
+    return []
+
+
+def _maybe_float(v: object) -> float | None:
+    if v is None or v == "":
+        return None
+    try:
+        f = float(v)  # type: ignore[arg-type]
+        if f != f or f in (float("inf"), float("-inf")):
+            return None
+        return f
+    except (TypeError, ValueError):
+        return None
+
+
+def fetch_greek_exposure(ticker: str, *, timeout: int = 10) -> dict | None:
+    """Aggregate ticker-level Greek exposure (delta/gamma/vanna/charm).
+
+    Returns a dict with:
+      - ``gex_total``:   net dealer gamma exposure (signed)
+      - ``vanna_total``: net dealer vanna exposure (signed)
+      - ``charm_total``: net dealer charm exposure (signed)
+
+    UW returns daily aggregated rows; we use the latest row's totals.
+    """
+    if not ticker:
+        return None
+    url = f"{BASE_URL}/stock/{ticker}/greek-exposure"
+    try:
+        resp = _uw_request(url, timeout=timeout)
+        resp.raise_for_status()
+        payload = resp.json()
+    except Exception:
+        return None
+
+    row = _safe_get_dict(payload)
+    if not row:
+        return None
+    out = {
+        "gex_total": _maybe_float(
+            row.get("gex") or row.get("gamma_exposure") or row.get("net_gamma")
+        ),
+        "vanna_total": _maybe_float(
+            row.get("vanna") or row.get("vanna_exposure") or row.get("net_vanna")
+        ),
+        "charm_total": _maybe_float(
+            row.get("charm") or row.get("charm_exposure") or row.get("net_charm")
+        ),
+    }
+    if all(v is None for v in out.values()):
+        return None
+    return out
+
+
+def fetch_iv_skew(ticker: str, *, timeout: int = 10) -> dict | None:
+    """25-delta put vs 25-delta call IV skew.
+
+    Returns ``{"iv_skew_25d": float}`` where the value is
+    ``(put_iv − call_iv) / atm_iv``.  Negative skew means put IV is
+    *below* call IV (rare; usually a meme-stock signature).
+    """
+    if not ticker:
+        return None
+    url = f"{BASE_URL}/stock/{ticker}/iv-skew"
+    try:
+        resp = _uw_request(url, timeout=timeout)
+        resp.raise_for_status()
+        payload = resp.json()
+    except Exception:
+        return None
+
+    row = _safe_get_dict(payload)
+    if not row:
+        return None
+    # Try multiple shape variants UW has used.
+    skew = _maybe_float(row.get("skew") or row.get("skew_25d") or row.get("iv_skew"))
+    if skew is None:
+        put_iv = _maybe_float(row.get("put_iv_25d") or row.get("p25_iv"))
+        call_iv = _maybe_float(row.get("call_iv_25d") or row.get("c25_iv"))
+        atm_iv = _maybe_float(row.get("atm_iv") or row.get("iv_atm"))
+        if put_iv is not None and call_iv is not None and atm_iv:
+            skew = (put_iv - call_iv) / atm_iv
+    if skew is None:
+        return None
+    return {"iv_skew_25d": skew}
+
+
+def fetch_atm_iv_term(ticker: str, *, timeout: int = 10) -> dict | None:
+    """ATM IV term structure at 30/60/90 DTE.
+
+    Returns ``{"atm_iv_30d": ..., "atm_iv_60d": ..., "atm_iv_90d": ...,
+    "term_slope_30_90": (iv_90 − iv_30) / iv_30}``.
+    """
+    if not ticker:
+        return None
+    url = f"{BASE_URL}/stock/{ticker}/atm-iv"
+    try:
+        resp = _uw_request(url, timeout=timeout)
+        resp.raise_for_status()
+        payload = resp.json()
+    except Exception:
+        return None
+
+    rows = _safe_get_list(payload)
+    if not rows:
+        # Some shapes expose IV at known DTEs as fields on a dict.
+        row = _safe_get_dict(payload)
+        if not row:
+            return None
+        iv30 = _maybe_float(row.get("iv_30") or row.get("atm_iv_30") or row.get("iv_30d"))
+        iv60 = _maybe_float(row.get("iv_60") or row.get("atm_iv_60") or row.get("iv_60d"))
+        iv90 = _maybe_float(row.get("iv_90") or row.get("atm_iv_90") or row.get("iv_90d"))
+    else:
+        # Otherwise pick the rows whose dte is closest to 30/60/90.
+        def _pick(target: int) -> float | None:
+            best_iv = None
+            best_diff = None
+            for r in rows:
+                dte = _maybe_float(r.get("dte") or r.get("days") or r.get("expiry_dte"))
+                iv = _maybe_float(r.get("iv") or r.get("atm_iv") or r.get("implied_volatility"))
+                if dte is None or iv is None:
+                    continue
+                diff = abs(dte - target)
+                if best_diff is None or diff < best_diff:
+                    best_diff = diff
+                    best_iv = iv
+            return best_iv
+
+        iv30 = _pick(30)
+        iv60 = _pick(60)
+        iv90 = _pick(90)
+
+    if iv30 is None and iv60 is None and iv90 is None:
+        return None
+    out = {
+        "atm_iv_30d": iv30,
+        "atm_iv_60d": iv60,
+        "atm_iv_90d": iv90,
+        "term_slope_30_90": None,
+    }
+    if iv30 and iv90:
+        out["term_slope_30_90"] = (iv90 - iv30) / iv30
+    return out
+
+
+def fetch_expiry_breakdown(ticker: str, *, timeout: int = 10) -> dict | None:
+    """Premium concentration in the nearest expiry.
+
+    Returns ``{"expiry_concentration_top1": premium_share_in_top_expiry}``.
+    """
+    if not ticker:
+        return None
+    url = f"{BASE_URL}/stock/{ticker}/expiry-breakdown"
+    try:
+        resp = _uw_request(url, timeout=timeout)
+        resp.raise_for_status()
+        payload = resp.json()
+    except Exception:
+        return None
+
+    rows = _safe_get_list(payload)
+    if not rows:
+        return None
+    # Each row is {expiry, premium} or similar.
+    premiums: list[float] = []
+    for r in rows:
+        prem = _maybe_float(
+            r.get("premium") or r.get("total_premium") or r.get("call_premium", 0)
+        )
+        if prem is None:
+            continue
+        # If row exposes call+put split separately, sum them.
+        if r.get("call_premium") and r.get("put_premium"):
+            cp = _maybe_float(r.get("call_premium")) or 0
+            pp = _maybe_float(r.get("put_premium")) or 0
+            prem = cp + pp
+        premiums.append(prem)
+    if not premiums:
+        return None
+    total = sum(premiums)
+    if total <= 0:
+        return None
+    top1 = max(premiums) / total
+    return {"expiry_concentration_top1": top1}
+
+
+def fetch_max_pain(ticker: str, *, timeout: int = 10) -> dict | None:
+    """Distance from spot to max pain price as a fraction of spot.
+
+    Returns ``{"max_pain_dist_pct": (spot − max_pain) / spot}``. Positive
+    means spot is above max pain (price has 'rallied past pain' — often
+    a sign of upward pressure).
+    """
+    if not ticker:
+        return None
+    url = f"{BASE_URL}/stock/{ticker}/max-pain"
+    try:
+        resp = _uw_request(url, timeout=timeout)
+        resp.raise_for_status()
+        payload = resp.json()
+    except Exception:
+        return None
+
+    row = _safe_get_dict(payload)
+    if not row:
+        return None
+    mp = _maybe_float(row.get("max_pain") or row.get("price") or row.get("strike"))
+    spot = _maybe_float(row.get("spot") or row.get("underlying_price") or row.get("close"))
+    if mp is None or spot is None or spot == 0:
+        return None
+    return {"max_pain_dist_pct": (spot - mp) / spot}
+
+
+def fetch_spot_exposures(ticker: str, *, timeout: int = 10) -> dict | None:
+    """Dealer net delta and gamma exposure at the current spot level.
+
+    Returns ``{"dealer_net_delta_at_spot": ..., "dealer_net_gamma_at_spot": ...}``.
+    """
+    if not ticker:
+        return None
+    url = f"{BASE_URL}/stock/{ticker}/spot-exposures"
+    try:
+        resp = _uw_request(url, timeout=timeout)
+        resp.raise_for_status()
+        payload = resp.json()
+    except Exception:
+        return None
+
+    row = _safe_get_dict(payload)
+    if not row:
+        return None
+    delta = _maybe_float(
+        row.get("dealer_delta")
+        or row.get("net_delta")
+        or row.get("delta_at_spot")
+    )
+    gamma = _maybe_float(
+        row.get("dealer_gamma")
+        or row.get("net_gamma")
+        or row.get("gamma_at_spot")
+    )
+    if delta is None and gamma is None:
+        return None
+    return {
+        "dealer_net_delta_at_spot": delta,
+        "dealer_net_gamma_at_spot": gamma,
+    }

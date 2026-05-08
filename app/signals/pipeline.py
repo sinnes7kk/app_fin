@@ -1992,6 +1992,7 @@ def run_flow_to_price_pipeline(
         # against the now-enriched snapshot so the grade_history.csv panel
         # has full DTE/sweep/multileg coverage instead of leaking ~50%
         # "unknown" buckets from the early (unenriched) call above.
+        qualified_enriched: list[dict] | None = None
         try:
             from app.analytics.grade_history import (
                 attach_forward_returns,
@@ -2006,6 +2007,31 @@ def run_flow_to_price_pipeline(
             print(f"  [grade-history] wrote={wrote} attached={attached}")
         except Exception as ge:
             print(f"  [grade-history] skipped: {ge}")
+
+        # Feature lab — shadow log of research-backed candidate features
+        # for offline analysis. Zero impact on conviction_score / promotion
+        # logic. Top-N candidates get the expensive UW endpoint fetches;
+        # the rest get NaN UW columns but full free-feature columns.
+        try:
+            from app.features.feature_lab import (
+                compute_lab_features,
+                load_latest_raw_flow,
+                load_recent_grade_history,
+                persist_feature_lab,
+            )
+            from app.utils.market_calendar import current_trading_day
+            as_of_today = current_trading_day().isoformat()
+            if qualified_enriched:
+                lab_rows = compute_lab_features(
+                    qualified_enriched,
+                    raw_flow_df=load_latest_raw_flow(),
+                    grade_history_df=load_recent_grade_history(days=7),
+                    fetch_uw=True,
+                )
+                wrote_lab = persist_feature_lab(lab_rows, as_of=as_of_today)
+                print(f"  [feature-lab] wrote={wrote_lab} rows")
+        except Exception as fle:
+            print(f"  [feature-lab] skipped: {fle}")
 
         try:
             from app.analytics.grade_attribution import refresh_attribution
@@ -2180,6 +2206,22 @@ def run_flow_to_price_pipeline(
     rejected_df = pd.DataFrame(all_rejected_combined) if all_rejected_combined else pd.DataFrame(
         columns=REJECTED_COLUMNS
     )
+
+    # Stamp is_promoted / reject_reason onto today's grade_history rows so
+    # downstream feature-importance fits can distinguish survivorship-bias-
+    # affected panels (promoted-only) from the full graded universe.
+    try:
+        from app.analytics.grade_history import stamp_promotion_outcomes
+        from app.utils.market_calendar import current_trading_day
+        as_of_today = current_trading_day().isoformat()
+        stamped = stamp_promotion_outcomes(
+            as_of=as_of_today,
+            promoted=final_results,
+            rejected=all_rejected_combined,
+        )
+        print(f"  [grade-history] stamped promotion outcome on {stamped} rows")
+    except Exception as ge:
+        print(f"  [grade-history] promotion stamp skipped: {ge}")
 
     saved_paths = {}
     if save:

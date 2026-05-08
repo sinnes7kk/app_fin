@@ -33,6 +33,9 @@ if str(ROOT) not in sys.path:
 
 from app.analytics.conviction_recalibration import (  # noqa: E402
     LEGACY_WEIGHTS,
+    MIN_N_FOR_TIGHT_THRESHOLD,
+    OOS_LIFT_OVER_LEGACY,
+    OOS_SPEARMAN_MIN_ACCEPT,
     PROXY_FEATURES,
     fit_global_and_per_bucket,
 )
@@ -74,9 +77,15 @@ def write_report(result: dict, out_path: Path) -> None:
         "train slice, OOS Spearman rank correlation on the validate slice, "
         "weights normalized to sum 1.0.",
         "",
-        "**Acceptance criteria:** OOS Spearman > 0 AND OOS Spearman ≥ legacy "
-        "OOS Spearman. If either fails, legacy weights are kept and "
-        "`accept=False` is recorded.",
+        "**Acceptance criteria (sample-size-aware):**",
+        "",
+        f"- *Loose regime* (n_train < {MIN_N_FOR_TIGHT_THRESHOLD}): OOS Spearman > 0 "
+        "AND OOS Spearman ≥ legacy OOS Spearman.",
+        f"- *Tight regime* (n_train ≥ {MIN_N_FOR_TIGHT_THRESHOLD}): OOS Spearman ≥ "
+        f"{OOS_SPEARMAN_MIN_ACCEPT:.2f} AND OOS Spearman ≥ legacy + "
+        f"{OOS_LIFT_OVER_LEGACY:.2f}.",
+        "",
+        "If either fails, legacy weights are kept and `accept=False` is recorded.",
         "",
         "---",
         "",
@@ -87,12 +96,13 @@ def write_report(result: dict, out_path: Path) -> None:
         g.get("n_train", 0),
         g.get("n_val", 0),
         g.get("confidence", "—"),
+        g.get("threshold_regime", "—"),
         _fmt_corr(g.get("oos_spearman", float("nan"))),
         _fmt_corr(g.get("oos_spearman_legacy", float("nan"))),
         "✅ accept" if g.get("accept") else f"❌ reject ({g.get('reason') or '—'})",
     ]]
     lines.append(_table(
-        ["n_train", "n_val", "Confidence", "OOS Spearman (new)", "OOS Spearman (legacy)", "Decision"],
+        ["n_train", "n_val", "Confidence", "Regime", "OOS Spearman (new)", "OOS Spearman (legacy)", "Decision"],
         rows,
     ))
     lines.append("")
@@ -119,12 +129,13 @@ def write_report(result: dict, out_path: Path) -> None:
             br.get("n_train", 0),
             br.get("n_val", 0),
             br.get("confidence", "—"),
+            br.get("threshold_regime", "—"),
             _fmt_corr(br.get("oos_spearman", float("nan"))),
             _fmt_corr(br.get("oos_spearman_legacy", float("nan"))),
             "✅" if br.get("accept") else "❌",
         ])
     lines.append(_table(
-        ["Bucket", "n_train", "n_val", "Conf", "OOS new", "OOS legacy", "Accept"],
+        ["Bucket", "n_train", "n_val", "Conf", "Regime", "OOS new", "OOS legacy", "Accept"],
         rows,
     ))
     lines.append("")
@@ -190,6 +201,18 @@ def main(argv: list[str] | None = None) -> int:
     out_md = DATA_DIR / f"diagnostic_recalibration_{datetime.now().strftime('%Y-%m-%d')}.md"
     write_report(result, out_md)
     print(f"Wrote: {out_md}")
+
+    # Append the grade-history input audit so the human reviewing the
+    # diagnostic sees both the fit results and the data-quality context.
+    try:
+        from scripts.audit_grade_history import audit, render_markdown
+        audit_report = audit()
+        with open(out_md, "a") as f:
+            f.write("\n\n---\n\n")
+            f.write(render_markdown(audit_report))
+        print("  appended grade-history input audit")
+    except Exception as e:
+        print(f"  audit append skipped: {e}")
     return 0
 
 
