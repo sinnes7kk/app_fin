@@ -151,12 +151,12 @@ def test_day_persistence_below_skew_floor_is_flat():
 # ─────────────────────────────────────────────────────────────────────────────
 
 def test_strong_passes_when_day_persistence_meets_floor():
-    strong_cfg = FLOW_TRACKER_MODES["strong_accumulation"]
+    strong_cfg = FLOW_TRACKER_MODES["5d"]["strong_accumulation"]
     assert _mode_passes(_row(day_persistence=0.6, has_flips=False), strong_cfg)
 
 
 def test_strong_fails_when_day_persistence_below_floor():
-    strong_cfg = FLOW_TRACKER_MODES["strong_accumulation"]
+    strong_cfg = FLOW_TRACKER_MODES["5d"]["strong_accumulation"]
     # 0.5 < 0.6 → fail.
     assert not _mode_passes(_row(day_persistence=0.5), strong_cfg)
 
@@ -164,7 +164,7 @@ def test_strong_fails_when_day_persistence_below_floor():
 def test_strong_fails_when_window_has_flips_even_with_high_persistence():
     """A window with both bull and bear days fails the flip gate even
     if the dominant direction commands a clear majority."""
-    strong_cfg = FLOW_TRACKER_MODES["strong_accumulation"]
+    strong_cfg = FLOW_TRACKER_MODES["5d"]["strong_accumulation"]
     assert not _mode_passes(
         _row(day_persistence=0.8, has_flips=True), strong_cfg
     )
@@ -174,14 +174,14 @@ def test_activity_ignores_day_persistence_and_flips():
     """Activity has no day-level gate, so a row that fails Strong's
     persistence / flip checks must still pass Activity (assuming the
     other gates are satisfied)."""
-    activity_cfg = FLOW_TRACKER_MODES["activity"]
+    activity_cfg = FLOW_TRACKER_MODES["5d"]["activity"]
     assert _mode_passes(
         _row(day_persistence=0.0, has_flips=True, _accel_t_stat=0.2), activity_cfg
     )
 
 
 def test_all_mode_ignores_day_persistence_and_flips():
-    all_cfg = FLOW_TRACKER_MODES["all"]
+    all_cfg = FLOW_TRACKER_MODES["5d"]["all"]
     assert _mode_passes(
         _row(day_persistence=0.0, has_flips=True), all_cfg
     )
@@ -191,7 +191,7 @@ def test_strong_consistency_floor_still_enforced():
     """The aggregate-consistency floor on Strong (0.10 after the
     2026-05-09 calibration sweep) still rejects a too-mixed row even
     when day-level persistence and the flip gate pass."""
-    strong_cfg = FLOW_TRACKER_MODES["strong_accumulation"]
+    strong_cfg = FLOW_TRACKER_MODES["5d"]["strong_accumulation"]
     # Below the new floor — should fail.
     assert not _mode_passes(_row(_consistency_raw=0.05), strong_cfg)
     # At the floor — should pass.
@@ -199,11 +199,16 @@ def test_strong_consistency_floor_still_enforced():
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Early mode (2-day same-direction radar) — gate behaviour.
+# Strong @ 2d horizon — the 2-day same-direction radar.
+#
+# Renamed 2026-05-09 from the standalone "Early" mode after we
+# refactored ``FLOW_TRACKER_MODES`` into a per-horizon dict. The 2-day
+# pattern is now expressed as Strong on the 2d horizon — same quality
+# bar (full day-persistence, no flips, B+ grade) but a smaller window.
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _early_row(**overrides) -> dict:
-    """Minimal scored-row dict that clears every Early gate by default."""
+def _strong_2d_row(**overrides) -> dict:
+    """Minimal scored-row dict that clears every Strong @ 2d gate by default."""
     base = {
         "active_days": 2,
         "_cum_total": 8_000_000,
@@ -221,52 +226,66 @@ def _early_row(**overrides) -> dict:
     return base
 
 
-def test_early_passes_two_day_same_direction():
-    early_cfg = FLOW_TRACKER_MODES["early_accumulation"]
-    assert _mode_passes(_early_row(), early_cfg)
+def test_strong_2d_passes_two_day_same_direction():
+    cfg = FLOW_TRACKER_MODES["2d"]["strong_accumulation"]
+    assert _mode_passes(_strong_2d_row(), cfg)
 
 
-def test_early_fails_when_one_active_day_only():
-    early_cfg = FLOW_TRACKER_MODES["early_accumulation"]
-    assert not _mode_passes(_early_row(active_days=1), early_cfg)
+def test_strong_2d_fails_when_one_active_day_only():
+    cfg = FLOW_TRACKER_MODES["2d"]["strong_accumulation"]
+    assert not _mode_passes(_strong_2d_row(active_days=1), cfg)
 
 
-def test_early_requires_full_day_persistence():
-    early_cfg = FLOW_TRACKER_MODES["early_accumulation"]
-    # 0.5 = 1 of 2 days same direction — one is flat → fails Early's
-    # 1.0 floor.
-    assert not _mode_passes(_early_row(day_persistence=0.5), early_cfg)
+def test_strong_2d_requires_full_day_persistence():
+    cfg = FLOW_TRACKER_MODES["2d"]["strong_accumulation"]
+    # 0.5 = 1 of 2 days same direction — one is flat → fails Strong @ 2d's 1.0 floor.
+    assert not _mode_passes(_strong_2d_row(day_persistence=0.5), cfg)
 
 
-def test_early_rejects_any_flip():
-    early_cfg = FLOW_TRACKER_MODES["early_accumulation"]
+def test_strong_2d_rejects_any_flip():
+    cfg = FLOW_TRACKER_MODES["2d"]["strong_accumulation"]
     # Even a strong directional read on the dominant side is rejected
     # if there's any opposite-direction day in the window.
-    assert not _mode_passes(_early_row(has_flips=True), early_cfg)
+    assert not _mode_passes(_strong_2d_row(has_flips=True), cfg)
 
 
-def test_early_excludes_hedging():
-    early_cfg = FLOW_TRACKER_MODES["early_accumulation"]
-    assert not _mode_passes(_early_row(hedging_risk=True), early_cfg)
+def test_strong_2d_excludes_hedging():
+    cfg = FLOW_TRACKER_MODES["2d"]["strong_accumulation"]
+    assert not _mode_passes(_strong_2d_row(hedging_risk=True), cfg)
 
 
-def test_early_grade_floor_b_plus():
-    early_cfg = FLOW_TRACKER_MODES["early_accumulation"]
-    # Grade B (rank 2) should fail Early's B+ (rank 3) floor.
-    assert not _mode_passes(_early_row(conviction_grade="B"), early_cfg)
-    assert _mode_passes(_early_row(conviction_grade="B+"), early_cfg)
-    assert _mode_passes(_early_row(conviction_grade="A"), early_cfg)
+def test_strong_2d_grade_floor_b_plus():
+    cfg = FLOW_TRACKER_MODES["2d"]["strong_accumulation"]
+    # Grade B (rank 2) should fail Strong @ 2d's B+ (rank 3) floor.
+    assert not _mode_passes(_strong_2d_row(conviction_grade="B"), cfg)
+    assert _mode_passes(_strong_2d_row(conviction_grade="B+"), cfg)
+    assert _mode_passes(_strong_2d_row(conviction_grade="A"), cfg)
 
 
-def test_early_size_floors_smaller_than_activity():
-    """Early permits a $5M cumulative floor (vs Activity's $25M) so it
-    catches emerging flow before it scales up to Activity's threshold."""
-    early_cfg = FLOW_TRACKER_MODES["early_accumulation"]
-    activity_cfg = FLOW_TRACKER_MODES["activity"]
-    # $6M cumulative — clears Early ($5M) but not Activity ($25M).
-    row = _early_row(_cum_total=6_000_000, cumulative_premium=6_000_000)
-    assert _mode_passes(row, early_cfg)
-    assert not _mode_passes(row, activity_cfg)
+def test_strong_2d_size_floors_smaller_than_strong_5d():
+    """Strong @ 2d permits a $5M cumulative floor (vs Strong @ 5d's
+    $25M) because the window covers fewer trading days. This catches
+    emerging same-direction flow before it scales up to the longer-
+    horizon thresholds."""
+    cfg_2d = FLOW_TRACKER_MODES["2d"]["strong_accumulation"]
+    cfg_5d = FLOW_TRACKER_MODES["5d"]["strong_accumulation"]
+    # $6M cumulative — clears Strong @ 2d ($5M) but not Strong @ 5d ($25M).
+    row = _strong_2d_row(_cum_total=6_000_000, cumulative_premium=6_000_000)
+    assert _mode_passes(row, cfg_2d)
+    assert not _mode_passes(row, cfg_5d)
+
+
+def test_horizon_resolver_returns_correct_dict():
+    """The per-horizon resolver should map ``2d`` / ``5d`` / ``15d`` to
+    distinct mode-config dicts and fall back to the default for
+    unknown keys."""
+    from app.config import resolve_modes_for_horizon, FLOW_TRACKER_HORIZON_DEFAULT
+
+    assert resolve_modes_for_horizon("2d") is FLOW_TRACKER_MODES["2d"]
+    assert resolve_modes_for_horizon("5d") is FLOW_TRACKER_MODES["5d"]
+    assert resolve_modes_for_horizon("15d") is FLOW_TRACKER_MODES["15d"]
+    assert resolve_modes_for_horizon(None) is FLOW_TRACKER_MODES[FLOW_TRACKER_HORIZON_DEFAULT]
+    assert resolve_modes_for_horizon("nonsense") is FLOW_TRACKER_MODES[FLOW_TRACKER_HORIZON_DEFAULT]
 
 
 # ─────────────────────────────────────────────────────────────────────────────

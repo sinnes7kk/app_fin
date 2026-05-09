@@ -2288,6 +2288,7 @@ def _build_flow_tracker(
     hottest_chains_by_ticker: dict[str, dict],
     insider_by_ticker: dict[str, dict],
     risk_regime: dict | None = None,
+    horizon_key: str | None = None,
 ) -> list[dict]:
     """Compute + enrich a Flow Tracker list for a given horizon.
 
@@ -2299,8 +2300,18 @@ def _build_flow_tracker(
     Wave 8 — ``risk_regime`` is threaded through to the decision enricher
     so every row's ``trade_structure`` payload carries the current sizing
     context and HALT caveats.
+
+    ``horizon_key`` is forwarded to ``compute_multi_day_flow`` so the
+    per-row ``passes_strong`` / ``passes_activity`` / ``passes_all``
+    flags are evaluated against the *horizon-specific* gate dict in
+    ``FLOW_TRACKER_MODES``. Strong on 2d uses the early-radar
+    calibration; Strong on 5d uses the strict 5-day calibration; etc.
     """
-    base = compute_multi_day_flow(lookback_days, min_active_days)
+    base = compute_multi_day_flow(
+        lookback_days,
+        min_active_days,
+        horizon_key=horizon_key,
+    )
     if not base:
         return base
     dp_tracker = compute_multi_day_dp(DP_TRACKER_LOOKBACK_DAYS, DP_TRACKER_MIN_ACTIVE_DAYS)
@@ -3344,6 +3355,7 @@ def index():
         hottest_chains_by_ticker=_hottest_chains_by_ticker,
         insider_by_ticker=_insider_by_ticker,
         risk_regime=_risk_regime_for_tracker,
+        horizon_key=active_horizon,
     )
 
     # Flow-Tracker-Swing-Radar: cross-reference chip.  Tag each tracker

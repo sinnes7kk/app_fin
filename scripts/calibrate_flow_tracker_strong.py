@@ -8,8 +8,8 @@ historically. Two cohorts are evaluated:
   * Strong (multi-day, directional purity, accumulation-class)
   * Early (2-day same-direction confirmation, looser size floors)
 
-The values currently in ``FLOW_TRACKER_MODES["strong_accumulation"]`` and
-``FLOW_TRACKER_MODES["early_accumulation"]`` were picked from the
+The values currently in ``FLOW_TRACKER_MODES["5d"]["strong_accumulation"]``
+and ``FLOW_TRACKER_MODES["2d"]["strong_accumulation"]`` were picked from the
 ``wide-10-min4`` and ``early-mid`` rows of the 2026-05-09 sweep (see
 ``data/diagnostic_strong_calibration_2026-05-09.md``). Re-run periodically
 as the data window grows; if a different candidate dominates, update the
@@ -101,14 +101,15 @@ def _gate_dict(c: dict[str, Any], label: str) -> dict[str, Any]:
     }
 
 
-def _patch_strong_mode(c: dict[str, Any]) -> None:
-    """Rewrite Strong's gate dict in-place so passes_strong reflects the candidate."""
-    ft.FLOW_TRACKER_MODES["strong_accumulation"] = _gate_dict(c, "Strong")
+def _patch_strong_mode(c: dict[str, Any], horizon_key: str = "5d") -> None:
+    """Rewrite the per-horizon Strong gate dict so passes_strong reflects the candidate.
 
-
-def _patch_early_mode(c: dict[str, Any]) -> None:
-    """Rewrite Early's gate dict in-place so passes_early reflects the candidate."""
-    ft.FLOW_TRACKER_MODES["early_accumulation"] = _gate_dict(c, "Early")
+    Defaults to patching the ``5d`` horizon (which is what the legacy
+    "Strong" cohort sweep targets). The ``2d`` horizon is patched
+    separately for the Early-cohort sweep — same Strong mode key, just
+    a different horizon dict.
+    """
+    ft.FLOW_TRACKER_MODES[horizon_key]["strong_accumulation"] = _gate_dict(c, "Strong")
 
 
 def trading_days_from_archive(n_back: int) -> list[str]:
@@ -124,18 +125,21 @@ def evaluate_candidate(
 ) -> dict[str, Any]:
     """Evaluate ``candidate`` for the requested ``cohort`` (``strong`` or ``early``).
 
-    Re-uses ``passes_strong`` / ``passes_early`` per-row flags by patching
-    the corresponding entry in ``FLOW_TRACKER_MODES`` before each scoring
-    pass. Cohorts are evaluated independently so each can sweep its own
-    lookback / skew settings without interference.
+    Patches the per-horizon Strong gate dict (5d for the strong cohort,
+    2d for the early cohort) and reads ``passes_strong`` per-row flags
+    after threading the matching ``horizon_key`` through
+    ``compute_multi_day_flow``. Cohorts are evaluated independently so
+    each can sweep its own lookback / skew settings without
+    interference.
     """
     _patch_global_constants(candidate["lookback"], candidate["skew"])
     if cohort == "strong":
-        _patch_strong_mode(candidate)
-        flag = "passes_strong"
+        _patch_strong_mode(candidate, horizon_key="5d")
+        horizon_for_eval = "5d"
     else:
-        _patch_early_mode(candidate)
-        flag = "passes_early"
+        _patch_strong_mode(candidate, horizon_key="2d")
+        horizon_for_eval = "2d"
+    flag = "passes_strong"
 
     per_day_pass: dict[str, int] = {}
     per_day_total: dict[str, int] = {}
@@ -143,7 +147,10 @@ def evaluate_candidate(
 
     for asof in asof_dates:
         rows = compute_multi_day_flow(
-            mode=None, as_of=asof, snapshots_path=ARCHIVE_PATH,
+            mode=None,
+            as_of=asof,
+            snapshots_path=ARCHIVE_PATH,
+            horizon_key=horizon_for_eval,
         )
         per_day_total[asof] = len(rows)
         passers = [r for r in rows if r.get(flag)]
@@ -307,8 +314,8 @@ def main() -> None:
     # module's constants in long-running test environments.
     orig_lookback = ft.FLOW_TRACKER_LOOKBACK_DAYS
     orig_skew = ft.FLOW_TRACKER_DAY_SKEW_FLOOR
-    orig_strong = dict(ft.FLOW_TRACKER_MODES["strong_accumulation"])
-    orig_early = dict(ft.FLOW_TRACKER_MODES.get("early_accumulation", {}))
+    orig_strong_5d = dict(ft.FLOW_TRACKER_MODES["5d"]["strong_accumulation"])
+    orig_strong_2d = dict(ft.FLOW_TRACKER_MODES["2d"]["strong_accumulation"])
     orig_defaults = ft._compute_day_persistence.__defaults__
 
     try:
@@ -324,9 +331,8 @@ def main() -> None:
     finally:
         ft.FLOW_TRACKER_LOOKBACK_DAYS = orig_lookback
         ft.FLOW_TRACKER_DAY_SKEW_FLOOR = orig_skew
-        ft.FLOW_TRACKER_MODES["strong_accumulation"] = orig_strong
-        if orig_early:
-            ft.FLOW_TRACKER_MODES["early_accumulation"] = orig_early
+        ft.FLOW_TRACKER_MODES["5d"]["strong_accumulation"] = orig_strong_5d
+        ft.FLOW_TRACKER_MODES["2d"]["strong_accumulation"] = orig_strong_2d
         ft._compute_day_persistence.__defaults__ = orig_defaults
 
     md = render_markdown(strong_results, early_results, asof_dates, args.top)

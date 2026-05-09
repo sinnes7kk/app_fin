@@ -1,5 +1,7 @@
 """Application configuration."""
 
+from __future__ import annotations
+
 import os
 from pathlib import Path
 
@@ -287,11 +289,22 @@ FLOW_TRACKER_MAX_RESULTS = 15
 # still short enough that the CSV stays small.
 FLOW_TRACKER_RETENTION_DAYS = 21
 
-# Horizons offered to the UI as a [5d][15d] toggle.  5d is the default
-# (matches FLOW_TRACKER_LOOKBACK_DAYS); 15d confirms persistence over a
-# longer window.  Horizon config is `{key: {label, lookback_days,
-# min_active_days}}`.
+# Horizons offered to the UI as a [2d][5d][15d] toggle.  5d is the default
+# (matches FLOW_TRACKER_LOOKBACK_DAYS); 2d is the early-radar window for
+# catching emerging same-direction flow before it matures; 15d confirms
+# persistence over a longer window.  Horizon config is `{key: {label,
+# lookback_days, min_active_days}}`.
 FLOW_TRACKER_HORIZONS = {
+    # 2d uses a 4-calendar-day lookback so the window reliably contains
+    # ~2 trading days plus today (handles weekends + the occasional
+    # missing scan).  Strong-mode gates for this horizon (defined
+    # below in FLOW_TRACKER_MODES["2d"]) require both active days to
+    # lean the same way.
+    "2d": {
+        "label": "2d",
+        "lookback_days": 4,
+        "min_active_days": 2,
+    },
     "5d": {
         "label": "5d",
         "lookback_days": 5,
@@ -335,111 +348,193 @@ FLOW_TRACKER_HARD_ILLIQUID_FILTER = True
 FLOW_TRACKER_WARMUP_DAYS = 3
 FLOW_TRACKER_WARMUP_BANNER_ENABLED = True
 
+# Per-horizon mode gate configs. Restructured 2026-05-09 from a flat
+# {mode: cfg} dict into {horizon: {mode: cfg}} so each horizon can carry
+# its own empirical calibration of the active-days / size / purity
+# floors. The mode names (``all``, ``activity``, ``strong_accumulation``)
+# stay constant across horizons — the user-facing UI is "Strong on 2d"
+# vs "Strong on 5d" vs "Strong on 15d", same quality intent at three
+# different windows.
+#
+# Calibration provenance:
+#   - 5d Strong + Activity floors are unchanged from the 2026-05-09
+#     sweep (``data/diagnostic_strong_calibration_2026-05-09.md``).
+#     Strong fires ~0.7/day on the test window; Activity ~5/day.
+#   - 2d Strong is the same gate previously called ``early_accumulation``
+#     and dropped 2026-05-09 — it was the wrong abstraction (a horizon,
+#     not a mode). 2-day same-direction confirmation, ~6/day in sweep.
+#   - 15d Strong + Activity inherit 5d settings until enough trading
+#     days exist for a separate calibration sweep (target: 60+ days).
+#     The 15d ``min_active_days`` floor scales up because the window
+#     covers many more trading days, but the directional-purity and
+#     grade gates stay 5d-equivalent.
+#
+# Mode gates are hard filters: rows failing the gate are dropped before
+# the 15-row cap so the radar stays tight on every horizon.
 FLOW_TRACKER_MODES = {
-    # Flow-Tracker bucket redesign (2026-04-30 → 2026-05-05):
-    # the old ``accumulation`` (cons≥0.55) / ``strong_accumulation``
-    # (cons≥0.65) gates fired 0–1 times across 10 trading days of real
-    # screener data because total_{bull,bear}_premium mixes conviction
-    # with routine hedging on both sides. Lowering the threshold would
-    # admit names with barely-biased noise, so we redesigned the modes
-    # around two distinct goals:
-    #
-    #   - ``activity`` (replaces ``accumulation``) drops the directional-
-    #     purity gate entirely and surfaces names with sustained heavy
-    #     premium regardless of the bull/bear split. Useful most days.
-    #     Backed by dollar floors + acceleration only.
-    #
-    #   - ``strong_accumulation`` keeps a strict definition but is now
-    #     primarily gated on day-LEVEL persistence (≥60% of days clearly
-    #     directional, same direction, no flips), with the aggregate
-    #     consistency floor as a secondary check. Allowed to be empty
-    #     in two-sided regimes — that empty state is informative.
-    #
-    # Mode gates are hard filters: rows failing the gate are dropped
-    # before the 15-row cap so the radar stays tight.
-    "all": {
-        "label": "All",
-        "min_active_days": 2,
-        "min_cum_premium": 2_000_000,
-        "min_prem_mcap_bps": 0.50,
-        "min_consistency": 0.0,
-        "min_day_persistence": 0.0,
-        "require_no_flips": False,
-        "min_accel_t": -99.0,
-        "exclude_hedging": False,
-        "min_grade_rank": 0,                        # C and above
-        "intro": "All tickers clearing the base multi-day persistence gate.",
+    "2d": {
+        "all": {
+            "label": "All",
+            "min_active_days": 2,
+            "min_cum_premium": 2_000_000,
+            "min_prem_mcap_bps": 0.50,
+            "min_consistency": 0.0,
+            "min_day_persistence": 0.0,
+            "require_no_flips": False,
+            "min_accel_t": -99.0,
+            "exclude_hedging": False,
+            "min_grade_rank": 0,
+            "intro": "All tickers with 2-day flow activity.",
+        },
+        "activity": {
+            "label": "Activity",
+            # Floor scaled down from 5d (4 → 2) so the "sustained"
+            # semantic still has meaning — both days had to be active.
+            "min_active_days": 2,
+            # Lower size floor for 2-day window (cum premium is lower
+            # by definition since fewer days summed).
+            "min_cum_premium": 10_000_000,
+            "min_prem_mcap_bps": 2.5,
+            "min_consistency": 0.0,
+            "min_day_persistence": 0.0,
+            "require_no_flips": False,
+            "min_accel_t": 0.0,
+            "exclude_hedging": True,
+            "min_grade_rank": 3,
+            "intro": "Heavy 2-day flow, any direction.",
+        },
+        "strong_accumulation": {
+            "label": "Strong",
+            # 2-day same-direction confirmation. Empirically calibrated
+            # 2026-05-09 (the gate previously called "Early"). Both
+            # active days must lean the same direction, no flips,
+            # ≥B+ grade. ~6 names/day on the sweep window.
+            "min_active_days": 2,
+            "min_cum_premium": 5_000_000,
+            "min_prem_mcap_bps": 2.0,
+            "min_consistency": 0.10,
+            "min_day_persistence": 1.00,
+            "require_no_flips": True,
+            "min_accel_t": -99.0,                  # meaningless on 2 points
+            "exclude_hedging": True,
+            "min_grade_rank": 3,                   # B+ and above
+            "intro": "2-day same-direction confirmation: both active days lean the same way, no flips. The early-radar window for emerging flow.",
+        },
     },
-    "activity": {
-        "label": "Activity",
-        "min_active_days": 4,
-        "min_cum_premium": 25_000_000,
-        "min_prem_mcap_bps": 3.0,
-        "min_consistency": 0.0,                     # no purity requirement
-        "min_day_persistence": 0.0,
-        "require_no_flips": False,
-        "min_accel_t": 0.0,                         # require flat-or-rising flow
-        "exclude_hedging": True,
-        "min_grade_rank": 3,                        # B+ and above
-        "intro": "Names with sustained multi-day options flow — heavy persistent activity, any direction.",
+    "5d": {
+        "all": {
+            "label": "All",
+            "min_active_days": 2,
+            "min_cum_premium": 2_000_000,
+            "min_prem_mcap_bps": 0.50,
+            "min_consistency": 0.0,
+            "min_day_persistence": 0.0,
+            "require_no_flips": False,
+            "min_accel_t": -99.0,
+            "exclude_hedging": False,
+            "min_grade_rank": 0,
+            "intro": "All tickers clearing the base multi-day persistence gate.",
+        },
+        "activity": {
+            "label": "Activity",
+            "min_active_days": 4,
+            "min_cum_premium": 25_000_000,
+            "min_prem_mcap_bps": 3.0,
+            "min_consistency": 0.0,
+            "min_day_persistence": 0.0,
+            "require_no_flips": False,
+            "min_accel_t": 0.0,
+            "exclude_hedging": True,
+            "min_grade_rank": 3,
+            "intro": "Names with sustained multi-day options flow — heavy persistent activity, any direction.",
+        },
+        "strong_accumulation": {
+            "label": "Strong",
+            # Empirically calibrated 2026-05-09 against
+            # ``data/snapshots_archive.csv.gz`` (15 trading days). Old
+            # gates (min_active_days=5, min_consistency=0.30,
+            # min_accel_t=0.5, DAY_SKEW_FLOOR=0.20) fired 0/15 days by
+            # arithmetic alone. New gates fire ~0.7/day with clean
+            # shortlist (WULF, MUSA, SATS, POET, FSLR, AXSM, PTCT, QCOM).
+            "min_active_days": 4,
+            "min_cum_premium": 25_000_000,
+            "min_prem_mcap_bps": 5.0,
+            "min_consistency": 0.10,
+            "min_day_persistence": 0.60,
+            "require_no_flips": True,
+            "min_accel_t": 0.0,
+            "exclude_hedging": True,
+            "min_grade_rank": 4,                   # A- and above
+            "intro": "Rare: 4+ active days, every active day leans the same direction, no flips, flat-or-rising premium, A-tier grade.",
+        },
     },
-    "strong_accumulation": {
-        "label": "Strong",
-        # Empirically calibrated 2026-05-09 against
-        # ``data/snapshots_archive.csv.gz`` (15 trading days). The
-        # previous gates (``min_active_days=5``, ``min_consistency=0.30``,
-        # ``min_accel_t=0.5``, ``DAY_SKEW_FLOOR=0.20``) fired 0/15 days
-        # by arithmetic alone — see
-        # ``data/diagnostic_strong_calibration_2026-05-09.md`` for the
-        # sweep that picked these values. The new gates fire ~0.7/day on
-        # average across the same window with a clean shortlist (WULF,
-        # MUSA, SATS, POET, FSLR, AXSM, PTCT, QCOM).
-        "min_active_days": 4,
-        "min_cum_premium": 25_000_000,
-        "min_prem_mcap_bps": 5.0,
-        # 0.10 ≈ 55/45 cumulative split. 0.30 was unrealistic for liquid
-        # mega-caps where puts and calls trade in similar absolute size;
-        # the day-level persistence + no-flips gates carry the directional
-        # purity work.
-        "min_consistency": 0.10,
-        "min_day_persistence": 0.60,                # ≥60% of days clearly directional
-        "require_no_flips": True,                   # no opposite-direction days
-        # 0.5 was too tight on a 4-bar regression (t-stat is noisy with
-        # so few points). 0.0 still requires the log-linear regression
-        # of daily premium to be flat-or-rising.
-        "min_accel_t": 0.0,
-        "exclude_hedging": True,
-        "min_grade_rank": 4,                        # A- and above
-        "intro": "Rare: 4+ active days, every active day leans the same direction, no flips, flat-or-rising premium, A-tier grade.",
-    },
-    # Early — added 2026-05-09 to bridge the gap between 1-day flow
-    # (noise) and the multi-day Activity / Strong gates. Captures a
-    # 2-day same-direction confirmation pattern: both active days have
-    # to lean the same way (``min_day_persistence=1.0``) with zero
-    # opposite-direction days (``require_no_flips``). Calibrated to
-    # produce ~6 names/day across the empirical sweep window — small
-    # enough to manually skim, big enough to surface emerging flow
-    # before it matures into a Strong / Activity hit.
-    #
-    # Note: this mode operates on whatever lookback the active horizon
-    # uses (5d / 15d). The 2-day pattern carries directional meaning
-    # because of ``min_day_persistence=1.0`` — *every* active day in
-    # the window must lean the same direction, not just a window-
-    # average preference.
-    "early_accumulation": {
-        "label": "Early",
-        "min_active_days": 2,
-        "min_cum_premium": 5_000_000,
-        "min_prem_mcap_bps": 2.0,
-        "min_consistency": 0.10,
-        "min_day_persistence": 1.00,                # both active days same direction
-        "require_no_flips": True,                   # absolute purity — any flip kills the row
-        "min_accel_t": -99.0,                       # acceleration t-stat meaningless on 2 points
-        "exclude_hedging": True,
-        "min_grade_rank": 3,                        # B+ and above
-        "intro": "2-day same-direction confirmation: at least 2 active days, every one leaning the same way, no flips. The early-radar between 1-day noise and Strong's multi-day confirmation.",
+    "15d": {
+        # 15d horizon gates inherit 5d defaults except for the
+        # ``min_active_days`` floor which scales up to match the
+        # longer window. A separate per-horizon calibration sweep
+        # should run once 60+ days of history are available; for now
+        # this is a "best-guess scale-up" and may be loose.
+        "all": {
+            "label": "All",
+            "min_active_days": 4,
+            "min_cum_premium": 2_000_000,
+            "min_prem_mcap_bps": 0.50,
+            "min_consistency": 0.0,
+            "min_day_persistence": 0.0,
+            "require_no_flips": False,
+            "min_accel_t": -99.0,
+            "exclude_hedging": False,
+            "min_grade_rank": 0,
+            "intro": "All tickers clearing the long-horizon persistence gate.",
+        },
+        "activity": {
+            "label": "Activity",
+            "min_active_days": 6,                  # scaled from 4 (5d) → 6 (15d) ≈ 40% active
+            "min_cum_premium": 25_000_000,
+            "min_prem_mcap_bps": 3.0,
+            "min_consistency": 0.0,
+            "min_day_persistence": 0.0,
+            "require_no_flips": False,
+            "min_accel_t": 0.0,
+            "exclude_hedging": True,
+            "min_grade_rank": 3,
+            "intro": "Names with persistent flow over 15 days — heavy activity, any direction.",
+        },
+        "strong_accumulation": {
+            "label": "Strong",
+            # 15d Strong: 8+ active days same direction (≈55% of window).
+            # Tighter than 5d to compensate for the longer window's
+            # noise floor. NOT calibrated — placeholder until a
+            # dedicated 60-day sweep runs.
+            "min_active_days": 8,
+            "min_cum_premium": 50_000_000,         # bigger window → bigger floor
+            "min_prem_mcap_bps": 5.0,
+            "min_consistency": 0.10,
+            "min_day_persistence": 0.60,
+            "require_no_flips": True,
+            "min_accel_t": 0.0,
+            "exclude_hedging": True,
+            "min_grade_rank": 4,
+            "intro": "15-day same-direction conviction: 8+ active days, all leaning the same way, no flips, flat-or-rising premium, A-tier grade.",
+        },
     },
 }
+
+
+def resolve_modes_for_horizon(horizon_key: str | None) -> dict:
+    """Return the mode-config dict for ``horizon_key`` (falls back to default).
+
+    Used by ``compute_multi_day_flow`` to evaluate ``passes_strong``,
+    ``passes_activity``, ``passes_all`` against the horizon-specific
+    gate. Defensive against unknown / missing keys so legacy callers
+    that don't thread the horizon through still get sensible defaults.
+    """
+    if not horizon_key:
+        return FLOW_TRACKER_MODES[FLOW_TRACKER_HORIZON_DEFAULT]
+    return FLOW_TRACKER_MODES.get(
+        str(horizon_key).lower(),
+        FLOW_TRACKER_MODES[FLOW_TRACKER_HORIZON_DEFAULT],
+    )
 
 # Day-level skew floor used by ``_compute_day_persistence`` to classify
 # a single day as "clearly directional". 0.20 was the original value but

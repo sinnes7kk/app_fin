@@ -23,6 +23,8 @@ from app.config import (
     FLOW_TRACKER_MIN_PREM_MCAP_BPS,
     FLOW_TRACKER_MIN_PREMIUM,
     FLOW_TRACKER_MODES,
+    FLOW_TRACKER_HORIZON_DEFAULT,
+    resolve_modes_for_horizon,
     FLOW_TRACKER_RETENTION_DAYS,
     FLOW_TRACKER_WEIGHTS_ACCUM,
 )
@@ -803,6 +805,7 @@ def compute_multi_day_flow(
     mode: str | None = None,
     as_of: "date | str | None" = None,
     snapshots_path: "Path | None" = None,
+    horizon_key: str | None = None,
 ) -> list[dict]:
     """Aggregate screener snapshots over the lookback window.
 
@@ -819,7 +822,18 @@ def compute_multi_day_flow(
     conviction sort + cap, so the swing-candidate radar stays tight.
     Legacy callers that pass ``mode=None`` get the original behaviour
     (every row tagged with ``passes_*`` flags).
+
+    ``horizon_key`` — selects which per-horizon gate dict in
+    ``FLOW_TRACKER_MODES`` is consulted for ``passes_strong``,
+    ``passes_activity`` and ``passes_all``.  Defaults to ``"5d"`` so
+    legacy callers that don't thread the horizon through keep the
+    historical behaviour.  Pass ``"2d"`` for the early-radar window
+    or ``"15d"`` for the long-horizon confirmation window.
     """
+    # Resolve the per-horizon mode-config dict once up-front so each
+    # row's ``passes_*`` evaluation reads from the right gate dict.
+    _horizon_modes = resolve_modes_for_horizon(horizon_key)
+
     source_path = snapshots_path if snapshots_path is not None else SNAPSHOTS_PATH
     if not source_path.exists():
         return []
@@ -1355,16 +1369,15 @@ def compute_multi_day_flow(
         # Per-mode pass flags. Modes are no longer strict subsets after
         # the 2026-05-05 redesign — Strong demands day-level persistence
         # that Activity intentionally ignores — so the UI cannot infer
-        # one from the other client-side.
-        r["passes_all"] = _mode_passes(r, FLOW_TRACKER_MODES["all"])
-        r["passes_activity"] = _mode_passes(r, FLOW_TRACKER_MODES["activity"])
-        r["passes_strong"] = _mode_passes(r, FLOW_TRACKER_MODES["strong_accumulation"])
-        # 2-day same-direction radar (Early). Added 2026-05-09 — this is
-        # NOT a strict subset of Activity / Strong; the directional-
-        # purity gates (``min_day_persistence=1.0`` + ``require_no_flips``)
-        # are tighter than Activity, while the active-day floor is
-        # looser. Treated as a peer mode in the UI toggle.
-        r["passes_early"] = _mode_passes(r, FLOW_TRACKER_MODES.get("early_accumulation", {}))
+        # one from the other client-side. Mode gates are *horizon-aware*
+        # since 2026-05-09: ``passes_strong`` against a 2d-horizon row
+        # uses the 2d Strong calibration (lighter active-day floor +
+        # full directional purity), while a 5d-horizon row uses the
+        # tighter 5d Strong calibration. The horizon is selected via
+        # the ``horizon_key`` argument.
+        r["passes_all"] = _mode_passes(r, _horizon_modes["all"])
+        r["passes_activity"] = _mode_passes(r, _horizon_modes["activity"])
+        r["passes_strong"] = _mode_passes(r, _horizon_modes["strong_accumulation"])
 
         try:
             from app.features.grade_explainer import build_tracker_grade_reasons
@@ -1390,12 +1403,15 @@ def compute_multi_day_flow(
     count_strong = sum(1 for r in raw_results if r["passes_strong"])
     count_activity = sum(1 for r in raw_results if r["passes_activity"])
     count_all = sum(1 for r in raw_results if r["passes_all"])
-    count_early = sum(1 for r in raw_results if r.get("passes_early"))
 
     # Flow-Tracker-Swing-Radar: mode hard-filter before the cap.  Legacy
     # callers (mode=None) keep the old "return all, tag per mode" shape.
     # ``accumulation`` is kept as a deprecated alias for ``activity`` so
     # external scripts / saved URLs don't blow up after the rename.
+    # ``early`` / ``early_accumulation`` are deprecated mode names — the
+    # 2-day same-direction radar is now Strong on the 2d horizon. We
+    # alias them to ``passes_strong`` so saved URLs still resolve;
+    # callers should switch to ``mode='strong', horizon_key='2d'``.
     if mode and FLOW_TRACKER_HARD_MODE_FILTER:
         mode_key = str(mode).lower()
         mode_flag_map = {
@@ -1404,9 +1420,8 @@ def compute_multi_day_flow(
             "accumulation": "passes_activity",   # legacy alias
             "strong_accumulation": "passes_strong",
             "strong": "passes_strong",
-            # 2-day same-direction confirmation radar.
-            "early_accumulation": "passes_early",
-            "early": "passes_early",
+            "early_accumulation": "passes_strong",  # deprecated alias
+            "early": "passes_strong",               # deprecated alias
         }
         flag = mode_flag_map.get(mode_key)
         if flag is not None:
@@ -1435,7 +1450,6 @@ def compute_multi_day_flow(
             "strong_accumulation": count_strong,
             "activity": count_activity,
             "accumulation": count_activity,   # legacy alias
-            "early_accumulation": count_early,
             "all": count_all,
         }
         key = (str(r.get("sector") or "—"), str(r.get("direction") or ""))

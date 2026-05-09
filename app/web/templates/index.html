@@ -672,9 +672,8 @@
       <h1 class="panel-title">Flow Tracker</h1>
       {# Wave 0 — mode-aware intro copy rendered inline via data attrs so the client-side toggle can swap without a re-render. #}
       <p class="tab-intro" id="ft-intro"
-         data-intro-strong_accumulation="Rare: every active day in the last {{ flow_tracker_lookback }} leans the same direction, rising, and large enough to matter. Empty by design when the market is two-sided."
+         data-intro-strong_accumulation="Rare: every active day in the last {{ flow_tracker_lookback }} leans the same direction, rising, and large enough to matter. Empty by design when the market is two-sided. Pick the [2d] horizon for the early-radar window."
          data-intro-activity="Names with sustained multi-day options flow — heavy persistent activity, any direction."
-         data-intro-early_accumulation="2-day same-direction confirmation: at least 2 active days, every one leaning the same way, no flips. The early radar between 1-day noise and Strong's multi-day confirmation."
          data-intro-all="All tickers clearing the base multi-day persistence gate over the last {{ flow_tracker_lookback }} trading days.">
         Names with sustained multi-day options flow — heavy persistent activity, any direction.
       </p>
@@ -687,7 +686,7 @@
       {% endif %}
 
       {% if flow_tracker %}
-      {% set _counts = flow_tracker[0].mode_counts if flow_tracker[0].mode_counts is defined else {'strong_accumulation':0,'activity':0,'early_accumulation':0,'all':(flow_tracker|length)} %}
+      {% set _counts = flow_tracker[0].mode_counts if flow_tracker[0].mode_counts is defined else {'strong_accumulation':0,'activity':0,'all':(flow_tracker|length)} %}
 
       {# Wave 1 — "Now What" 3-card hero strip.  Computed server-side in
          _build_flow_tracker_hero: highest conviction, biggest sector
@@ -782,20 +781,23 @@
          flags so client-side filtering is O(n). #}
       <div class="ft-mode-toggle-row">
         <div class="ft-mode-toggle" role="tablist" aria-label="Flow Tracker mode">
-          <button type="button" class="ft-mode-btn" data-mode="strong_accumulation" role="tab" title="Rare: 4+ active days, every active day clearly directional, same side, no flips. Empty by design in two-sided regimes.">Strong</button>
-          <button type="button" class="ft-mode-btn" data-mode="early_accumulation" role="tab" title="2-day same-direction confirmation. Early radar between 1-day noise and Strong's multi-day confirmation.">Early</button>
+          <button type="button" class="ft-mode-btn" data-mode="strong_accumulation" role="tab" title="Same-direction conviction over the active horizon. Strong-on-2d = 2-day same-direction radar; Strong-on-5d = strict 4-of-5-day purity. Empty by design in two-sided regimes.">Strong</button>
           <button type="button" class="ft-mode-btn" data-mode="activity" role="tab" title="Sustained heavy multi-day flow, any direction. The day-to-day watch list.">Activity</button>
           <button type="button" class="ft-mode-btn" data-mode="all" role="tab" title="Permissive baseline — every qualifying ticker">All</button>
         </div>
-        {# Wave 0.5 C1 — horizon toggle.  Links navigate with
-           ?horizon=5d|15d which drives compute_multi_day_flow's lookback.
-           NOTE: the ``tab=flow-tracker`` param is mandatory here — without
-           it the page reloads on the default tab (Overview), because the
-           sidebar's tab-restore JS keys off ?tab=.  The horizon toggle is
-           only ever rendered inside the Flow Tracker panel, so the hard-
-           coded value is safe. #}
+        {# Horizon toggle. Links navigate with ?horizon=2d|5d|15d which
+           drives compute_multi_day_flow's lookback AND selects the per-
+           horizon mode-config in FLOW_TRACKER_MODES. So Strong-on-2d
+           uses the early-radar gates, Strong-on-5d uses the strict 5-
+           day calibration, etc.
+
+           NOTE: the ``tab=flow-tracker`` param is mandatory here —
+           without it the page reloads on the default tab (Overview)
+           because the sidebar's tab-restore JS keys off ?tab=. The
+           horizon toggle is only ever rendered inside the Flow Tracker
+           panel, so the hard-coded value is safe. #}
         <div class="ft-horizon-toggle" role="tablist" aria-label="Flow Tracker horizon"
-             title="How many trading days back the tracker aggregates.  15d needs ≥4 active days and confirms persistence over a longer window; 5d is the default quick read.">
+             title="How many trading days back the tracker aggregates. 2d is the early-radar window (Strong here = 2-day same-direction); 5d is the default quick read; 15d confirms persistence over a longer window.">
           {% for key, cfg in flow_tracker_horizons_config.items() %}
             <a class="ft-horizon-btn{% if key == flow_tracker_active_horizon %} ft-horizon-btn-active{% endif %}"
                href="?horizon={{ key }}&tab=flow-tracker"
@@ -805,8 +807,6 @@
         </div>
         <div class="ft-funnel-counts" aria-live="polite">
           <span class="ft-funnel-item"><span class="ft-funnel-label">Strong</span> <span id="ft-count-strong">{{ _counts.strong_accumulation }}</span></span>
-          <span class="ft-funnel-sep">·</span>
-          <span class="ft-funnel-item"><span class="ft-funnel-label">Early</span> <span id="ft-count-early">{{ _counts.early_accumulation if _counts.early_accumulation is defined else 0 }}</span></span>
           <span class="ft-funnel-sep">·</span>
           <span class="ft-funnel-item"><span class="ft-funnel-label">Activity</span> <span id="ft-count-activity">{{ _counts.activity }}</span></span>
           <span class="ft-funnel-sep">·</span>
@@ -853,7 +853,6 @@
                  id="ft-card-{{ ft.ticker }}"
                  data-ticker="{{ ft.ticker }}"
                  data-passes-strong="{{ '1' if ft.passes_strong else '0' }}"
-                 data-passes-early="{{ '1' if ft.passes_early else '0' }}"
                  data-passes-activity="{{ '1' if ft.passes_activity else '0' }}"
                  data-passes-all="{{ '1' if ft.passes_all else '0' }}"
                  data-grade="{{ ft.conviction_grade }}"
@@ -3318,39 +3317,41 @@
       var AUTO_WIDEN_MIN = {{ flow_tracker_auto_widen_min | tojson }};
       var MODE_LABELS = {
         strong_accumulation: "Strong",
-        early_accumulation: "Early",
         activity: "Activity",
         all: "All"
       };
-      // Auto-widen escalation order — Strong → Early → Activity → All. Early
-      // sits between Strong and Activity as a tighter "2-day confirmation"
-      // radar so empty-Strong days route to Early before falling all the
-      // way back to Activity.
-      var MODE_ORDER = ["strong_accumulation", "early_accumulation", "activity", "all"];
+      // Auto-widen escalation order — Strong → Activity → All. The
+      // 2-day same-direction radar that used to be a separate "Early"
+      // mode is now Strong on the 2d horizon (selected via the
+      // horizon toggle); the mode-toggle stays a 3-state quality
+      // selector at every horizon.
+      var MODE_ORDER = ["strong_accumulation", "activity", "all"];
       // Map mode key → data-passes-<short> attribute suffix on each card.
       var MODE_FLAG_SUFFIX = {
         strong_accumulation: "strong",
-        early_accumulation: "early",
         activity: "activity",
         all: "all"
       };
 
-      // Migrate any legacy localStorage value ("accumulation") that
-      // predates the 2026-05-05 rename so the toggle doesn't get stuck
-      // on a mode that no longer exists.
+      // Migrate legacy localStorage values that predate later renames so
+      // the toggle doesn't get stuck on a mode that no longer exists:
+      //   - 2026-05-05: ``accumulation`` → ``activity``
+      //   - 2026-05-09: ``early_accumulation`` → ``strong_accumulation``
+      //     (the 2-day radar is now Strong @ 2d horizon, not its own mode)
       try {
         var __legacy = window.localStorage && window.localStorage.getItem("ft-mode");
         if (__legacy === "accumulation") {
           window.localStorage.setItem("ft-mode", "activity");
+        } else if (__legacy === "early_accumulation" || __legacy === "early") {
+          window.localStorage.setItem("ft-mode", "strong_accumulation");
         }
       } catch (_e) { /* private mode / quota — fine to ignore */ }
 
       function countByMode() {
         var cards = listEl.querySelectorAll(".ft-card");
-        var counts = { strong_accumulation: 0, early_accumulation: 0, activity: 0, all: 0 };
+        var counts = { strong_accumulation: 0, activity: 0, all: 0 };
         cards.forEach(function (c) {
           if (c.getAttribute("data-passes-strong") === "1") counts.strong_accumulation++;
-          if (c.getAttribute("data-passes-early") === "1") counts.early_accumulation++;
           if (c.getAttribute("data-passes-activity") === "1") counts.activity++;
           if (c.getAttribute("data-passes-all") === "1") counts.all++;
         });
