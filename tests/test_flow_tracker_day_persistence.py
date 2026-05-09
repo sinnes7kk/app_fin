@@ -188,11 +188,85 @@ def test_all_mode_ignores_day_persistence_and_flips():
 
 
 def test_strong_consistency_floor_still_enforced():
-    """The aggregate-consistency floor (0.30 on Strong) is unchanged
-    by this redesign and still rejects a too-mixed row even when
-    day-level persistence and the flip gate pass."""
+    """The aggregate-consistency floor on Strong (0.10 after the
+    2026-05-09 calibration sweep) still rejects a too-mixed row even
+    when day-level persistence and the flip gate pass."""
     strong_cfg = FLOW_TRACKER_MODES["strong_accumulation"]
-    assert not _mode_passes(_row(_consistency_raw=0.10), strong_cfg)
+    # Below the new floor — should fail.
+    assert not _mode_passes(_row(_consistency_raw=0.05), strong_cfg)
+    # At the floor — should pass.
+    assert _mode_passes(_row(_consistency_raw=0.10), strong_cfg)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Early mode (2-day same-direction radar) — gate behaviour.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _early_row(**overrides) -> dict:
+    """Minimal scored-row dict that clears every Early gate by default."""
+    base = {
+        "active_days": 2,
+        "_cum_total": 8_000_000,
+        "cumulative_premium": 8_000_000,
+        "prem_mcap_bps": 3.0,
+        "_consistency_raw": 0.5,
+        "_accel_t_stat": 0.0,
+        "hedging_risk": False,
+        "conviction_grade": "B+",
+        "perc_3_day_total_max": 0.85,
+        "day_persistence": 1.0,
+        "has_flips": False,
+    }
+    base.update(overrides)
+    return base
+
+
+def test_early_passes_two_day_same_direction():
+    early_cfg = FLOW_TRACKER_MODES["early_accumulation"]
+    assert _mode_passes(_early_row(), early_cfg)
+
+
+def test_early_fails_when_one_active_day_only():
+    early_cfg = FLOW_TRACKER_MODES["early_accumulation"]
+    assert not _mode_passes(_early_row(active_days=1), early_cfg)
+
+
+def test_early_requires_full_day_persistence():
+    early_cfg = FLOW_TRACKER_MODES["early_accumulation"]
+    # 0.5 = 1 of 2 days same direction — one is flat → fails Early's
+    # 1.0 floor.
+    assert not _mode_passes(_early_row(day_persistence=0.5), early_cfg)
+
+
+def test_early_rejects_any_flip():
+    early_cfg = FLOW_TRACKER_MODES["early_accumulation"]
+    # Even a strong directional read on the dominant side is rejected
+    # if there's any opposite-direction day in the window.
+    assert not _mode_passes(_early_row(has_flips=True), early_cfg)
+
+
+def test_early_excludes_hedging():
+    early_cfg = FLOW_TRACKER_MODES["early_accumulation"]
+    assert not _mode_passes(_early_row(hedging_risk=True), early_cfg)
+
+
+def test_early_grade_floor_b_plus():
+    early_cfg = FLOW_TRACKER_MODES["early_accumulation"]
+    # Grade B (rank 2) should fail Early's B+ (rank 3) floor.
+    assert not _mode_passes(_early_row(conviction_grade="B"), early_cfg)
+    assert _mode_passes(_early_row(conviction_grade="B+"), early_cfg)
+    assert _mode_passes(_early_row(conviction_grade="A"), early_cfg)
+
+
+def test_early_size_floors_smaller_than_activity():
+    """Early permits a $5M cumulative floor (vs Activity's $25M) so it
+    catches emerging flow before it scales up to Activity's threshold."""
+    early_cfg = FLOW_TRACKER_MODES["early_accumulation"]
+    activity_cfg = FLOW_TRACKER_MODES["activity"]
+    # $6M cumulative — clears Early ($5M) but not Activity ($25M).
+    row = _early_row(_cum_total=6_000_000, cumulative_premium=6_000_000)
+    assert _mode_passes(row, early_cfg)
+    assert not _mode_passes(row, activity_cfg)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

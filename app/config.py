@@ -385,25 +385,73 @@ FLOW_TRACKER_MODES = {
     },
     "strong_accumulation": {
         "label": "Strong",
-        "min_active_days": 5,
+        # Empirically calibrated 2026-05-09 against
+        # ``data/snapshots_archive.csv.gz`` (15 trading days). The
+        # previous gates (``min_active_days=5``, ``min_consistency=0.30``,
+        # ``min_accel_t=0.5``, ``DAY_SKEW_FLOOR=0.20``) fired 0/15 days
+        # by arithmetic alone — see
+        # ``data/diagnostic_strong_calibration_2026-05-09.md`` for the
+        # sweep that picked these values. The new gates fire ~0.7/day on
+        # average across the same window with a clean shortlist (WULF,
+        # MUSA, SATS, POET, FSLR, AXSM, PTCT, QCOM).
+        "min_active_days": 4,
         "min_cum_premium": 25_000_000,
         "min_prem_mcap_bps": 5.0,
-        "min_consistency": 0.30,                    # ~65/35 aggregate floor
+        # 0.10 ≈ 55/45 cumulative split. 0.30 was unrealistic for liquid
+        # mega-caps where puts and calls trade in similar absolute size;
+        # the day-level persistence + no-flips gates carry the directional
+        # purity work.
+        "min_consistency": 0.10,
         "min_day_persistence": 0.60,                # ≥60% of days clearly directional
         "require_no_flips": True,                   # no opposite-direction days
-        "min_accel_t": 0.5,
+        # 0.5 was too tight on a 4-bar regression (t-stat is noisy with
+        # so few points). 0.0 still requires the log-linear regression
+        # of daily premium to be flat-or-rising.
+        "min_accel_t": 0.0,
         "exclude_hedging": True,
         "min_grade_rank": 4,                        # A- and above
-        "intro": "Rare: every active day in the window leans the same direction, rising, and large enough to matter. Empty by design when the market is two-sided.",
+        "intro": "Rare: 4+ active days, every active day leans the same direction, no flips, flat-or-rising premium, A-tier grade.",
+    },
+    # Early — added 2026-05-09 to bridge the gap between 1-day flow
+    # (noise) and the multi-day Activity / Strong gates. Captures a
+    # 2-day same-direction confirmation pattern: both active days have
+    # to lean the same way (``min_day_persistence=1.0``) with zero
+    # opposite-direction days (``require_no_flips``). Calibrated to
+    # produce ~6 names/day across the empirical sweep window — small
+    # enough to manually skim, big enough to surface emerging flow
+    # before it matures into a Strong / Activity hit.
+    #
+    # Note: this mode operates on whatever lookback the active horizon
+    # uses (5d / 15d). The 2-day pattern carries directional meaning
+    # because of ``min_day_persistence=1.0`` — *every* active day in
+    # the window must lean the same direction, not just a window-
+    # average preference.
+    "early_accumulation": {
+        "label": "Early",
+        "min_active_days": 2,
+        "min_cum_premium": 5_000_000,
+        "min_prem_mcap_bps": 2.0,
+        "min_consistency": 0.10,
+        "min_day_persistence": 1.00,                # both active days same direction
+        "require_no_flips": True,                   # absolute purity — any flip kills the row
+        "min_accel_t": -99.0,                       # acceleration t-stat meaningless on 2 points
+        "exclude_hedging": True,
+        "min_grade_rank": 3,                        # B+ and above
+        "intro": "2-day same-direction confirmation: at least 2 active days, every one leaning the same way, no flips. The early-radar between 1-day noise and Strong's multi-day confirmation.",
     },
 }
 
 # Day-level skew floor used by ``_compute_day_persistence`` to classify
-# a single day as "clearly directional". 0.20 = ~60/40 day-level split;
-# anything less and the day is treated as flat (mixed). Strong's
-# ``min_day_persistence`` then asks how many such days share the
-# dominant direction.
-FLOW_TRACKER_DAY_SKEW_FLOOR = 0.20
+# a single day as "clearly directional". 0.20 was the original value but
+# proved too tight: liquid mega-caps where puts and calls trade in
+# similar absolute size rarely cross 60/40 on single-day flow even when
+# the cumulative bias is unmistakable (QCOM 2026-05-04→07: bull > bear
+# every day, every daily skew under 0.12, all classified FLAT under
+# 0.20). Empirically calibrated to **0.10** (≈55/45) on 2026-05-09 —
+# strong-purity gates (``require_no_flips``, ``min_day_persistence``)
+# do the directional-classification work; this floor only defines what
+# counts as a directional vs flat day.
+FLOW_TRACKER_DAY_SKEW_FLOOR = 0.10
 
 # Use accumulation-mode weights for conviction scoring on every row (even
 # when the user picks "All" mode) so grades stay comparable across modes

@@ -674,6 +674,7 @@
       <p class="tab-intro" id="ft-intro"
          data-intro-strong_accumulation="Rare: every active day in the last {{ flow_tracker_lookback }} leans the same direction, rising, and large enough to matter. Empty by design when the market is two-sided."
          data-intro-activity="Names with sustained multi-day options flow — heavy persistent activity, any direction."
+         data-intro-early_accumulation="2-day same-direction confirmation: at least 2 active days, every one leaning the same way, no flips. The early radar between 1-day noise and Strong's multi-day confirmation."
          data-intro-all="All tickers clearing the base multi-day persistence gate over the last {{ flow_tracker_lookback }} trading days.">
         Names with sustained multi-day options flow — heavy persistent activity, any direction.
       </p>
@@ -686,7 +687,7 @@
       {% endif %}
 
       {% if flow_tracker %}
-      {% set _counts = flow_tracker[0].mode_counts if flow_tracker[0].mode_counts is defined else {'strong_accumulation':0,'activity':0,'all':(flow_tracker|length)} %}
+      {% set _counts = flow_tracker[0].mode_counts if flow_tracker[0].mode_counts is defined else {'strong_accumulation':0,'activity':0,'early_accumulation':0,'all':(flow_tracker|length)} %}
 
       {# Wave 1 — "Now What" 3-card hero strip.  Computed server-side in
          _build_flow_tracker_hero: highest conviction, biggest sector
@@ -781,7 +782,8 @@
          flags so client-side filtering is O(n). #}
       <div class="ft-mode-toggle-row">
         <div class="ft-mode-toggle" role="tablist" aria-label="Flow Tracker mode">
-          <button type="button" class="ft-mode-btn" data-mode="strong_accumulation" role="tab" title="Rare: every day clearly directional, same side, no flips. Empty by design in two-sided regimes.">Strong</button>
+          <button type="button" class="ft-mode-btn" data-mode="strong_accumulation" role="tab" title="Rare: 4+ active days, every active day clearly directional, same side, no flips. Empty by design in two-sided regimes.">Strong</button>
+          <button type="button" class="ft-mode-btn" data-mode="early_accumulation" role="tab" title="2-day same-direction confirmation. Early radar between 1-day noise and Strong's multi-day confirmation.">Early</button>
           <button type="button" class="ft-mode-btn" data-mode="activity" role="tab" title="Sustained heavy multi-day flow, any direction. The day-to-day watch list.">Activity</button>
           <button type="button" class="ft-mode-btn" data-mode="all" role="tab" title="Permissive baseline — every qualifying ticker">All</button>
         </div>
@@ -803,6 +805,8 @@
         </div>
         <div class="ft-funnel-counts" aria-live="polite">
           <span class="ft-funnel-item"><span class="ft-funnel-label">Strong</span> <span id="ft-count-strong">{{ _counts.strong_accumulation }}</span></span>
+          <span class="ft-funnel-sep">·</span>
+          <span class="ft-funnel-item"><span class="ft-funnel-label">Early</span> <span id="ft-count-early">{{ _counts.early_accumulation if _counts.early_accumulation is defined else 0 }}</span></span>
           <span class="ft-funnel-sep">·</span>
           <span class="ft-funnel-item"><span class="ft-funnel-label">Activity</span> <span id="ft-count-activity">{{ _counts.activity }}</span></span>
           <span class="ft-funnel-sep">·</span>
@@ -849,6 +853,7 @@
                  id="ft-card-{{ ft.ticker }}"
                  data-ticker="{{ ft.ticker }}"
                  data-passes-strong="{{ '1' if ft.passes_strong else '0' }}"
+                 data-passes-early="{{ '1' if ft.passes_early else '0' }}"
                  data-passes-activity="{{ '1' if ft.passes_activity else '0' }}"
                  data-passes-all="{{ '1' if ft.passes_all else '0' }}"
                  data-grade="{{ ft.conviction_grade }}"
@@ -3313,10 +3318,22 @@
       var AUTO_WIDEN_MIN = {{ flow_tracker_auto_widen_min | tojson }};
       var MODE_LABELS = {
         strong_accumulation: "Strong",
+        early_accumulation: "Early",
         activity: "Activity",
         all: "All"
       };
-      var MODE_ORDER = ["strong_accumulation", "activity", "all"];
+      // Auto-widen escalation order — Strong → Early → Activity → All. Early
+      // sits between Strong and Activity as a tighter "2-day confirmation"
+      // radar so empty-Strong days route to Early before falling all the
+      // way back to Activity.
+      var MODE_ORDER = ["strong_accumulation", "early_accumulation", "activity", "all"];
+      // Map mode key → data-passes-<short> attribute suffix on each card.
+      var MODE_FLAG_SUFFIX = {
+        strong_accumulation: "strong",
+        early_accumulation: "early",
+        activity: "activity",
+        all: "all"
+      };
 
       // Migrate any legacy localStorage value ("accumulation") that
       // predates the 2026-05-05 rename so the toggle doesn't get stuck
@@ -3330,9 +3347,10 @@
 
       function countByMode() {
         var cards = listEl.querySelectorAll(".ft-card");
-        var counts = { strong_accumulation: 0, activity: 0, all: 0 };
+        var counts = { strong_accumulation: 0, early_accumulation: 0, activity: 0, all: 0 };
         cards.forEach(function (c) {
           if (c.getAttribute("data-passes-strong") === "1") counts.strong_accumulation++;
+          if (c.getAttribute("data-passes-early") === "1") counts.early_accumulation++;
           if (c.getAttribute("data-passes-activity") === "1") counts.activity++;
           if (c.getAttribute("data-passes-all") === "1") counts.all++;
         });
@@ -3343,8 +3361,9 @@
         opts = opts || {};
         var cards = listEl.querySelectorAll(".ft-card");
         var shown = 0;
+        var suffix = MODE_FLAG_SUFFIX[mode] || mode;
         cards.forEach(function (c) {
-          var pass = c.getAttribute("data-passes-" + (mode === "strong_accumulation" ? "strong" : mode)) === "1";
+          var pass = c.getAttribute("data-passes-" + suffix) === "1";
           c.style.display = pass ? "" : "none";
           if (pass) shown++;
         });

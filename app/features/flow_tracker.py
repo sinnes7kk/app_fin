@@ -1359,6 +1359,12 @@ def compute_multi_day_flow(
         r["passes_all"] = _mode_passes(r, FLOW_TRACKER_MODES["all"])
         r["passes_activity"] = _mode_passes(r, FLOW_TRACKER_MODES["activity"])
         r["passes_strong"] = _mode_passes(r, FLOW_TRACKER_MODES["strong_accumulation"])
+        # 2-day same-direction radar (Early). Added 2026-05-09 — this is
+        # NOT a strict subset of Activity / Strong; the directional-
+        # purity gates (``min_day_persistence=1.0`` + ``require_no_flips``)
+        # are tighter than Activity, while the active-day floor is
+        # looser. Treated as a peer mode in the UI toggle.
+        r["passes_early"] = _mode_passes(r, FLOW_TRACKER_MODES.get("early_accumulation", {}))
 
         try:
             from app.features.grade_explainer import build_tracker_grade_reasons
@@ -1384,6 +1390,7 @@ def compute_multi_day_flow(
     count_strong = sum(1 for r in raw_results if r["passes_strong"])
     count_activity = sum(1 for r in raw_results if r["passes_activity"])
     count_all = sum(1 for r in raw_results if r["passes_all"])
+    count_early = sum(1 for r in raw_results if r.get("passes_early"))
 
     # Flow-Tracker-Swing-Radar: mode hard-filter before the cap.  Legacy
     # callers (mode=None) keep the old "return all, tag per mode" shape.
@@ -1397,6 +1404,9 @@ def compute_multi_day_flow(
             "accumulation": "passes_activity",   # legacy alias
             "strong_accumulation": "passes_strong",
             "strong": "passes_strong",
+            # 2-day same-direction confirmation radar.
+            "early_accumulation": "passes_early",
+            "early": "passes_early",
         }
         flag = mode_flag_map.get(mode_key)
         if flag is not None:
@@ -1425,6 +1435,7 @@ def compute_multi_day_flow(
             "strong_accumulation": count_strong,
             "activity": count_activity,
             "accumulation": count_activity,   # legacy alias
+            "early_accumulation": count_early,
             "all": count_all,
         }
         key = (str(r.get("sector") or "—"), str(r.get("direction") or ""))
