@@ -1059,8 +1059,11 @@
                   <span class="badge badge-lab {{ _gex_b }}" title="Dealer net gamma exposure (B). Positive: dealers absorb moves (mean-reverting). Negative: dealers chase (trending).">GEX {{ "{:+.1f}".format(ft.lab.gex_total / 1e9) }}B</span>
                 {% endif %}
                 {% if ft.lab.iv_skew_25d is not none and ft.lab.iv_skew_25d|abs > 0.10 %}
-                  {% set _sk_b = "lab-skew-put" if ft.lab.iv_skew_25d > 0 else "lab-skew-call" %}
-                  <span class="badge badge-lab {{ _sk_b }}" title="25-delta put vs call IV skew (normalized). Positive: put-skew (downside fear). Negative: call-skew (upside chase, common in meme stocks).">Skew {{ "{:+.2f}".format(ft.lab.iv_skew_25d) }}</span>
+                  {# Sign convention: positive risk_reversal means call IV >
+                     put IV (call-skewed, bullish). See app/vendors/unusual_whales.py
+                     fetch_iv_skew docstring for the contract. #}
+                  {% set _sk_b = "lab-skew-call" if ft.lab.iv_skew_25d > 0 else "lab-skew-put" %}
+                  <span class="badge badge-lab {{ _sk_b }}" title="25-delta call vs put IV skew. Positive: call-skewed (upside chase, momo). Negative: put-skewed (downside hedging, common in indices/large caps).">Skew {{ "{:+.2f}".format(ft.lab.iv_skew_25d) }}</span>
                 {% endif %}
                 {% if ft.lab.vrp_proxy is not none and ft.lab.vrp_proxy|abs > 10 %}
                   {% set _vrp_b = "lab-vrp-rich" if ft.lab.vrp_proxy > 0 else "lab-vrp-cheap" %}
@@ -1069,15 +1072,25 @@
                 {% if ft.lab.term_slope_30_90 is not none and ft.lab.term_slope_30_90|abs > 0.05 %}
                   {% set _term_label = "Backwardated" if ft.lab.term_slope_30_90 < 0 else "Contango" %}
                   {% set _term_b = "lab-term-back" if ft.lab.term_slope_30_90 < 0 else "lab-term-cont" %}
-                  <span class="badge badge-lab {{ _term_b }}" title="ATM IV term-structure slope, 30d→90d. Backwardation (front IV > back IV) often signals an event or near-term stress.">{{ _term_label }}</span>
+                  <span class="badge badge-lab {{ _term_b }}" title="ATM IV term slope (30d → 90d). Positive: contango (back > front IV) — 'lottery' setup, vol curve expects fireworks later. Negative: backwardation — front IV richer than back, panic or near-term event.">{{ _term_label }}</span>
                 {% endif %}
                 {% if ft.lab.far_otm_call_share is not none and ft.lab.far_otm_call_share > 0.30 %}
                   <span class="badge badge-lab lab-otm-call" title="Premium share where strike is >10% above spot. High share → speculative call buying / lottery flow.">OTM call {{ "{:.0%}".format(ft.lab.far_otm_call_share) }}</span>
                 {% elif ft.lab.far_otm_put_share is not none and ft.lab.far_otm_put_share > 0.30 %}
                   <span class="badge badge-lab lab-otm-put" title="Premium share where strike is >10% below spot. High share → speculative put buying / hedging.">OTM put {{ "{:.0%}".format(ft.lab.far_otm_put_share) }}</span>
                 {% endif %}
-                {% if ft.lab.max_pain_dist_pct is not none and ft.lab.max_pain_dist_pct|abs < 0.02 %}
-                  <span class="badge badge-lab lab-maxpain" title="Distance from spot to max-pain strike, as fraction of spot. |dist| < 2% means we're sitting on max pain — often a magnet into expiry.">MaxPain {{ "{:+.1%}".format(ft.lab.max_pain_dist_pct) }}</span>
+                {% if ft.lab.max_pain_dist_pct is not none %}
+                  {% set _mp = ft.lab.max_pain_dist_pct %}
+                  {% if _mp|abs < 0.02 %}
+                    <span class="badge badge-lab lab-maxpain" title="Spot is sitting on max-pain strike (|dist| < 2%). Often a magnet into expiry — price tends to gravitate here as gamma decays.">On pin {{ "{:+.1%}".format(_mp) }}</span>
+                  {% elif _mp >= 0.02 %}
+                    <span class="badge badge-lab lab-maxpain-above" title="Spot is {{ '%.1f'|format(_mp*100) }}% above max pain. Reading: large above-pin distance = strong upward pressure overwhelming the pin (drift up may continue). Classical pinning theory would say the opposite — that dealers push price down toward pin into expiry. Treat as informational.">Above pin {{ "{:+.1%}".format(_mp) }}</span>
+                  {% else %}
+                    <span class="badge badge-lab lab-maxpain-below" title="Spot is {{ '%.1f'|format(_mp|abs*100) }}% below max pain. Classical pinning theory: dealers push price up toward pin into expiry.">Below pin {{ "{:+.1%}".format(_mp) }}</span>
+                  {% endif %}
+                {% endif %}
+                {% if ft.lab.expiry_concentration_top1 is not none and ft.lab.expiry_concentration_top1 > 0.50 %}
+                  <span class="badge badge-lab lab-expiry-event" title="Top expiry holds {{ '%.0f'|format(ft.lab.expiry_concentration_top1*100) }}% of total option premium. > 50% = single-event setup (earnings, FDA, etc.) — binary risk concentrated on that expiry.">Event {{ "{:.0%}".format(ft.lab.expiry_concentration_top1) }}</span>
                 {% endif %}
                 {% if ft.lab.prem_momentum_z3d is not none and ft.lab.prem_momentum_z3d > 1.5 %}
                   <span class="badge badge-lab lab-prem-mom" title="Today's cumulative premium z-score vs the trailing 3 days. >1.5σ = unusually accelerating flow.">Prem-mom {{ "{:+.1f}".format(ft.lab.prem_momentum_z3d) }}σ</span>

@@ -1719,6 +1719,22 @@ dl.detail-grid dd {
   background: rgba(210, 153, 34, 0.10);
   color: var(--warn);
 }
+.lab-maxpain-above {
+  background: rgba(63, 185, 80, 0.10);
+  color: #a3e6b0;
+  border-color: rgba(63, 185, 80, 0.25);
+}
+.lab-maxpain-below {
+  background: rgba(80, 165, 220, 0.10);
+  color: #8ad3ff;
+  border-color: rgba(80, 165, 220, 0.25);
+}
+.lab-expiry-event {
+  background: rgba(255, 191, 0, 0.12);
+  color: #ffcf52;
+  border-color: rgba(255, 191, 0, 0.30);
+  font-weight: 700;
+}
 .lab-prem-mom {
   background: rgba(63, 185, 80, 0.12);
   color: var(--good);
