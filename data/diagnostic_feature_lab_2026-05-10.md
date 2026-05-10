@@ -1,4 +1,4 @@
-# Feature lab — Spearman ranking — 2026-05-10 06:28
+# Feature lab — Spearman ranking — 2026-05-10 09:14
 
 Joined `feature_lab.csv` × `grade_history_with_replay.csv` on (as_of, ticker, direction).  Panel size: **6 rows** (after dropping rows without realized_r).
 
