@@ -1345,6 +1345,83 @@ def _maybe_float(v: object) -> float | None:
         return None
 
 
+# Wave D — UW endpoint observability.
+#
+# Every feature-lab fetcher used to swallow exceptions silently with
+# ``except Exception: return None``, which made it impossible to tell
+# whether 100% NULL columns were caused by auth, response-shape drift,
+# rate limiting, or genuine no-data. The module-level diagnostics dict
+# below is populated on every failure so ``feature_lab_uw.py`` can
+# persist a per-endpoint error trace into the day-cache JSON, and the
+# helper ``_uw_diag`` emits a structured stderr line per failure.
+#
+# Reset per-ticker by ``feature_lab_uw.fetch_uw_features`` so the dict
+# always reflects the most recent fetch attempt.
+_UW_LAST_ERROR: dict[str, str] = {}
+
+
+def get_uw_last_errors() -> dict[str, str]:
+    """Return a copy of the per-endpoint last-error map.
+
+    Used by ``app/features/feature_lab_uw.py`` to persist
+    diagnostics into the per-ticker cache. Cleared by
+    ``reset_uw_last_errors``.
+    """
+    return dict(_UW_LAST_ERROR)
+
+
+def reset_uw_last_errors() -> None:
+    """Clear the per-endpoint last-error map.
+
+    Called at the start of each ``fetch_uw_features`` invocation so a
+    successful fetcher doesn't leak a previous ticker's failure into
+    the cache.
+    """
+    _UW_LAST_ERROR.clear()
+
+
+def _uw_diag(
+    endpoint: str,
+    ticker: str,
+    exc: BaseException | None = None,
+    resp: object = None,
+    note: str = "",
+) -> None:
+    """Record + log a UW fetcher failure.
+
+    Writes to ``sys.stderr`` (visible in pipeline output) and stamps
+    ``_UW_LAST_ERROR[endpoint]`` so the feature-lab cache can persist
+    the diagnosis. ``resp`` may be ``requests.Response`` or ``None``.
+    """
+    import sys
+    status = ""
+    body_snip = ""
+    try:
+        if resp is not None and hasattr(resp, "status_code"):
+            status = f" status={resp.status_code}"
+            text = getattr(resp, "text", "") or ""
+            body_snip = text[:200].replace("\n", " ")
+    except Exception:
+        pass
+    exc_label = ""
+    if exc is not None:
+        exc_label = f" {type(exc).__name__}: {exc}"
+    suffix = f" note={note}" if note else ""
+    msg = (
+        f"  [uw-diag] endpoint={endpoint} ticker={ticker}{status}"
+        f"{exc_label}{suffix}"
+    )
+    if body_snip:
+        msg = f"{msg} body={body_snip!r}"
+    print(msg, file=sys.stderr)
+    _UW_LAST_ERROR[endpoint] = (
+        f"{type(exc).__name__ if exc else 'no_data'}"
+        + (f": {exc}" if exc else "")
+        + (f" status={resp.status_code}" if resp is not None and hasattr(resp, "status_code") else "")
+        + (f" note={note}" if note else "")
+    )
+
+
 def fetch_greek_exposure(ticker: str, *, timeout: int = 10) -> dict | None:
     """Aggregate ticker-level Greek exposure (delta/gamma/vanna/charm).
 
@@ -1357,112 +1434,206 @@ def fetch_greek_exposure(ticker: str, *, timeout: int = 10) -> dict | None:
     """
     if not ticker:
         return None
-    url = f"{BASE_URL}/stock/{ticker}/greek-exposure"
+    endpoint = "greek-exposure"
+    url = f"{BASE_URL}/stock/{ticker}/{endpoint}"
+    resp = None
     try:
         resp = _uw_request(url, timeout=timeout)
         resp.raise_for_status()
         payload = resp.json()
-    except Exception:
+    except Exception as e:
+        _uw_diag(endpoint, ticker, exc=e, resp=resp)
         return None
 
+    # UW returns a daily time-series list; take the most recent date.
+    # Live shape (probed 2026-05-10): each row carries call_<X> and
+    # put_<X> for X in {delta, gamma, vanna, charm}; put values come
+    # signed (negative) so net = call + put. Legacy aliases kept as a
+    # fallback for older snapshots.
     row = _safe_get_dict(payload)
     if not row:
+        _uw_diag(endpoint, ticker, resp=resp, note="empty_payload")
         return None
+
+    def _net(call_key: str, put_key: str, *legacy: str) -> float | None:
+        cv = _maybe_float(row.get(call_key))
+        pv = _maybe_float(row.get(put_key))
+        if cv is not None or pv is not None:
+            return (cv or 0.0) + (pv or 0.0)
+        for k in legacy:
+            v = _maybe_float(row.get(k))
+            if v is not None:
+                return v
+        return None
+
     out = {
-        "gex_total": _maybe_float(
-            row.get("gex") or row.get("gamma_exposure") or row.get("net_gamma")
-        ),
-        "vanna_total": _maybe_float(
-            row.get("vanna") or row.get("vanna_exposure") or row.get("net_vanna")
-        ),
-        "charm_total": _maybe_float(
-            row.get("charm") or row.get("charm_exposure") or row.get("net_charm")
-        ),
+        "gex_total": _net("call_gamma", "put_gamma", "gex", "gamma_exposure", "net_gamma"),
+        "vanna_total": _net("call_vanna", "put_vanna", "vanna", "vanna_exposure", "net_vanna"),
+        "charm_total": _net("call_charm", "put_charm", "charm", "charm_exposure", "net_charm"),
     }
     if all(v is None for v in out.values()):
+        _uw_diag(
+            endpoint, ticker, resp=resp,
+            note=f"no_known_keys keys={sorted(row.keys())[:10]}",
+        )
         return None
     return out
 
 
 def fetch_iv_skew(ticker: str, *, timeout: int = 10) -> dict | None:
-    """25-delta put vs 25-delta call IV skew.
+    """25-delta risk-reversal skew (put-IV minus call-IV at delta=25).
 
-    Returns ``{"iv_skew_25d": float}`` where the value is
-    ``(put_iv − call_iv) / atm_iv``.  Negative skew means put IV is
-    *below* call IV (rare; usually a meme-stock signature).
+    Live UW endpoint: ``/stock/{ticker}/historical-risk-reversal-skew``
+    returns a list of daily ``{date, ticker, delta, risk_reversal}``
+    rows. We take the most recent row (highest date) at delta=25.
+
+    The legacy ``/iv-skew`` URL was 404'ing — fixed 2026-05-10 after
+    Wave D diagnostic scan.
+
+    Positive ``risk_reversal`` means call IV exceeds put IV (bullish
+    skew, typical of meme/momentum). Negative is the standard
+    "smile" with puts richer than calls (typical of indices/large caps).
     """
     if not ticker:
         return None
-    url = f"{BASE_URL}/stock/{ticker}/iv-skew"
+    endpoint = "historical-risk-reversal-skew"
+    url = f"{BASE_URL}/stock/{ticker}/{endpoint}?delta=25"
+    resp = None
     try:
         resp = _uw_request(url, timeout=timeout)
         resp.raise_for_status()
         payload = resp.json()
-    except Exception:
+    except Exception as e:
+        _uw_diag(endpoint, ticker, exc=e, resp=resp)
         return None
 
-    row = _safe_get_dict(payload)
-    if not row:
-        return None
-    # Try multiple shape variants UW has used.
-    skew = _maybe_float(row.get("skew") or row.get("skew_25d") or row.get("iv_skew"))
+    rows = _safe_get_list(payload)
+    if not rows:
+        # Fall back to single-dict legacy shape.
+        row = _safe_get_dict(payload)
+        if not row:
+            _uw_diag(endpoint, ticker, resp=resp, note="empty_payload")
+            return None
+        rows = [row]
+
+    # Filter to delta=25 in case the endpoint returns multiple deltas.
+    delta_rows = [r for r in rows if _maybe_float(r.get("delta")) == 25.0] or rows
+    # Pick the row with the most recent date.
+    def _date_key(r: dict) -> str:
+        return str(r.get("date", ""))
+    latest = max(delta_rows, key=_date_key)
+
+    skew = _maybe_float(
+        latest.get("risk_reversal")
+        or latest.get("skew")
+        or latest.get("skew_25d")
+        or latest.get("iv_skew")
+    )
     if skew is None:
-        put_iv = _maybe_float(row.get("put_iv_25d") or row.get("p25_iv"))
-        call_iv = _maybe_float(row.get("call_iv_25d") or row.get("c25_iv"))
-        atm_iv = _maybe_float(row.get("atm_iv") or row.get("iv_atm"))
+        # Legacy derivation fallback.
+        put_iv = _maybe_float(latest.get("put_iv_25d") or latest.get("p25_iv"))
+        call_iv = _maybe_float(latest.get("call_iv_25d") or latest.get("c25_iv"))
+        atm_iv = _maybe_float(latest.get("atm_iv") or latest.get("iv_atm"))
         if put_iv is not None and call_iv is not None and atm_iv:
             skew = (put_iv - call_iv) / atm_iv
     if skew is None:
+        _uw_diag(
+            endpoint, ticker, resp=resp,
+            note=f"no_known_keys keys={sorted(latest.keys())[:10]}",
+        )
         return None
     return {"iv_skew_25d": skew}
 
 
 def fetch_atm_iv_term(ticker: str, *, timeout: int = 10) -> dict | None:
-    """ATM IV term structure at 30/60/90 DTE.
+    """ATM IV term structure at 30 / 60 / 90 DTE.
 
-    Returns ``{"atm_iv_30d": ..., "atm_iv_60d": ..., "atm_iv_90d": ...,
-    "term_slope_30_90": (iv_90 − iv_30) / iv_30}``.
+    Live UW endpoint: ``/stock/{ticker}/interpolated-iv`` returns a
+    list of {date, days, percentile, volatility, implied_move_perc}
+    rows for the canonical interpolation grid (1, 7, 14, 30, 60, 90,
+    180, 270, 365 days). We pull the row at each target ``days`` value.
+
+    Falls back to ``/volatility/term-structure`` (per-expiry rows
+    keyed by ``dte``) when interpolated-iv isn't available — picks
+    rows whose ``dte`` is closest to 30/60/90.
+
+    The legacy ``/atm-iv`` URL was 404'ing — fixed 2026-05-10 after
+    Wave D diagnostic scan.
     """
     if not ticker:
         return None
-    url = f"{BASE_URL}/stock/{ticker}/atm-iv"
+    endpoint = "interpolated-iv"
+    url = f"{BASE_URL}/stock/{ticker}/{endpoint}"
+    resp = None
+    rows: list[dict] = []
     try:
         resp = _uw_request(url, timeout=timeout)
         resp.raise_for_status()
-        payload = resp.json()
-    except Exception:
-        return None
+        rows = _safe_get_list(resp.json())
+    except Exception as e:
+        _uw_diag(endpoint, ticker, exc=e, resp=resp)
 
-    rows = _safe_get_list(payload)
-    if not rows:
-        # Some shapes expose IV at known DTEs as fields on a dict.
-        row = _safe_get_dict(payload)
-        if not row:
-            return None
-        iv30 = _maybe_float(row.get("iv_30") or row.get("atm_iv_30") or row.get("iv_30d"))
-        iv60 = _maybe_float(row.get("iv_60") or row.get("atm_iv_60") or row.get("iv_60d"))
-        iv90 = _maybe_float(row.get("iv_90") or row.get("atm_iv_90") or row.get("iv_90d"))
-    else:
-        # Otherwise pick the rows whose dte is closest to 30/60/90.
-        def _pick(target: int) -> float | None:
-            best_iv = None
-            best_diff = None
-            for r in rows:
-                dte = _maybe_float(r.get("dte") or r.get("days") or r.get("expiry_dte"))
-                iv = _maybe_float(r.get("iv") or r.get("atm_iv") or r.get("implied_volatility"))
-                if dte is None or iv is None:
-                    continue
-                diff = abs(dte - target)
-                if best_diff is None or diff < best_diff:
-                    best_diff = diff
-                    best_iv = iv
-            return best_iv
+    iv30 = iv60 = iv90 = None
+    used_endpoint = endpoint
+    if rows:
+        # interpolated-iv: prefer exact ``days`` match.
+        by_days: dict[int, float] = {}
+        for r in rows:
+            d = _maybe_float(r.get("days") or r.get("dte"))
+            iv = _maybe_float(r.get("volatility") or r.get("iv") or r.get("implied_volatility"))
+            if d is None or iv is None:
+                continue
+            by_days[int(round(d))] = iv
+        iv30 = by_days.get(30)
+        iv60 = by_days.get(60)
+        iv90 = by_days.get(90)
+        # If exact lookup misses, fall back to closest-DTE pick.
+        if iv30 is None or iv60 is None or iv90 is None:
+            def _pick(target: int) -> float | None:
+                if not by_days:
+                    return None
+                best = min(by_days.keys(), key=lambda d: abs(d - target))
+                return by_days[best]
+            iv30 = iv30 if iv30 is not None else _pick(30)
+            iv60 = iv60 if iv60 is not None else _pick(60)
+            iv90 = iv90 if iv90 is not None else _pick(90)
 
-        iv30 = _pick(30)
-        iv60 = _pick(60)
-        iv90 = _pick(90)
+    # Legacy fallback: per-expiry term structure.
+    if iv30 is None and iv60 is None and iv90 is None:
+        used_endpoint = "volatility/term-structure"
+        url2 = f"{BASE_URL}/stock/{ticker}/volatility/term-structure"
+        resp2 = None
+        try:
+            resp2 = _uw_request(url2, timeout=timeout)
+            resp2.raise_for_status()
+            rows2 = _safe_get_list(resp2.json())
+        except Exception as e:
+            _uw_diag(used_endpoint, ticker, exc=e, resp=resp2)
+            rows2 = []
+        if rows2:
+            def _pick2(target: int) -> float | None:
+                best_iv = None
+                best_diff = None
+                for r in rows2:
+                    dte = _maybe_float(r.get("dte") or r.get("days") or r.get("expiry_dte"))
+                    iv = _maybe_float(r.get("volatility") or r.get("iv") or r.get("atm_iv") or r.get("implied_volatility"))
+                    if dte is None or iv is None:
+                        continue
+                    diff = abs(dte - target)
+                    if best_diff is None or diff < best_diff:
+                        best_diff = diff
+                        best_iv = iv
+                return best_iv
+            iv30 = _pick2(30)
+            iv60 = _pick2(60)
+            iv90 = _pick2(90)
 
     if iv30 is None and iv60 is None and iv90 is None:
+        sample_keys = sorted((rows[0] or {}).keys())[:10] if rows else []
+        _uw_diag(
+            used_endpoint, ticker, resp=resp,
+            note=f"no_dte_match list_len={len(rows)} sample_keys={sample_keys}",
+        )
         return None
     out = {
         "atm_iv_30d": iv30,
@@ -1476,43 +1647,67 @@ def fetch_atm_iv_term(ticker: str, *, timeout: int = 10) -> dict | None:
 
 
 def fetch_expiry_breakdown(ticker: str, *, timeout: int = 10) -> dict | None:
-    """Premium concentration in the nearest expiry.
+    """Volume concentration in the nearest expiry.
 
-    Returns ``{"expiry_concentration_top1": premium_share_in_top_expiry}``.
+    Live UW endpoint: ``/stock/{ticker}/expiry-breakdown`` returns
+    ``{expires, volume, open_interest, chains}`` per expiry — there's
+    no premium field. We use ``volume`` as the concentration proxy
+    (where flow is going *today*) with a fallback to ``open_interest``
+    (where flow is parked) and finally legacy premium aliases.
+
+    Returns ``{"expiry_concentration_top1": top_expiry / total}``.
+    Fixed 2026-05-10 after Wave D diagnostic scan revealed the
+    ``premium`` field doesn't exist on the live response.
     """
     if not ticker:
         return None
-    url = f"{BASE_URL}/stock/{ticker}/expiry-breakdown"
+    endpoint = "expiry-breakdown"
+    url = f"{BASE_URL}/stock/{ticker}/{endpoint}"
+    resp = None
     try:
         resp = _uw_request(url, timeout=timeout)
         resp.raise_for_status()
         payload = resp.json()
-    except Exception:
+    except Exception as e:
+        _uw_diag(endpoint, ticker, exc=e, resp=resp)
         return None
 
     rows = _safe_get_list(payload)
     if not rows:
+        _uw_diag(endpoint, ticker, resp=resp, note="empty_payload")
         return None
-    # Each row is {expiry, premium} or similar.
-    premiums: list[float] = []
+
+    # Try fields in priority order: live volume → open_interest →
+    # legacy premium aliases.
+    def _row_value(r: dict) -> float | None:
+        for key in ("volume", "open_interest", "premium", "total_premium"):
+            v = _maybe_float(r.get(key))
+            if v is not None and v >= 0:
+                return v
+        # call+put premium split fallback.
+        cp = _maybe_float(r.get("call_premium"))
+        pp = _maybe_float(r.get("put_premium"))
+        if cp is not None or pp is not None:
+            return (cp or 0.0) + (pp or 0.0)
+        return None
+
+    weights: list[float] = []
     for r in rows:
-        prem = _maybe_float(
-            r.get("premium") or r.get("total_premium") or r.get("call_premium", 0)
-        )
-        if prem is None:
+        v = _row_value(r)
+        if v is None:
             continue
-        # If row exposes call+put split separately, sum them.
-        if r.get("call_premium") and r.get("put_premium"):
-            cp = _maybe_float(r.get("call_premium")) or 0
-            pp = _maybe_float(r.get("put_premium")) or 0
-            prem = cp + pp
-        premiums.append(prem)
-    if not premiums:
+        weights.append(v)
+    if not weights:
+        _uw_diag(
+            endpoint, ticker, resp=resp,
+            note=f"no_weight_keys list_len={len(rows)} sample_keys={sorted((rows[0] or {}).keys())[:10]}",
+        )
         return None
-    total = sum(premiums)
+    total = sum(weights)
     if total <= 0:
+        _uw_diag(endpoint, ticker, resp=resp, note="zero_total_weight")
         return None
-    top1 = max(premiums) / total
+    top1 = max(weights) / total
     return {"expiry_concentration_top1": top1}
 
 
@@ -1525,53 +1720,104 @@ def fetch_max_pain(ticker: str, *, timeout: int = 10) -> dict | None:
     """
     if not ticker:
         return None
-    url = f"{BASE_URL}/stock/{ticker}/max-pain"
+    endpoint = "max-pain"
+    url = f"{BASE_URL}/stock/{ticker}/{endpoint}"
+    resp = None
     try:
         resp = _uw_request(url, timeout=timeout)
         resp.raise_for_status()
         payload = resp.json()
-    except Exception:
+    except Exception as e:
+        _uw_diag(endpoint, ticker, exc=e, resp=resp)
         return None
 
-    row = _safe_get_dict(payload)
+    # Live response is a list of per-expiry rows. Pick the *nearest*
+    # expiry (first row) — that's the one driving today's pin
+    # behaviour. Previous code used ``_safe_get_dict`` which returned
+    # the last row (farthest expiry, often years out and irrelevant).
+    rows = _safe_get_list(payload)
+    if rows:
+        def _expiry_key(r: dict) -> str:
+            return str(r.get("expiry") or r.get("expires") or "")
+        # Sort ascending; first = nearest expiry.
+        rows_sorted = sorted(rows, key=_expiry_key)
+        row = rows_sorted[0]
+    else:
+        row = _safe_get_dict(payload)
     if not row:
+        _uw_diag(endpoint, ticker, resp=resp, note="empty_payload")
         return None
     mp = _maybe_float(row.get("max_pain") or row.get("price") or row.get("strike"))
     spot = _maybe_float(row.get("spot") or row.get("underlying_price") or row.get("close"))
     if mp is None or spot is None or spot == 0:
+        _uw_diag(
+            endpoint, ticker, resp=resp,
+            note=f"missing_fields mp={mp} spot={spot} keys={sorted(row.keys())[:10]}",
+        )
         return None
     return {"max_pain_dist_pct": (spot - mp) / spot}
 
 
 def fetch_spot_exposures(ticker: str, *, timeout: int = 10) -> dict | None:
-    """Dealer net delta and gamma exposure at the current spot level.
+    """Dealer per-1%-move exposure at the current spot.
 
-    Returns ``{"dealer_net_delta_at_spot": ..., "dealer_net_gamma_at_spot": ...}``.
+    Live UW endpoint: ``/stock/{ticker}/spot-exposures`` returns a
+    long minute-by-minute list with fields like
+    ``gamma_per_one_percent_move_oi``, ``vanna_per_one_percent_move_oi``,
+    and ``charm_per_one_percent_move_oi``. We take the *latest minute*
+    (most recent ``time``) and surface the open-interest-weighted
+    versions (the most stable across regimes).
+
+    UW does not currently expose a clean dealer-delta-at-spot in this
+    payload, so ``dealer_net_delta_at_spot`` is repurposed to carry
+    the OI-weighted vanna sensitivity (delta change per 1% IV move) —
+    a useful proxy for "how does dealer hedging react when IV moves".
+    Legacy aliases kept as a fallback.
+
+    Fixed 2026-05-10 after Wave D diagnostic scan revealed the live
+    schema doesn't expose a flat ``dealer_delta`` field.
     """
     if not ticker:
         return None
-    url = f"{BASE_URL}/stock/{ticker}/spot-exposures"
+    endpoint = "spot-exposures"
+    url = f"{BASE_URL}/stock/{ticker}/{endpoint}"
+    resp = None
     try:
         resp = _uw_request(url, timeout=timeout)
         resp.raise_for_status()
         payload = resp.json()
-    except Exception:
+    except Exception as e:
+        _uw_diag(endpoint, ticker, exc=e, resp=resp)
         return None
 
-    row = _safe_get_dict(payload)
+    rows = _safe_get_list(payload)
+    if rows:
+        def _time_key(r: dict) -> str:
+            return str(r.get("time") or r.get("start_time") or "")
+        row = max(rows, key=_time_key)
+    else:
+        row = _safe_get_dict(payload)
     if not row:
+        _uw_diag(endpoint, ticker, resp=resp, note="empty_payload")
         return None
-    delta = _maybe_float(
-        row.get("dealer_delta")
-        or row.get("net_delta")
-        or row.get("delta_at_spot")
-    )
+
     gamma = _maybe_float(
-        row.get("dealer_gamma")
+        row.get("gamma_per_one_percent_move_oi")
+        or row.get("dealer_gamma")
         or row.get("net_gamma")
         or row.get("gamma_at_spot")
     )
+    delta = _maybe_float(
+        row.get("vanna_per_one_percent_move_oi")
+        or row.get("dealer_delta")
+        or row.get("net_delta")
+        or row.get("delta_at_spot")
+    )
     if delta is None and gamma is None:
+        _uw_diag(
+            endpoint, ticker, resp=resp,
+            note=f"no_known_keys keys={sorted(row.keys())[:10]}",
+        )
         return None
     return {
         "dealer_net_delta_at_spot": delta,

@@ -1701,6 +1701,28 @@ def run_flow_to_price_pipeline(
         raw_flow_dir.mkdir(parents=True, exist_ok=True)
         normalized.to_csv(raw_flow_dir / f"raw_flow_{_run_stamp()}.csv", index=False)
 
+    # Wave A coverage telemetry — `accel_ratio_today` depends on `event_ts`
+    # being non-null in the normalized frame (so the within-2h flag fires
+    # on at least *some* prints). When this drops below 80% it usually
+    # means UW renamed `created_at` upstream and ``RENAME_MAP`` in
+    # ``app/vendors/unusual_whales.py`` needs an update. Logged once per
+    # scan; if you see this warn on healthy runs, the screener-only flow
+    # rows are dragging the share down (they don't carry timestamps).
+    try:
+        if not normalized.empty and "event_ts" in normalized.columns:
+            n_total = len(normalized)
+            n_present = int(normalized["event_ts"].notna().sum())
+            share = (n_present / n_total) if n_total else 0.0
+            tag = "WARN" if share < 0.80 else "ok"
+            print(
+                f"  [flow-coverage] event_ts {tag}: "
+                f"{n_present}/{n_total} ({share*100:.0f}%) of normalized rows have a timestamp"
+            )
+        elif not normalized.empty:
+            print("  [flow-coverage] WARN event_ts column missing from normalized frame")
+    except Exception as _ce:
+        print(f"  [flow-coverage] event_ts audit failed (non-fatal): {_ce}")
+
     # Build today's total-tape premium map from the screener enrichment rows so
     # ``aggregate_flow_by_ticker`` can emit ``*_unusual_premium_share`` columns
     # (flagged premium / total-tape premium). Best-effort: missing tickers get
@@ -1955,7 +1977,31 @@ def run_flow_to_price_pipeline(
         # structural enrichment (dominant DTE bucket, sweep share,
         # multileg share).  Build enrichment from feature_table first so
         # it can be forwarded to save_screener_snapshot below.
+        #
+        # Wave A (2026-05-10) — the strict ``feature_table`` only covers
+        # tickers whose flow falls in the 30-120 DTE band at the swing
+        # premium floor. Most screener-only tickers therefore ended up
+        # without ``dominant_dte_bucket`` and were stamped ``"unknown"``
+        # in ``persist_grade_history`` (~67% on real scans). We now
+        # build a *parallel* wide-DTE feature_table (0-9999 days at a
+        # halved premium floor) purely for structural classification,
+        # and merge its rows into ``enrichment`` for any ticker the
+        # strict pass missed. The strict feature_table still owns the
+        # scoring path; only the snapshot/grade-history structural
+        # fields gain coverage.
         enrichment: dict[str, dict] = {}
+
+        def _structural_payload(fr) -> dict:
+            return {
+                "dominant_dte_bucket": fr.get("dominant_dte_bucket"),
+                "sweep_share": float(fr.get("sweep_share", 0) or 0),
+                "multileg_share": float(fr.get("multileg_share", 0) or 0),
+                # Wave 2 — repeat-flow acceleration per side.
+                "bullish_accel_ratio": float(fr.get("bullish_accel_ratio", 0) or 0),
+                "bearish_accel_ratio": float(fr.get("bearish_accel_ratio", 0) or 0),
+            }
+
+        strict_count = 0
         if (
             not feature_table.empty
             and "dominant_dte_bucket" in feature_table.columns
@@ -1964,14 +2010,39 @@ def run_flow_to_price_pipeline(
                 t = str(fr.get("ticker", "")).upper().strip()
                 if not t:
                     continue
-                enrichment[t] = {
-                    "dominant_dte_bucket": fr.get("dominant_dte_bucket"),
-                    "sweep_share": float(fr.get("sweep_share", 0) or 0),
-                    "multileg_share": float(fr.get("multileg_share", 0) or 0),
-                    # Wave 2 — repeat-flow acceleration per side.
-                    "bullish_accel_ratio": float(fr.get("bullish_accel_ratio", 0) or 0),
-                    "bearish_accel_ratio": float(fr.get("bearish_accel_ratio", 0) or 0),
-                }
+                enrichment[t] = _structural_payload(fr)
+                strict_count += 1
+
+        # Wave A — wide-DTE classification pass. Halve the premium floor
+        # (still well above noise) and drop the DTE band entirely so
+        # short-dated and LEAP-heavy tickers also get classified.
+        wide_count = 0
+        try:
+            if not normalized.empty:
+                wide_feature_table = build_flow_feature_table(
+                    normalized,
+                    min_premium=max(min_premium / 2.0, 250_000),
+                    min_dte=0,
+                    max_dte=9999,
+                    total_tape_map=None,
+                )
+                if (
+                    not wide_feature_table.empty
+                    and "dominant_dte_bucket" in wide_feature_table.columns
+                ):
+                    for _, fr in wide_feature_table.iterrows():
+                        t = str(fr.get("ticker", "")).upper().strip()
+                        if not t or t in enrichment:
+                            continue
+                        enrichment[t] = _structural_payload(fr)
+                        wide_count += 1
+        except Exception as _wa:
+            print(f"  [structural-enrichment] wide-DTE pass failed (non-fatal): {_wa}")
+
+        print(
+            f"  [structural-enrichment] strict={strict_count} "
+            f"wide-only={wide_count} total={len(enrichment)}"
+        )
 
         # Snapshot writer order matters: save_screener_snapshot rewrites
         # today's slice of the CSV (drops all today-rows, writes screener

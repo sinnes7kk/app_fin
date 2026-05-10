@@ -1060,15 +1060,26 @@ def aggregate_flow_by_ticker(
     ).astype(int)
 
     # Wave 2 — repeat-flow acceleration.  Flags trades within the last 2h
-    # of the most-recent print in the frame (treats today's last observed
-    # event as "now" so backtests are deterministic).  The downstream
-    # aggregation converts this into `bullish_repeat_2h` / `bearish_repeat_2h`
-    # and derives `*_accel_ratio = repeat_2h / count`.  Ratio centred on
-    # 2/6.5≈0.308 (flat-distribution baseline for a 6.5h session).
+    # of *this ticker's* most-recent print (per-ticker reference). Earlier
+    # implementations used the global ``event_ts.max()`` across the whole
+    # batch; UW returns a ~29-day historical window, so the global
+    # reference collapsed onto the very last calendar day and any ticker
+    # whose flow concentrated earlier registered ``accel_ratio = 0``.
+    # Phase 1 diagnostic on 2026-05-10 showed 44% of LONG-active tickers
+    # and 33% of SHORT-active tickers gain a non-zero acceleration signal
+    # from the per-ticker switch.  Centred on 2/6.5≈0.308 (flat-
+    # distribution baseline for a 6.5h session) when interpreted as
+    # ``accel_score = ratio − baseline``.
     if "event_ts" in out.columns and not out["event_ts"].isna().all():
         _ts = pd.to_datetime(out["event_ts"], errors="coerce", utc=True)
-        _now_ref = _ts.max()
-        _within_2h = (_now_ref - _ts) <= pd.Timedelta(hours=2)
+        # Per-ticker "now": each ticker's own latest print, mapped back
+        # to every row by ticker. Using ``.map(per_ticker_max)`` instead
+        # of ``.groupby().transform("max")`` because the latter drops the
+        # tz-aware datetime dtype on pandas 2.x and breaks the
+        # subsequent Timedelta arithmetic.
+        _per_ticker_max = _ts.groupby(out["ticker"]).max()
+        _now_ref_per_ticker = out["ticker"].map(_per_ticker_max)
+        _within_2h = (_now_ref_per_ticker - _ts) <= pd.Timedelta(hours=2)
         out["is_within_2h"] = _within_2h.fillna(False)
     else:
         out["is_within_2h"] = False
@@ -1261,14 +1272,21 @@ def aggregate_flow_by_ticker(
     #                     Negative → flow died off earlier in the day.
     # ------------------------------------------------------------------
     _FLAT_BASELINE = 2.0 / 6.5  # ~0.308
+    # Phase 2 — count-floor guard. With per-ticker ``_now_ref``, any
+    # ticker that has only 1-2 prints would otherwise register
+    # ``accel_ratio = 1.0`` (the prints ARE its last-2h window).
+    # Require >= 3 directional prints before publishing a non-zero
+    # acceleration; below the floor we still publish 0.0 so the
+    # consumer schema stays unchanged.
+    _ACCEL_MIN_COUNT = 3
     agg["bullish_accel_ratio"] = np.where(
-        agg["bullish_count"] > 0,
-        agg["bullish_repeat_2h"] / agg["bullish_count"],
+        agg["bullish_count"] >= _ACCEL_MIN_COUNT,
+        agg["bullish_repeat_2h"] / agg["bullish_count"].clip(lower=1),
         0.0,
     )
     agg["bearish_accel_ratio"] = np.where(
-        agg["bearish_count"] > 0,
-        agg["bearish_repeat_2h"] / agg["bearish_count"],
+        agg["bearish_count"] >= _ACCEL_MIN_COUNT,
+        agg["bearish_repeat_2h"] / agg["bearish_count"].clip(lower=1),
         0.0,
     )
     agg["bullish_accel_score"] = np.clip(

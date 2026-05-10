@@ -266,16 +266,35 @@ def stamp_promotion_outcomes(
     if not rows:
         return 0
 
+    # Direction-vocabulary normalization. ``grade_history`` rows carry
+    # ``BULLISH`` / ``BEARISH`` (flow_tracker native vocabulary) but the
+    # signal pipeline emits ``LONG`` / ``SHORT`` on ``final_results`` and
+    # rejection rows. Without this map the (ticker, direction) join fails
+    # on every row and every entry falls through to ``not_evaluated`` —
+    # which is exactly what we observed on every post-2026-05-08 scan
+    # before this fix landed. Aliases are applied at the join boundary
+    # so callers don't have to know about the vocabulary mismatch.
+    _DIRECTION_ALIAS = {
+        "LONG": "BULLISH",
+        "SHORT": "BEARISH",
+        "BULLISH": "BULLISH",
+        "BEARISH": "BEARISH",
+    }
+
+    def _norm_dir(value: object) -> str:
+        s = str(value or "").upper().strip()
+        return _DIRECTION_ALIAS.get(s, s)
+
     promoted_keys = {
         (str(p.get("ticker") or "").upper().strip(),
-         str(p.get("direction") or "").upper().strip())
+         _norm_dir(p.get("direction")))
         for p in promoted
     }
     rejected_lookup: dict[tuple[str, str], str] = {}
     for r in rejected:
         key = (
             str(r.get("ticker") or "").upper().strip(),
-            str(r.get("direction") or "").upper().strip(),
+            _norm_dir(r.get("direction")),
         )
         if not key[0] or not key[1]:
             continue
@@ -288,7 +307,7 @@ def stamp_promotion_outcomes(
             continue
         key = (
             str(row.get("ticker") or "").upper().strip(),
-            str(row.get("direction") or "").upper().strip(),
+            _norm_dir(row.get("direction")),
         )
         if key in promoted_keys:
             new_promoted, new_reason = "true", ""

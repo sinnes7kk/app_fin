@@ -127,13 +127,27 @@ def _safe_div(num: float | None, den: float | None) -> float | None:
 
 
 def _bullish_premium_share(g: dict) -> float | None:
-    """Share of total directional premium that is bullish."""
-    bull = _safe_float(g.get("bullish_premium")) or _safe_float(
-        g.get("total_bullish_premium")
-    ) or 0.0
-    bear = _safe_float(g.get("bearish_premium")) or _safe_float(
-        g.get("total_bearish_premium")
-    ) or 0.0
+    """Share of total directional premium that is bullish.
+
+    ``g`` is a row from ``compute_multi_day_flow``. The cumulative
+    bull/bear totals live at ``cumulative_bull`` / ``cumulative_bear``;
+    the older flat key names (``bullish_premium``, etc.) only exist on
+    raw screener payloads and were the cause of the 100% NULL bug
+    surfaced 2026-05-09. We accept both shapes so the helper still
+    works on legacy fixtures.
+    """
+    bull = (
+        _safe_float(g.get("cumulative_bull"))
+        or _safe_float(g.get("bullish_premium"))
+        or _safe_float(g.get("total_bullish_premium"))
+        or 0.0
+    )
+    bear = (
+        _safe_float(g.get("cumulative_bear"))
+        or _safe_float(g.get("bearish_premium"))
+        or _safe_float(g.get("total_bearish_premium"))
+        or 0.0
+    )
     total = bull + bear
     if total <= 0:
         return None
@@ -141,9 +155,23 @@ def _bullish_premium_share(g: dict) -> float | None:
 
 
 def _unusual_premium_share(g: dict) -> float | None:
-    """Share of *unusual* premium (vol > OI sweeps) that is bullish."""
-    ub = _safe_float(g.get("unusual_bullish_premium")) or 0.0
-    ud = _safe_float(g.get("unusual_bearish_premium")) or 0.0
+    """Share of *unusual* premium that is bullish.
+
+    Reads from the nested ``premium_mix`` dict that
+    ``compute_multi_day_flow`` emits (``unusual_bullish`` /
+    ``unusual_bearish``). Falls back to legacy flat keys for fixtures.
+    """
+    mix = g.get("premium_mix") or {}
+    ub = (
+        _safe_float(mix.get("unusual_bullish"))
+        or _safe_float(g.get("unusual_bullish_premium"))
+        or 0.0
+    )
+    ud = (
+        _safe_float(mix.get("unusual_bearish"))
+        or _safe_float(g.get("unusual_bearish_premium"))
+        or 0.0
+    )
     total = ub + ud
     if total <= 0:
         return None

@@ -82,20 +82,25 @@ def test_accel_score_clipped_into_bounded_range():
 
 
 def test_accel_ratio_directionally_separated():
-    """Bullish 2h prints don't leak into bearish counts and vice versa."""
+    """Bullish 2h prints don't leak into bearish counts and vice versa.
+
+    Both sides have >= 3 prints to clear the count-floor guard; the
+    test isolates the directional-separation behaviour, not the floor.
+    """
     df = pd.DataFrame([
         _row("SPY", ts="2025-01-10T10:00:00Z", direction="LONG"),
         _row("SPY", ts="2025-01-10T11:00:00Z", direction="LONG"),
         _row("SPY", ts="2025-01-10T19:30:00Z", direction="LONG"),   # in 2h window
         _row("SPY", ts="2025-01-10T20:00:00Z", direction="SHORT"),  # in 2h window
         _row("SPY", ts="2025-01-10T10:30:00Z", direction="SHORT"),  # out of window
+        _row("SPY", ts="2025-01-10T11:30:00Z", direction="SHORT"),  # out of window
     ])
     out = aggregate_flow_by_ticker(df)
     row = out[out["ticker"] == "SPY"].iloc[0]
     assert int(row["bullish_repeat_2h"]) == 1
     assert int(row["bearish_repeat_2h"]) == 1
     assert abs(float(row["bullish_accel_ratio"]) - 1 / 3) < 1e-6
-    assert abs(float(row["bearish_accel_ratio"]) - 1 / 2) < 1e-6
+    assert abs(float(row["bearish_accel_ratio"]) - 1 / 3) < 1e-6
 
 
 def test_accel_ratio_zero_when_no_2h_window_coverage():
@@ -132,19 +137,90 @@ def test_missing_event_ts_does_not_crash():
     assert float(row["bullish_accel_ratio"]) == 0.0
 
 
+def test_per_ticker_now_ref_rescues_inactive_last_2h_ticker():
+    """Phase 2 (2026-05-10) regression test: with the OLD global
+    ``_now_ref`` an early-bird ticker (all prints before the global
+    anchor's 2h window) would register ``bullish_accel_ratio = 0``
+    even when its own activity was clustered at the end of its tape.
+
+    Two tickers in one batch:
+      * EARLY: 4 prints clustered between 09:00 and 11:00.
+      * LATE:  3 prints between 19:30 and 20:00 (sets global anchor).
+
+    Under global ``_now_ref`` (the old bug), EARLY's last-2h count is
+    0 because all its prints are 9-11h old vs the 20:00 anchor. Under
+    per-ticker ``_now_ref`` (the fix), EARLY's anchor is 11:00 so its
+    own last-2h window is 09:00-11:00 → all 4 prints qualify, giving
+    ``bullish_accel_ratio = 4/4 = 1.0``.
+    """
+    df = pd.DataFrame([
+        _row("EARLY", ts="2025-01-10T09:00:00Z"),
+        _row("EARLY", ts="2025-01-10T09:30:00Z"),
+        _row("EARLY", ts="2025-01-10T10:30:00Z"),
+        _row("EARLY", ts="2025-01-10T11:00:00Z"),
+        _row("LATE",  ts="2025-01-10T19:30:00Z"),
+        _row("LATE",  ts="2025-01-10T19:45:00Z"),
+        _row("LATE",  ts="2025-01-10T20:00:00Z"),
+    ])
+    out = aggregate_flow_by_ticker(df)
+    early = out[out["ticker"] == "EARLY"].iloc[0]
+    late = out[out["ticker"] == "LATE"].iloc[0]
+    # All 4 EARLY prints fall within its OWN last-2h window (09:00-11:00).
+    assert int(early["bullish_count"]) == 4
+    assert int(early["bullish_repeat_2h"]) == 4
+    assert float(early["bullish_accel_ratio"]) == 1.0
+    # LATE: all 3 prints within its OWN 2h window.
+    assert int(late["bullish_count"]) == 3
+    assert int(late["bullish_repeat_2h"]) == 3
+    assert float(late["bullish_accel_ratio"]) == 1.0
+
+
+def test_count_floor_blocks_single_print_ticker():
+    """Phase 2 count-floor guard: per-ticker ``_now_ref`` would otherwise
+    auto-stamp ``accel_ratio = 1.0`` for any ticker with 1-2 prints
+    (the prints ARE its own last-2h window). The floor of 3
+    directional prints prevents this thin-data noise from polluting
+    downstream features."""
+    df = pd.DataFrame([
+        # PUNY has only 2 LONG prints. Even though both are inside its
+        # own 2h window, the count-floor (>= 3) keeps the ratio at 0.0.
+        _row("PUNY", ts="2025-01-10T19:30:00Z"),
+        _row("PUNY", ts="2025-01-10T20:00:00Z"),
+        # BIG has 4 LONG prints; >= floor → ratio publishes normally.
+        _row("BIG", ts="2025-01-10T18:30:00Z"),
+        _row("BIG", ts="2025-01-10T19:00:00Z"),
+        _row("BIG", ts="2025-01-10T19:30:00Z"),
+        _row("BIG", ts="2025-01-10T20:00:00Z"),
+    ])
+    out = aggregate_flow_by_ticker(df)
+    puny = out[out["ticker"] == "PUNY"].iloc[0]
+    big = out[out["ticker"] == "BIG"].iloc[0]
+    # PUNY: count below the floor → ratio forced to 0 (intentional).
+    assert int(puny["bullish_count"]) == 2
+    assert int(puny["bullish_repeat_2h"]) == 2  # raw count still tracks both
+    assert float(puny["bullish_accel_ratio"]) == 0.0
+    # BIG: count clears the floor → ratio = 4/4 = 1.0.
+    assert int(big["bullish_count"]) == 4
+    assert float(big["bullish_accel_ratio"]) == 1.0
+
+
 def test_two_tickers_dont_cross_contaminate():
-    """The 2h anchor is per-frame, but counts must still be grouped
-    correctly per ticker without mixing signals."""
+    """Per-ticker 2h anchor (post Phase 2 fix). Each ticker's window is
+    measured against ITS OWN latest print, so prints don't leak across
+    tickers and an early-only-active ticker still gets a meaningful
+    last-2h count."""
     df = pd.DataFrame([
         _row("AAPL", ts="2025-01-10T10:00:00Z"),
-        _row("AAPL", ts="2025-01-10T19:30:00Z"),  # within 2h
-        _row("MSFT", ts="2025-01-10T19:45:00Z"),  # within 2h; sets anchor
-        _row("MSFT", ts="2025-01-10T20:00:00Z"),  # within 2h
+        _row("AAPL", ts="2025-01-10T19:30:00Z"),  # AAPL's anchor
+        _row("MSFT", ts="2025-01-10T19:45:00Z"),  # MSFT's window 17:45-19:45
+        _row("MSFT", ts="2025-01-10T20:00:00Z"),  # MSFT's anchor → 18:00-20:00
     ])
     out = aggregate_flow_by_ticker(df)
     aapl = out[out["ticker"] == "AAPL"].iloc[0]
     msft = out[out["ticker"] == "MSFT"].iloc[0]
+    # AAPL: 19:30 is within 2h of 19:30; 10:00 is not → 1 in window.
     assert int(aapl["bullish_repeat_2h"]) == 1
+    # MSFT: both 19:45 and 20:00 are within 2h of 20:00.
     assert int(msft["bullish_repeat_2h"]) == 2
 
 
@@ -156,6 +232,8 @@ if __name__ == "__main__":
         test_accel_ratio_directionally_separated,
         test_accel_ratio_zero_when_no_2h_window_coverage,
         test_missing_event_ts_does_not_crash,
+        test_per_ticker_now_ref_rescues_inactive_last_2h_ticker,
+        test_count_floor_blocks_single_print_ticker,
         test_two_tickers_dont_cross_contaminate,
     ]
     passed, failed = 0, 0

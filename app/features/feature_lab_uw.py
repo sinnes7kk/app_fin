@@ -85,29 +85,44 @@ def fetch_uw_features(ticker: str, spot: float | None = None) -> dict:
         fetch_iv_skew,
         fetch_max_pain,
         fetch_spot_exposures,
+        get_uw_last_errors,
+        reset_uw_last_errors,
     )
 
     out: dict = {c: None for c in UW_FEATURE_COLS}
 
+    # Wave D — per-endpoint diagnostics. Reset the module-level error
+    # tracker before each fetch so a stale failure from a previous
+    # ticker can't leak into this ticker's cache.
+    reset_uw_last_errors()
+
     fetchers = (
-        fetch_greek_exposure,
-        fetch_iv_skew,
-        fetch_atm_iv_term,
-        fetch_expiry_breakdown,
-        fetch_max_pain,
-        fetch_spot_exposures,
+        ("greek-exposure", fetch_greek_exposure),
+        ("iv-skew", fetch_iv_skew),
+        ("atm-iv", fetch_atm_iv_term),
+        ("expiry-breakdown", fetch_expiry_breakdown),
+        ("max-pain", fetch_max_pain),
+        ("spot-exposures", fetch_spot_exposures),
     )
+    endpoint_status: dict[str, str] = {}
     saw_any = False
-    for fn in fetchers:
+    for endpoint, fn in fetchers:
         try:
             res = fn(ticker)
-        except Exception:
+        except Exception as e:
             res = None
+            endpoint_status[endpoint] = f"unhandled_exc: {type(e).__name__}: {e}"
         if isinstance(res, dict):
             saw_any = True
+            endpoint_status[endpoint] = "ok"
             for k, v in res.items():
                 if k in out:
                     out[k] = v
+        elif endpoint not in endpoint_status:
+            # Fetcher returned None — pull the recorded reason if
+            # ``_uw_diag`` stamped one.
+            errs = get_uw_last_errors()
+            endpoint_status[endpoint] = errs.get(endpoint, "no_data")
 
     # Stamp spot into max_pain calc if UW endpoint didn't return one and we
     # have a spot from OHLCV cache. The fetcher already requires UW to
@@ -115,6 +130,10 @@ def fetch_uw_features(ticker: str, spot: float | None = None) -> dict:
     # column None rather than guessing.
     _ = spot
 
-    payload = {**out, "_status": "ok" if saw_any else "no_data"}
+    payload = {
+        **out,
+        "_status": "ok" if saw_any else "no_data",
+        "_endpoint_status": endpoint_status,
+    }
     _write_cache(ticker, payload)
     return out

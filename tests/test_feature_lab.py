@@ -34,6 +34,7 @@ def _ohlcv(seed: int = 0, n: int = 60) -> pd.DataFrame:
 
 
 def test_bullish_premium_share():
+    """Legacy flat-key fixture — still supported via fallback."""
     g = {"bullish_premium": 800.0, "bearish_premium": 200.0}
     assert fl._bullish_premium_share(g) == 0.8
     g = {"bullish_premium": 0, "bearish_premium": 0}
@@ -41,12 +42,54 @@ def test_bullish_premium_share():
     print("  PASS: test_bullish_premium_share")
 
 
+def test_bullish_premium_share_production_schema():
+    """Production schema — what ``compute_multi_day_flow`` actually emits.
+
+    Locks in the Wave C 2026-05-10 fix: the helper must read
+    ``cumulative_bull`` / ``cumulative_bear`` (the real keys), not
+    ``bullish_premium`` / ``bearish_premium`` (which never appear on
+    flow-tracker rows). Without this fix every feature_lab.csv row had
+    bullish_premium_share = NULL.
+    """
+    g = {"cumulative_bull": 7_500_000.0, "cumulative_bear": 2_500_000.0}
+    assert abs(fl._bullish_premium_share(g) - 0.75) < 1e-9
+    # Mixed shape — production keys win when both are present.
+    g = {
+        "cumulative_bull": 7_500_000.0,
+        "cumulative_bear": 2_500_000.0,
+        "bullish_premium": 1.0,        # legacy fallback, ignored
+        "bearish_premium": 99.0,
+    }
+    assert abs(fl._bullish_premium_share(g) - 0.75) < 1e-9
+    print("  PASS: test_bullish_premium_share_production_schema")
+
+
 def test_unusual_premium_share():
+    """Legacy flat-key fixture — still supported via fallback."""
     g = {"unusual_bullish_premium": 100, "unusual_bearish_premium": 300}
     assert abs(fl._unusual_premium_share(g) - 0.25) < 1e-9
     g = {}
     assert fl._unusual_premium_share(g) is None
     print("  PASS: test_unusual_premium_share")
+
+
+def test_unusual_premium_share_production_schema():
+    """Production schema — ``compute_multi_day_flow`` nests these under
+    ``premium_mix`` with bare keys (``unusual_bullish``,
+    ``unusual_bearish``), not the flat ``*_premium`` aliases. Locks in
+    the Wave C 2026-05-10 fix that resolved 100% NULLs in feature_lab.csv.
+    """
+    g = {
+        "premium_mix": {
+            "unusual_bullish": 4_000_000.0,
+            "unusual_bearish": 1_000_000.0,
+        }
+    }
+    assert abs(fl._unusual_premium_share(g) - 0.8) < 1e-9
+    # Empty premium_mix → None.
+    g = {"premium_mix": {"unusual_bullish": 0, "unusual_bearish": 0}}
+    assert fl._unusual_premium_share(g) is None
+    print("  PASS: test_unusual_premium_share_production_schema")
 
 
 def test_vrp_proxy_basic():
@@ -243,7 +286,9 @@ class _Monkeypatch:
 def main():
     tests = [
         ("test_bullish_premium_share", test_bullish_premium_share, False),
+        ("test_bullish_premium_share_production_schema", test_bullish_premium_share_production_schema, False),
         ("test_unusual_premium_share", test_unusual_premium_share, False),
+        ("test_unusual_premium_share_production_schema", test_unusual_premium_share_production_schema, False),
         ("test_vrp_proxy_basic", test_vrp_proxy_basic, False),
         ("test_vrp_proxy_missing_iv_rank_returns_none", test_vrp_proxy_missing_iv_rank_returns_none, False),
         ("test_far_otm_shares", test_far_otm_shares, False),

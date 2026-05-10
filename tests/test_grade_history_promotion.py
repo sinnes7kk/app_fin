@@ -135,6 +135,61 @@ def test_stamp_overwrites_with_new_inputs(monkeypatch):
     print("  PASS: test_stamp_overwrites_with_new_inputs")
 
 
+def test_stamp_normalizes_long_to_bullish(monkeypatch):
+    """Production reality check: ``final_results`` rows from the signal
+    pipeline carry ``direction='LONG'`` while grade_history rows carry
+    ``direction='BULLISH'``. Without normalization at the join boundary
+    every promoted row falls through to ``not_evaluated``. This test
+    locks the LONG→BULLISH alias in so the bug cannot regress.
+    """
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        path = _seed_history(tmp, "2026-05-08")
+        monkeypatch.setattr(gh, "GRADE_HISTORY_PATH", path)
+
+        gh.stamp_promotion_outcomes(
+            as_of="2026-05-08",
+            promoted=[
+                # Pipeline-native vocabulary — LONG must map to BULLISH.
+                {"ticker": "AAPL", "direction": "LONG"},
+            ],
+            rejected=[],
+        )
+        rows = _read(path)
+        aapl = next(r for r in rows if r["ticker"] == "AAPL")
+        assert aapl["is_promoted"] == "true", \
+            f"LONG must alias to BULLISH; got is_promoted={aapl['is_promoted']!r}"
+        assert aapl["reject_reason"] == ""
+        # Idempotence: NVDA is still not in any list → not_evaluated.
+        nvda = next(r for r in rows if r["ticker"] == "NVDA")
+        assert nvda["reject_reason"] == "not_evaluated"
+    print("  PASS: test_stamp_normalizes_long_to_bullish")
+
+
+def test_stamp_normalizes_short_to_bearish(monkeypatch):
+    """Symmetric check for SHORT→BEARISH on the rejection path."""
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        path = _seed_history(tmp, "2026-05-08")
+        monkeypatch.setattr(gh, "GRADE_HISTORY_PATH", path)
+
+        gh.stamp_promotion_outcomes(
+            as_of="2026-05-08",
+            promoted=[],
+            rejected=[
+                # SHORT must alias to BEARISH on the rejection lookup.
+                {"ticker": "TSLA", "direction": "SHORT",
+                 "reject_reason": "weak_bearish_flow"},
+            ],
+        )
+        rows = _read(path)
+        tsla = next(r for r in rows if r["ticker"] == "TSLA")
+        assert tsla["is_promoted"] == "false"
+        assert tsla["reject_reason"] == "weak_bearish_flow", \
+            f"SHORT must alias to BEARISH; got reject_reason={tsla['reject_reason']!r}"
+    print("  PASS: test_stamp_normalizes_short_to_bearish")
+
+
 # Minimal monkeypatch shim so we don't require pytest as a dependency.
 class _Monkeypatch:
     def __init__(self):
@@ -156,6 +211,8 @@ def main():
         ("test_stamp_promoted_and_rejected", test_stamp_promoted_and_rejected, True),
         ("test_stamp_idempotent", test_stamp_idempotent, True),
         ("test_stamp_overwrites_with_new_inputs", test_stamp_overwrites_with_new_inputs, True),
+        ("test_stamp_normalizes_long_to_bullish", test_stamp_normalizes_long_to_bullish, True),
+        ("test_stamp_normalizes_short_to_bearish", test_stamp_normalizes_short_to_bearish, True),
     ]
     failures = 0
     for name, fn, needs_mp in tests:
