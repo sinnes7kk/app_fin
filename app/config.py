@@ -220,7 +220,11 @@ FLOW_PERSISTENCE_BONUS = 0.5 # max score bonus for persistent flow (conservative
 # in ZSCORE_COMPONENTS that UW can hydrate are z-scored; the rest stay on
 # absolute-threshold scoring until hydrated separately.
 USE_ZSCORE_FLOW = True            # master switch (UW-backed baseline, intensity only)
-ZSCORE_LOOKBACK_DAYS = 30         # trailing window for per-ticker stats
+ZSCORE_LOOKBACK_DAYS = 45         # trailing window for per-ticker stats
+                                  # Widened 30 -> 45 on 2026-05-10 after the
+                                  # active universe saturated the old 30d cap
+                                  # (98% of scan tickers were Tier-1, so the
+                                  # baseline is the bottleneck not the data).
 ZSCORE_MIN_N_FULL = 20            # Tier 1 minimum valid observations
 ZSCORE_MIN_N_SHRUNK = 5           # Tier 2 minimum (below → Tier 3 cross-sectional)
 ZSCORE_SHRINKAGE_K = 10           # Bayesian shrinkage strength for Tier 2 MAD
@@ -238,7 +242,15 @@ ZSCORE_COMPONENTS = ["flow_intensity"]  # components whose z-baseline is UW-back
 # shadow component (z + tier columns attach to the feature table) but does not
 # feed the weighted ``bullish_score`` / ``bearish_score`` yet — that cutover
 # is a separate, weight-aware change.
-USE_ZSCORE_FLOW_EXTENDED = False
+USE_ZSCORE_FLOW_EXTENDED = True   # Activated 2026-05-10. Flips `vol_oi` from
+                                  # absolute-threshold to per-ticker z-score
+                                  # in the weighted bullish/bearish_score
+                                  # (since `vol_oi` has a 0.17 weight in
+                                  # `_FLOW_WEIGHTS`). `unusual_premium_share`
+                                  # gets z + tier columns attached to the
+                                  # feature table but does NOT yet feed the
+                                  # score (no weight in `_FLOW_WEIGHTS`); a
+                                  # weight-aware cutover is a separate change.
 ZSCORE_COMPONENTS_EXTENDED = ["flow_intensity", "vol_oi", "unusual_premium_share"]
 
 UW_HISTORY_CACHE_TTL_HOURS = 24   # per-ticker UW options-volume history cache TTL

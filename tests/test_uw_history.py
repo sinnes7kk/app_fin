@@ -91,9 +91,14 @@ def test_load_uw_intensity_history_derives_flow_intensity_from_premium_and_mcap(
             "fetch_ticker_options_history",
             side_effect=lambda t, days=30: _synthetic_history(t, days=days),
         ):
+            # Pin the test to a 30-day window so the assertion below stays
+            # decoupled from the production ``ZSCORE_LOOKBACK_DAYS`` default
+            # (which was widened to 45 on 2026-05-10). The loader logic is
+            # the same regardless of window size.
             return uw_history.load_uw_intensity_history(
                 tickers=["NVDA", "AAPL"],
                 marketcap_map={"NVDA": 3e12, "AAPL": 3.5e12},
+                lookback_days=30,
             )
 
     out = _with_tmp_cache_dir(_run)
@@ -123,13 +128,14 @@ def test_load_uw_intensity_history_derives_flow_intensity_from_premium_and_mcap(
 # ─────────────────────────────────────────────────────────────────────────────
 
 def test_fresh_cache_short_circuits_uw_fetch():
-    """When a ticker's cache file is <24h old, the loader must not call
+    """When a ticker's cache file is <24h old AND has at least
+    ``lookback_days`` rows, the loader must not call
     ``fetch_ticker_options_history`` at all."""
     from app.features import uw_history
 
     def _run(tmp: Path) -> int:
         uw_history._write_cache(
-            uw_history._cache_path("NVDA"), _synthetic_history("NVDA")
+            uw_history._cache_path("NVDA"), _synthetic_history("NVDA", days=30)
         )
         call_count = {"n": 0}
 
@@ -138,14 +144,54 @@ def test_fresh_cache_short_circuits_uw_fetch():
             return _synthetic_history(ticker, days=days)
 
         with patch.object(uw_history, "fetch_ticker_options_history", _tracking_fetch):
+            # Pin lookback_days=30 so the synthetic 30-row cache is wide
+            # enough to satisfy the new row-count guard (added 2026-05-10).
             out = uw_history.load_uw_intensity_history(
-                tickers=["NVDA"], marketcap_map={"NVDA": 3e12}
+                tickers=["NVDA"],
+                marketcap_map={"NVDA": 3e12},
+                lookback_days=30,
             )
             assert not out.empty, "cached rows should still produce a frame"
         return call_count["n"]
 
     n = _with_tmp_cache_dir(_run)
     assert n == 0, f"fresh cache should skip UW fetch; got {n} calls"
+
+
+def test_fresh_but_thin_cache_triggers_uw_refresh():
+    """Regression test for the row-count cache-bust added 2026-05-10.
+
+    When a fresh cache holds fewer rows than the requested ``lookback_days``
+    (e.g. cache was written under an old 30-day config and the lookback has
+    since been widened to 45), the loader must refresh from UW so the new
+    window actually takes effect — even though the file mtime is still
+    inside TTL.
+    """
+    from app.features import uw_history
+
+    def _run(tmp: Path) -> int:
+        # Cache has only 30 rows; we'll request 45.
+        uw_history._write_cache(
+            uw_history._cache_path("NVDA"), _synthetic_history("NVDA", days=30)
+        )
+        call_count = {"n": 0}
+
+        def _tracking_fetch(ticker, days=30):
+            call_count["n"] += 1
+            return _synthetic_history(ticker, days=days)
+
+        with patch.object(uw_history, "fetch_ticker_options_history", _tracking_fetch):
+            uw_history.load_uw_intensity_history(
+                tickers=["NVDA"],
+                marketcap_map={"NVDA": 3e12},
+                lookback_days=45,
+            )
+        return call_count["n"]
+
+    n = _with_tmp_cache_dir(_run)
+    assert n == 1, (
+        f"thin cache must trigger 1 refresh under the wider window; got {n}"
+    )
 
 
 def test_stale_cache_triggers_uw_refresh():
@@ -331,6 +377,7 @@ if __name__ == "__main__":
     tests = [
         test_load_uw_intensity_history_derives_flow_intensity_from_premium_and_mcap,
         test_fresh_cache_short_circuits_uw_fetch,
+        test_fresh_but_thin_cache_triggers_uw_refresh,
         test_stale_cache_triggers_uw_refresh,
         test_micro_cap_ticker_is_filtered_out,
         test_missing_mcap_ticker_is_skipped,

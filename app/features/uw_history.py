@@ -97,13 +97,22 @@ def _fetch_with_cache(
     days: int,
     ttl_hours: float,
 ) -> pd.DataFrame | None:
-    """Return cached history if fresh, else hit UW and refresh the cache."""
+    """Return cached history if fresh, else hit UW and refresh the cache.
+
+    Cache is invalidated under two conditions: (1) age exceeds ``ttl_hours``,
+    or (2) the cached row count is smaller than ``days`` (i.e. the requested
+    window has been widened since the cache was written). Without (2), old
+    30-row caches written before a lookback widening would be served stale
+    until natural TTL expiry.
+    """
     path = _cache_path(ticker)
 
     if _cache_fresh(path, ttl_hours):
         cached = _load_cache(path)
-        if cached is not None and not cached.empty:
+        if cached is not None and not cached.empty and len(cached) >= days:
             return cached
+        # Cache is fresh but too thin for the current window — fall through
+        # to refresh against UW so the wider lookback actually takes effect.
 
     df = fetch_ticker_options_history(ticker, days=days)
     time.sleep(_SLEEP_BETWEEN_MISSES_SEC)
