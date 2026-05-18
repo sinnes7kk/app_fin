@@ -96,7 +96,6 @@ snapshot_date,ticker,st_messages,st_bullish,st_bearish,st_sentiment,rd_mentions,
 2026-05-15,SEDG,0,0,0,0.5,0,0,0,—,neutral
 2026-05-15,WRBY,0,0,0,0.5,0,0,0,—,neutral
 2026-05-15,FIG,0,0,0,0.5,0,0,0,—,neutral
-2026-05-15,OUST,0,0,0,0.5,0,0,0,—,neutral
 2026-05-15,RXT,0,0,0,0.5,0,0,0,—,neutral
 2026-05-15,TSEM,0,0,0,0.5,0,0,0,—,neutral
 2026-05-15,TE,0,0,0,0.5,0,0,0,—,neutral
@@ -104,3 +103,4 @@ snapshot_date,ticker,st_messages,st_bullish,st_bearish,st_sentiment,rd_mentions,
 2026-05-15,CRVS,0,0,0,0.5,0,0,0,—,neutral
 2026-05-15,DOCS,0,0,0,0.5,0,0,0,—,neutral
 2026-05-15,HROW,0,0,0,0.5,0,0,0,—,neutral
+2026-05-15,LITE,0,0,0,0.5,0,0,0,—,neutral
