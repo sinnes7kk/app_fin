@@ -328,4 +328,4 @@ as_of,ticker,direction,sector,conviction_score,conviction_grade,conviction_stack
 2026-05-19,MDB,BEARISH,Technology,5.9,B,,25.22,1.0,43.2,0.0,0.0,0.0,7.08,133443676.0,25.22,0.66,90.1,4.48,0.818,,91+,per_ticker_api,false,weak_bearish_flow,,
 2026-05-19,AGYS,BEARISH,Technology,5.8,B,,9.13,0.75,55.8,0.0,0.0,0.0,11.43,3794013.0,9.13,0.64,50.8,162.11,4.036,,unknown,screener,false,not_evaluated,,
 2026-05-19,CVNA,BEARISH,Consumer Cyclical,5.8,B,,7.67,0.75,56.0,1.0,0.0,0.0,-3.84,70178575.0,7.67,1.13,36.0,0.95,1.462,,31-90,per_ticker_api,false,price_validation_failed,,
-2026-05-19,INTU,BEARISH,nan,5.8,B,,5.45,1.0,56.0,0.0,0.0,0.0,0.8,93470517.0,5.45,1.41,89.3,3.81,1.271,,31-90,per_ticker_api,false,not_evaluated,,
+2026-05-19,INTU,BEARISH,nan,5.8,B,,5.45,1.0,56.0,0.0,0.0,0.0,1.21,93470517.0,5.45,1.41,0.0,3.81,1.271,,31-90,per_ticker_api,false,not_evaluated,,
