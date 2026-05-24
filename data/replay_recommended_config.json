@@ -1,38 +1,38 @@
 {
   "swing": {
-    "n": 12,
+    "n": 15,
     "MAX_HOLD_DAYS": 5,
     "TIME_STOP_MIN_R": 0.5,
-    "ATR_TRAIL_MULT": 2.1,
-    "confidence": "low",
+    "ATR_TRAIL_MULT": 2.2,
+    "confidence": "medium",
     "observed_median_d_to_mfe": 1.0,
-    "observed_mean_r": -0.4678800000000001
+    "observed_mean_r": -0.5316769230769232
   },
   "position": {
-    "n": 89,
+    "n": 124,
     "MAX_HOLD_DAYS": 10,
     "TIME_STOP_MIN_R": 1.0,
     "ATR_TRAIL_MULT": 2.3,
     "confidence": "high",
     "observed_median_d_to_mfe": 1.0,
-    "observed_mean_r": 0.34372857142857144
+    "observed_mean_r": 0.19529888888888888
   },
   "leap": {
-    "n": 36,
+    "n": 61,
     "MAX_HOLD_DAYS": 15,
     "TIME_STOP_MIN_R": 0.5,
-    "ATR_TRAIL_MULT": 2.1,
-    "confidence": "high",
-    "observed_median_d_to_mfe": 1.0,
-    "observed_mean_r": 0.15315833333333334
-  },
-  "unknown": {
-    "n": 114,
-    "MAX_HOLD_DAYS": 5,
-    "TIME_STOP_MIN_R": 1.0,
     "ATR_TRAIL_MULT": 2.2,
     "confidence": "high",
     "observed_median_d_to_mfe": 1.0,
-    "observed_mean_r": 0.5147118811881187
+    "observed_mean_r": 0.15200270270270272
+  },
+  "unknown": {
+    "n": 134,
+    "MAX_HOLD_DAYS": 5,
+    "TIME_STOP_MIN_R": 1.0,
+    "ATR_TRAIL_MULT": 2.1,
+    "confidence": "high",
+    "observed_median_d_to_mfe": 1.0,
+    "observed_mean_r": 0.4726466101694915
   }
 }
