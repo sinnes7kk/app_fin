@@ -5051,5 +5051,48 @@
         "bearish_tier1_pct": 95.9
       }
     }
+  },
+  {
+    "ts": "2026-05-28T17:39:55Z",
+    "mode": "extended",
+    "n_tickers": 101,
+    "components": {
+      "flow_intensity": {
+        "bullish_tiers": {
+          "1": 94,
+          "3": 7
+        },
+        "bullish_tier1_pct": 93.1,
+        "bearish_tiers": {
+          "1": 94,
+          "3": 7
+        },
+        "bearish_tier1_pct": 93.1
+      },
+      "vol_oi": {
+        "bullish_tiers": {
+          "1": 94,
+          "3": 7
+        },
+        "bullish_tier1_pct": 93.1,
+        "bearish_tiers": {
+          "1": 94,
+          "3": 7
+        },
+        "bearish_tier1_pct": 93.1
+      },
+      "unusual_premium_share": {
+        "bullish_tiers": {
+          "1": 94,
+          "3": 7
+        },
+        "bullish_tier1_pct": 93.1,
+        "bearish_tiers": {
+          "1": 94,
+          "3": 7
+        },
+        "bearish_tier1_pct": 93.1
+      }
+    }
   }
 ]
