@@ -2114,9 +2114,9 @@
       "swing_dte_oi": 24449,
       "long_dated_oi": 121999,
       "daily_bullish_premium": 9547870.0,
-      "daily_bearish_premium": 11002065.0,
-      "daily_premium_bias": -1454195.0,
-      "call_volume_today": 14938,
+      "daily_bearish_premium": 10992820.0,
+      "daily_premium_bias": -1444950.0,
+      "call_volume_today": 14935,
       "put_volume_today": 10724,
       "call_volume_vs_30d_avg": 1.33,
       "put_volume_vs_30d_avg": 1.48,
@@ -2299,7 +2299,7 @@
     "price_pattern": 1.4,
     "price_momentum": 0.5,
     "price_confirm_vol": 0.27,
-    "options_context_score": 5.2,
+    "options_context_score": 5.1,
     "options_context": {
       "options_context_available": true,
       "options_context_sources_used": [
@@ -2328,12 +2328,12 @@
       "swing_dte_oi": 86688,
       "long_dated_oi": 691361,
       "daily_bullish_premium": 2604291.0,
-      "daily_bearish_premium": 3051628.0,
-      "daily_premium_bias": -447337.0,
-      "call_volume_today": 38925,
-      "put_volume_today": 21263,
-      "call_volume_vs_30d_avg": 1.2,
-      "put_volume_vs_30d_avg": 1.87,
+      "daily_bearish_premium": 2581628.0,
+      "daily_premium_bias": 22663.0,
+      "call_volume_today": 37925,
+      "put_volume_today": 20263,
+      "call_volume_vs_30d_avg": 1.17,
+      "put_volume_vs_30d_avg": 1.78,
       "call_ask_bid_ratio": null,
       "put_ask_bid_ratio": null,
       "iv_rank": 54.3,
@@ -3401,10 +3401,10 @@
       "swing_dte_oi": 290827,
       "long_dated_oi": 1049254,
       "daily_bullish_premium": 159017958.0,
-      "daily_bearish_premium": 203238178.0,
-      "daily_premium_bias": -44220220.0,
-      "call_volume_today": 259675,
-      "put_volume_today": 358471,
+      "daily_bearish_premium": 203237840.0,
+      "daily_premium_bias": -44219882.0,
+      "call_volume_today": 258675,
+      "put_volume_today": 358469,
       "call_volume_vs_30d_avg": 0.84,
       "put_volume_vs_30d_avg": 2.4,
       "call_ask_bid_ratio": null,
@@ -5749,11 +5749,11 @@
       "near_term_oi": 1518048,
       "swing_dte_oi": 505727,
       "long_dated_oi": 1552966,
-      "daily_bullish_premium": 1614482680.0,
-      "daily_bearish_premium": 1577064593.0,
-      "daily_premium_bias": 37418087.0,
+      "daily_bullish_premium": 1605695980.0,
+      "daily_bearish_premium": 1550207893.0,
+      "daily_premium_bias": 55488087.0,
       "call_volume_today": 309410,
-      "put_volume_today": 267130,
+      "put_volume_today": 265505,
       "call_volume_vs_30d_avg": 0.68,
       "put_volume_vs_30d_avg": 0.78,
       "call_ask_bid_ratio": null,
@@ -5959,7 +5959,7 @@
       "ticker_call_oi": 2780441,
       "ticker_put_oi": 7577961,
       "ticker_put_call_ratio": 2.725,
-      "near_term_oi": 4309695,
+      "near_term_oi": 4227145,
       "swing_dte_oi": 1095123,
       "long_dated_oi": 4953584,
       "daily_bullish_premium": 67691177.0,
@@ -6604,9 +6604,9 @@
       "daily_bearish_premium": 1542732.0,
       "daily_premium_bias": 1313883.0,
       "call_volume_today": 2991,
-      "put_volume_today": 4463,
+      "put_volume_today": 3463,
       "call_volume_vs_30d_avg": 0.71,
-      "put_volume_vs_30d_avg": 1.13,
+      "put_volume_vs_30d_avg": 0.88,
       "call_ask_bid_ratio": null,
       "put_ask_bid_ratio": null,
       "iv_rank": 30.7,
@@ -8310,12 +8310,12 @@
       "near_term_oi": 605478,
       "swing_dte_oi": 264427,
       "long_dated_oi": 908392,
-      "daily_bullish_premium": 72728065.0,
-      "daily_bearish_premium": 93869503.0,
-      "daily_premium_bias": -21141438.0,
-      "call_volume_today": 52947,
+      "daily_bullish_premium": 71637185.0,
+      "daily_bearish_premium": 92476623.0,
+      "daily_premium_bias": -20839438.0,
+      "call_volume_today": 50595,
       "put_volume_today": 54199,
-      "call_volume_vs_30d_avg": 0.69,
+      "call_volume_vs_30d_avg": 0.66,
       "put_volume_vs_30d_avg": 0.73,
       "call_ask_bid_ratio": null,
       "put_ask_bid_ratio": null,
@@ -8843,11 +8843,11 @@
       "near_term_oi": 1518048,
       "swing_dte_oi": 505727,
       "long_dated_oi": 1552966,
-      "daily_bullish_premium": 1614482680.0,
-      "daily_bearish_premium": 1577064593.0,
-      "daily_premium_bias": 37418087.0,
+      "daily_bullish_premium": 1605695980.0,
+      "daily_bearish_premium": 1550207893.0,
+      "daily_premium_bias": 55488087.0,
       "call_volume_today": 309410,
-      "put_volume_today": 267130,
+      "put_volume_today": 265505,
       "call_volume_vs_30d_avg": 0.68,
       "put_volume_vs_30d_avg": 0.78,
       "call_ask_bid_ratio": null,
@@ -8950,10 +8950,10 @@
       "near_term_oi": 1208898,
       "swing_dte_oi": 674436,
       "long_dated_oi": 2205096,
-      "daily_bullish_premium": 295040908.0,
-      "daily_bearish_premium": 386317358.0,
-      "daily_premium_bias": -91276450.0,
-      "call_volume_today": 664083,
+      "daily_bullish_premium": 295040887.0,
+      "daily_bearish_premium": 386317354.0,
+      "daily_premium_bias": -91276467.0,
+      "call_volume_today": 664081,
       "put_volume_today": 192539,
       "call_volume_vs_30d_avg": 1.0,
       "put_volume_vs_30d_avg": 0.89,
@@ -10982,9 +10982,9 @@
       "swing_dte_oi": 207383,
       "long_dated_oi": 450158,
       "daily_bullish_premium": 37509664.0,
-      "daily_bearish_premium": 37050299.0,
-      "daily_premium_bias": 459365.0,
-      "call_volume_today": 94653,
+      "daily_bearish_premium": 37048367.0,
+      "daily_premium_bias": 461297.0,
+      "call_volume_today": 94650,
       "put_volume_today": 38415,
       "call_volume_vs_30d_avg": 1.55,
       "put_volume_vs_30d_avg": 1.13,
@@ -11823,13 +11823,13 @@
       "near_term_oi": 382677,
       "swing_dte_oi": 261526,
       "long_dated_oi": 884301,
-      "daily_bullish_premium": 12600762.0,
-      "daily_bearish_premium": 13287252.0,
-      "daily_premium_bias": -686490.0,
-      "call_volume_today": 362164,
-      "put_volume_today": 48488,
-      "call_volume_vs_30d_avg": 8.35,
-      "put_volume_vs_30d_avg": 1.3,
+      "daily_bullish_premium": 12576012.0,
+      "daily_bearish_premium": 13171602.0,
+      "daily_premium_bias": -595590.0,
+      "call_volume_today": 355714,
+      "put_volume_today": 48038,
+      "call_volume_vs_30d_avg": 8.2,
+      "put_volume_vs_30d_avg": 1.29,
       "call_ask_bid_ratio": null,
       "put_ask_bid_ratio": null,
       "iv_rank": 43.9,
@@ -12577,12 +12577,12 @@
       "swing_dte_oi": 571962,
       "long_dated_oi": 2666091,
       "daily_bullish_premium": 22498648.0,
-      "daily_bearish_premium": 37683179.0,
-      "daily_premium_bias": -15184531.0,
+      "daily_bearish_premium": 33227783.0,
+      "daily_premium_bias": -10729135.0,
       "call_volume_today": 47414,
-      "put_volume_today": 124435,
+      "put_volume_today": 101933,
       "call_volume_vs_30d_avg": 0.55,
-      "put_volume_vs_30d_avg": 1.17,
+      "put_volume_vs_30d_avg": 0.96,
       "call_ask_bid_ratio": null,
       "put_ask_bid_ratio": null,
       "iv_rank": 82.2,
@@ -13433,9 +13433,9 @@
       "swing_dte_oi": 374244,
       "long_dated_oi": 1242293,
       "daily_bullish_premium": 247753784.0,
-      "daily_bearish_premium": 249548181.0,
-      "daily_premium_bias": -1794397.0,
-      "call_volume_today": 249593,
+      "daily_bearish_premium": 249449181.0,
+      "daily_premium_bias": -1695397.0,
+      "call_volume_today": 249443,
       "put_volume_today": 189618,
       "call_volume_vs_30d_avg": 1.0,
       "put_volume_vs_30d_avg": 2.02,
@@ -13992,10 +13992,10 @@
     "direction": "LONG",
     "flow_score_raw": 0.5511013927449534,
     "flow_score_scaled": 5.511013927449534,
-    "first_seen": "2026-06-02",
-    "last_seen": "2026-06-02",
+    "first_seen": "2026-06-03",
+    "last_seen": "2026-06-03",
     "seen_dates": [
-      "2026-06-02"
+      "2026-06-03"
     ],
     "flow_score_history": [
       0.5511013927449534
@@ -14009,7 +14009,7 @@
     "flow_imbalance_ratio": 99.0,
     "bullish_flow_intensity": 0.000234,
     "bearish_flow_intensity": 0.0,
-    "bullish_premium_per_trade": 2261423.8754000375,
+    "bullish_premium_per_trade": 1802540.786424415,
     "bearish_premium_per_trade": 0.0,
     "bullish_vol_oi": 4.059441,
     "bullish_sweep_count": 0,
@@ -14032,61 +14032,9 @@
     "bearish_breadth_tier": 4,
     "bullish_dte_tier": 4,
     "bearish_dte_tier": 4,
-    "bullish_delta_intensity": 5.5e-05,
+    "bullish_delta_intensity": 4.4e-05,
     "bearish_delta_intensity": 0.0,
     "bullish_avg_delta": 0.354816,
-    "bearish_avg_delta": 0.0,
-    "bullish_delta_source_mix": 0.0,
-    "bearish_delta_source_mix": 0.0
-  },
-  {
-    "ticker": "MTSI",
-    "direction": "LONG",
-    "flow_score_raw": 0.531825998812351,
-    "flow_score_scaled": 5.31825998812351,
-    "first_seen": "2026-06-02",
-    "last_seen": "2026-06-02",
-    "seen_dates": [
-      "2026-06-02"
-    ],
-    "flow_score_history": [
-      0.531825998812351
-    ],
-    "reject_reason": "price_validation_failed",
-    "checks_passed": "confirmation_volume, momentum_aligned, not_extended, retest_and_confirm, room_to_target, trend_aligned",
-    "checks_failed": "none",
-    "price_score": 6.31,
-    "repeat_flow_count": 1,
-    "dte_score": 1.0,
-    "flow_imbalance_ratio": 99.0,
-    "bullish_flow_intensity": 3.1e-05,
-    "bearish_flow_intensity": 0.0,
-    "bullish_premium_per_trade": 566971.5494799104,
-    "bearish_premium_per_trade": 0.0,
-    "bullish_vol_oi": 5.629213,
-    "bullish_sweep_count": 0,
-    "bearish_sweep_count": 0,
-    "bullish_breadth": 0.0,
-    "bearish_breadth": 0.0,
-    "bullish_zscore_tier": 4,
-    "bearish_zscore_tier": 4,
-    "bullish_flow_intensity_tier": 1,
-    "bearish_flow_intensity_tier": 1,
-    "bullish_premium_per_trade_tier": 4,
-    "bearish_premium_per_trade_tier": 4,
-    "bullish_vol_oi_tier": 1,
-    "bearish_vol_oi_tier": 1,
-    "bullish_repeat_tier": 4,
-    "bearish_repeat_tier": 4,
-    "bullish_sweep_tier": 4,
-    "bearish_sweep_tier": 4,
-    "bullish_breadth_tier": 4,
-    "bearish_breadth_tier": 4,
-    "bullish_dte_tier": 4,
-    "bearish_dte_tier": 4,
-    "bullish_delta_intensity": 5e-06,
-    "bearish_delta_intensity": 0.0,
-    "bullish_avg_delta": 0.236324,
     "bearish_avg_delta": 0.0,
     "bullish_delta_source_mix": 0.0,
     "bearish_delta_source_mix": 0.0
@@ -14096,10 +14044,10 @@
     "direction": "LONG",
     "flow_score_raw": 0.5191889461073123,
     "flow_score_scaled": 5.1918894610731225,
-    "first_seen": "2026-06-02",
-    "last_seen": "2026-06-02",
+    "first_seen": "2026-06-03",
+    "last_seen": "2026-06-03",
     "seen_dates": [
-      "2026-06-02"
+      "2026-06-03"
     ],
     "flow_score_history": [
       0.5191889461073123
@@ -14110,11 +14058,11 @@
     "price_score": 6.22,
     "repeat_flow_count": 3,
     "dte_score": 1.0,
-    "flow_imbalance_ratio": 27.78608646555955,
+    "flow_imbalance_ratio": 27.786086465559553,
     "bullish_flow_intensity": 8.5e-05,
     "bearish_flow_intensity": 2.3e-05,
-    "bullish_premium_per_trade": 0.18476553149714922,
-    "bearish_premium_per_trade": 0.013299140325224527,
+    "bullish_premium_per_trade": 0.14727332194194767,
+    "bearish_premium_per_trade": 0.010600508432484064,
     "bullish_vol_oi": 256.288436,
     "bearish_vol_oi": 13.25,
     "bullish_sweep_count": 0,
@@ -14145,14 +14093,66 @@
     "bearish_delta_source_mix": 0.0
   },
   {
+    "ticker": "MTSI",
+    "direction": "LONG",
+    "flow_score_raw": 0.5166041499884197,
+    "flow_score_scaled": 5.166041499884198,
+    "first_seen": "2026-06-03",
+    "last_seen": "2026-06-03",
+    "seen_dates": [
+      "2026-06-03"
+    ],
+    "flow_score_history": [
+      0.5166041499884197
+    ],
+    "reject_reason": "price_validation_failed",
+    "checks_passed": "confirmation_volume, momentum_aligned, not_extended, retest_and_confirm, room_to_target, trend_aligned",
+    "checks_failed": "none",
+    "price_score": 6.31,
+    "repeat_flow_count": 1,
+    "dte_score": 1.0,
+    "flow_imbalance_ratio": 99.0,
+    "bullish_flow_intensity": 3.1e-05,
+    "bearish_flow_intensity": 0.0,
+    "bullish_premium_per_trade": 451922.947217934,
+    "bearish_premium_per_trade": 0.0,
+    "bullish_vol_oi": 5.629213,
+    "bullish_sweep_count": 0,
+    "bearish_sweep_count": 0,
+    "bullish_breadth": 0.0,
+    "bearish_breadth": 0.0,
+    "bullish_zscore_tier": 4,
+    "bearish_zscore_tier": 4,
+    "bullish_flow_intensity_tier": 1,
+    "bearish_flow_intensity_tier": 1,
+    "bullish_premium_per_trade_tier": 4,
+    "bearish_premium_per_trade_tier": 4,
+    "bullish_vol_oi_tier": 1,
+    "bearish_vol_oi_tier": 1,
+    "bullish_repeat_tier": 4,
+    "bearish_repeat_tier": 4,
+    "bullish_sweep_tier": 4,
+    "bearish_sweep_tier": 4,
+    "bullish_breadth_tier": 4,
+    "bearish_breadth_tier": 4,
+    "bullish_dte_tier": 4,
+    "bearish_dte_tier": 4,
+    "bullish_delta_intensity": 4e-06,
+    "bearish_delta_intensity": 0.0,
+    "bullish_avg_delta": 0.236324,
+    "bearish_avg_delta": 0.0,
+    "bullish_delta_source_mix": 0.0,
+    "bearish_delta_source_mix": 0.0
+  },
+  {
     "ticker": "XP",
     "direction": "LONG",
     "flow_score_raw": 0.5065163738543761,
     "flow_score_scaled": 5.065163738543761,
-    "first_seen": "2026-06-02",
-    "last_seen": "2026-06-02",
+    "first_seen": "2026-06-03",
+    "last_seen": "2026-06-03",
     "seen_dates": [
-      "2026-06-02"
+      "2026-06-03"
     ],
     "flow_score_history": [
       0.5065163738543761
@@ -14166,7 +14166,7 @@
     "flow_imbalance_ratio": 99.0,
     "bullish_flow_intensity": 0.000112,
     "bearish_flow_intensity": 0.0,
-    "bullish_premium_per_trade": 6.1117533163112085e-30,
+    "bullish_premium_per_trade": 4.871569964859751e-30,
     "bearish_premium_per_trade": 0.0,
     "bullish_vol_oi": 197.159091,
     "bullish_sweep_count": 0,
@@ -14201,10 +14201,10 @@
     "direction": "LONG",
     "flow_score_raw": 0.4826276108657436,
     "flow_score_scaled": 4.826276108657436,
-    "first_seen": "2026-06-02",
-    "last_seen": "2026-06-02",
+    "first_seen": "2026-06-03",
+    "last_seen": "2026-06-03",
     "seen_dates": [
-      "2026-06-02"
+      "2026-06-03"
     ],
     "flow_score_history": [
       0.4826276108657436
@@ -14215,11 +14215,11 @@
     "price_score": 6.69,
     "repeat_flow_count": 2,
     "dte_score": 1.0,
-    "flow_imbalance_ratio": 9.389749102733831e-08,
+    "flow_imbalance_ratio": 9.389749102733899e-08,
     "bullish_flow_intensity": 0.000137,
     "bearish_flow_intensity": 8.5e-05,
-    "bullish_premium_per_trade": 8.994998309560703e-11,
-    "bearish_premium_per_trade": 0.0009579593885998299,
+    "bullish_premium_per_trade": 7.169753314793175e-11,
+    "bearish_premium_per_trade": 0.0007635724060726655,
     "bullish_vol_oi": 120.9,
     "bearish_vol_oi": 5.656716,
     "bullish_sweep_count": 0,
@@ -14250,67 +14250,14 @@
     "bearish_delta_source_mix": 0.0
   },
   {
-    "ticker": "VIAV",
-    "direction": "LONG",
-    "flow_score_raw": 0.48182894784229485,
-    "flow_score_scaled": 4.818289478422948,
-    "first_seen": "2026-06-02",
-    "last_seen": "2026-06-02",
-    "seen_dates": [
-      "2026-06-02"
-    ],
-    "flow_score_history": [
-      0.48182894784229485
-    ],
-    "reject_reason": "price_validation_failed",
-    "checks_passed": "momentum_aligned, not_extended, retest_and_confirm, room_to_target, trend_aligned",
-    "checks_failed": "confirmation_volume",
-    "price_score": 6.58,
-    "repeat_flow_count": 3,
-    "dte_score": 1.0,
-    "flow_imbalance_ratio": 1.499609429505698,
-    "bullish_flow_intensity": 0.000142,
-    "bearish_flow_intensity": 5.3e-05,
-    "bullish_premium_per_trade": 200023.5444533445,
-    "bearish_premium_per_trade": 266767.5202859672,
-    "bullish_vol_oi": 3.22847,
-    "bearish_vol_oi": 1.479798,
-    "bullish_sweep_count": 0,
-    "bearish_sweep_count": 0,
-    "bullish_breadth": 0.041369,
-    "bearish_breadth": 0.0,
-    "bullish_zscore_tier": 4,
-    "bearish_zscore_tier": 4,
-    "bullish_flow_intensity_tier": 1,
-    "bearish_flow_intensity_tier": 1,
-    "bullish_premium_per_trade_tier": 4,
-    "bearish_premium_per_trade_tier": 4,
-    "bullish_vol_oi_tier": 1,
-    "bearish_vol_oi_tier": 1,
-    "bullish_repeat_tier": 4,
-    "bearish_repeat_tier": 4,
-    "bullish_sweep_tier": 4,
-    "bearish_sweep_tier": 4,
-    "bullish_breadth_tier": 4,
-    "bearish_breadth_tier": 4,
-    "bullish_dte_tier": 4,
-    "bearish_dte_tier": 4,
-    "bullish_delta_intensity": 9e-06,
-    "bearish_delta_intensity": 8e-06,
-    "bullish_avg_delta": 0.25389,
-    "bearish_avg_delta": 0.3275,
-    "bullish_delta_source_mix": 0.0,
-    "bearish_delta_source_mix": 0.0
-  },
-  {
     "ticker": "CENX",
     "direction": "LONG",
     "flow_score_raw": 0.4808020881400903,
     "flow_score_scaled": 4.808020881400903,
-    "first_seen": "2026-06-02",
-    "last_seen": "2026-06-02",
+    "first_seen": "2026-06-03",
+    "last_seen": "2026-06-03",
     "seen_dates": [
-      "2026-06-02"
+      "2026-06-03"
     ],
     "flow_score_history": [
       0.4808020881400903
@@ -14324,7 +14271,7 @@
     "flow_imbalance_ratio": 99.0,
     "bullish_flow_intensity": 0.00022,
     "bearish_flow_intensity": 0.0,
-    "bullish_premium_per_trade": 0.0024213201710747393,
+    "bullish_premium_per_trade": 0.001929991282409316,
     "bearish_premium_per_trade": 0.0,
     "bullish_vol_oi": 1.189968,
     "bullish_sweep_count": 0,
@@ -14357,15 +14304,15 @@
   {
     "ticker": "EPD",
     "direction": "LONG",
-    "flow_score_raw": 0.4796520846253871,
-    "flow_score_scaled": 4.7965208462538715,
-    "first_seen": "2026-06-02",
-    "last_seen": "2026-06-02",
+    "flow_score_raw": 0.4757564536353519,
+    "flow_score_scaled": 4.757564536353519,
+    "first_seen": "2026-06-03",
+    "last_seen": "2026-06-03",
     "seen_dates": [
-      "2026-06-02"
+      "2026-06-03"
     ],
     "flow_score_history": [
-      0.4796520846253871
+      0.4757564536353519
     ],
     "reject_reason": "price_validation_failed",
     "checks_passed": "ema_pullback, momentum_aligned, not_extended",
@@ -14376,7 +14323,7 @@
     "flow_imbalance_ratio": 99.0,
     "bullish_flow_intensity": 8e-06,
     "bearish_flow_intensity": 0.0,
-    "bullish_premium_per_trade": 379508.26606832194,
+    "bullish_premium_per_trade": 302499.29516303,
     "bearish_premium_per_trade": 0.0,
     "bullish_vol_oi": 2.992174,
     "bullish_sweep_count": 0,
@@ -14399,10 +14346,63 @@
     "bearish_breadth_tier": 4,
     "bullish_dte_tier": 4,
     "bearish_dte_tier": 4,
-    "bullish_delta_intensity": 2e-06,
+    "bullish_delta_intensity": 1e-06,
     "bearish_delta_intensity": 0.0,
     "bullish_avg_delta": 0.320906,
     "bearish_avg_delta": 0.0,
+    "bullish_delta_source_mix": 0.0,
+    "bearish_delta_source_mix": 0.0
+  },
+  {
+    "ticker": "VIAV",
+    "direction": "LONG",
+    "flow_score_raw": 0.46847744200022906,
+    "flow_score_scaled": 4.684774420002291,
+    "first_seen": "2026-06-03",
+    "last_seen": "2026-06-03",
+    "seen_dates": [
+      "2026-06-03"
+    ],
+    "flow_score_history": [
+      0.46847744200022906
+    ],
+    "reject_reason": "price_validation_failed",
+    "checks_passed": "momentum_aligned, not_extended, retest_and_confirm, room_to_target, trend_aligned",
+    "checks_failed": "confirmation_volume",
+    "price_score": 6.58,
+    "repeat_flow_count": 3,
+    "dte_score": 1.0,
+    "flow_imbalance_ratio": 1.4996094295056983,
+    "bullish_flow_intensity": 0.000142,
+    "bearish_flow_intensity": 5.3e-05,
+    "bullish_premium_per_trade": 159435.21294014395,
+    "bearish_premium_per_trade": 212635.65006082554,
+    "bullish_vol_oi": 3.22847,
+    "bearish_vol_oi": 1.479798,
+    "bullish_sweep_count": 0,
+    "bearish_sweep_count": 0,
+    "bullish_breadth": 0.041369,
+    "bearish_breadth": 0.0,
+    "bullish_zscore_tier": 4,
+    "bearish_zscore_tier": 4,
+    "bullish_flow_intensity_tier": 1,
+    "bearish_flow_intensity_tier": 1,
+    "bullish_premium_per_trade_tier": 4,
+    "bearish_premium_per_trade_tier": 4,
+    "bullish_vol_oi_tier": 1,
+    "bearish_vol_oi_tier": 1,
+    "bullish_repeat_tier": 4,
+    "bearish_repeat_tier": 4,
+    "bullish_sweep_tier": 4,
+    "bearish_sweep_tier": 4,
+    "bullish_breadth_tier": 4,
+    "bearish_breadth_tier": 4,
+    "bullish_dte_tier": 4,
+    "bearish_dte_tier": 4,
+    "bullish_delta_intensity": 7e-06,
+    "bearish_delta_intensity": 6e-06,
+    "bullish_avg_delta": 0.25389,
+    "bearish_avg_delta": 0.3275,
     "bullish_delta_source_mix": 0.0,
     "bearish_delta_source_mix": 0.0
   },
@@ -14411,10 +14411,10 @@
     "direction": "LONG",
     "flow_score_raw": 0.43945120338511456,
     "flow_score_scaled": 4.394512033851146,
-    "first_seen": "2026-06-02",
-    "last_seen": "2026-06-02",
+    "first_seen": "2026-06-03",
+    "last_seen": "2026-06-03",
     "seen_dates": [
-      "2026-06-02"
+      "2026-06-03"
     ],
     "flow_score_history": [
       0.43945120338511456
@@ -14428,7 +14428,7 @@
     "flow_imbalance_ratio": 99.0,
     "bullish_flow_intensity": 3.2e-05,
     "bearish_flow_intensity": 0.0,
-    "bullish_premium_per_trade": 1.1355314817604912e-29,
+    "bullish_premium_per_trade": 9.051119661413079e-30,
     "bearish_premium_per_trade": 0.0,
     "bullish_vol_oi": 34.0,
     "bullish_sweep_count": 0,
@@ -14463,10 +14463,10 @@
     "direction": "LONG",
     "flow_score_raw": 0.4311557829228211,
     "flow_score_scaled": 4.311557829228211,
-    "first_seen": "2026-06-02",
-    "last_seen": "2026-06-02",
+    "first_seen": "2026-06-03",
+    "last_seen": "2026-06-03",
     "seen_dates": [
-      "2026-06-02"
+      "2026-06-03"
     ],
     "flow_score_history": [
       0.4311557829228211
@@ -14480,7 +14480,7 @@
     "flow_imbalance_ratio": 99.0,
     "bullish_flow_intensity": 5.2e-05,
     "bearish_flow_intensity": 0.0,
-    "bullish_premium_per_trade": 0.047208610031768135,
+    "bullish_premium_per_trade": 0.0376291441769684,
     "bearish_premium_per_trade": 0.0,
     "bullish_vol_oi": 11.44763,
     "bullish_sweep_count": 0,
@@ -14515,10 +14515,10 @@
     "direction": "LONG",
     "flow_score_raw": 0.41935548268978695,
     "flow_score_scaled": 4.19355482689787,
-    "first_seen": "2026-06-02",
-    "last_seen": "2026-06-02",
+    "first_seen": "2026-06-03",
+    "last_seen": "2026-06-03",
     "seen_dates": [
-      "2026-06-02"
+      "2026-06-03"
     ],
     "flow_score_history": [
       0.41935548268978695
@@ -14532,7 +14532,7 @@
     "flow_imbalance_ratio": 99.0,
     "bullish_flow_intensity": 0.000113,
     "bearish_flow_intensity": 0.0,
-    "bullish_premium_per_trade": 0.0012818371638695415,
+    "bullish_premium_per_trade": 0.0010217296255531486,
     "bearish_premium_per_trade": 0.0,
     "bullish_vol_oi": 6.326279,
     "bullish_sweep_count": 0,
@@ -14567,10 +14567,10 @@
     "direction": "LONG",
     "flow_score_raw": 0.3750945817287758,
     "flow_score_scaled": 3.750945817287758,
-    "first_seen": "2026-06-02",
-    "last_seen": "2026-06-02",
+    "first_seen": "2026-06-03",
+    "last_seen": "2026-06-03",
     "seen_dates": [
-      "2026-06-02"
+      "2026-06-03"
     ],
     "flow_score_history": [
       0.3750945817287758
@@ -14584,7 +14584,7 @@
     "flow_imbalance_ratio": 99.0,
     "bullish_flow_intensity": 3.2e-05,
     "bearish_flow_intensity": 0.0,
-    "bullish_premium_per_trade": 16672.545616825493,
+    "bullish_premium_per_trade": 13289.38984626812,
     "bearish_premium_per_trade": 0.0,
     "bullish_vol_oi": 1.159914,
     "bullish_sweep_count": 0,
@@ -14615,66 +14615,14 @@
     "bearish_delta_source_mix": 0.0
   },
   {
-    "ticker": "TWLO",
-    "direction": "LONG",
-    "flow_score_raw": 0.3703598706557321,
-    "flow_score_scaled": 3.703598706557321,
-    "first_seen": "2026-06-02",
-    "last_seen": "2026-06-02",
-    "seen_dates": [
-      "2026-06-02"
-    ],
-    "flow_score_history": [
-      0.3703598706557321
-    ],
-    "reject_reason": "price_validation_failed",
-    "checks_passed": "confirmation_volume, momentum_aligned, not_extended, trend_aligned, trend_continuation",
-    "checks_failed": "room_to_target",
-    "price_score": 6.62,
-    "repeat_flow_count": 2,
-    "dte_score": 0.7,
-    "flow_imbalance_ratio": 99.0,
-    "bullish_flow_intensity": 3.7e-05,
-    "bearish_flow_intensity": 0.0,
-    "bullish_premium_per_trade": 25557.415588430908,
-    "bearish_premium_per_trade": 0.0,
-    "bullish_vol_oi": 16.050216,
-    "bullish_sweep_count": 1,
-    "bearish_sweep_count": 0,
-    "bullish_breadth": 0.30764,
-    "bearish_breadth": 0.0,
-    "bullish_zscore_tier": 4,
-    "bearish_zscore_tier": 4,
-    "bullish_flow_intensity_tier": 1,
-    "bearish_flow_intensity_tier": 1,
-    "bullish_premium_per_trade_tier": 4,
-    "bearish_premium_per_trade_tier": 4,
-    "bullish_vol_oi_tier": 1,
-    "bearish_vol_oi_tier": 1,
-    "bullish_repeat_tier": 4,
-    "bearish_repeat_tier": 4,
-    "bullish_sweep_tier": 4,
-    "bearish_sweep_tier": 4,
-    "bullish_breadth_tier": 4,
-    "bearish_breadth_tier": 4,
-    "bullish_dte_tier": 4,
-    "bearish_dte_tier": 4,
-    "bullish_delta_intensity": 0.0,
-    "bearish_delta_intensity": 0.0,
-    "bullish_avg_delta": 0.206489,
-    "bearish_avg_delta": 0.0,
-    "bullish_delta_source_mix": 0.0,
-    "bearish_delta_source_mix": 0.0
-  },
-  {
     "ticker": "ZS",
     "direction": "LONG",
     "flow_score_raw": 0.3699014269906136,
     "flow_score_scaled": 3.699014269906136,
-    "first_seen": "2026-06-02",
-    "last_seen": "2026-06-02",
+    "first_seen": "2026-06-03",
+    "last_seen": "2026-06-03",
     "seen_dates": [
-      "2026-06-02"
+      "2026-06-03"
     ],
     "flow_score_history": [
       0.3699014269906136
@@ -14688,7 +14636,7 @@
     "flow_imbalance_ratio": 99.0,
     "bullish_flow_intensity": 6.4e-05,
     "bearish_flow_intensity": 0.0,
-    "bullish_premium_per_trade": 0.3919848249272513,
+    "bullish_premium_per_trade": 0.3124441385256954,
     "bearish_premium_per_trade": 0.0,
     "bullish_vol_oi": 2.606268,
     "bullish_sweep_count": 1,
@@ -14719,14 +14667,66 @@
     "bearish_delta_source_mix": 0.0
   },
   {
+    "ticker": "TWLO",
+    "direction": "LONG",
+    "flow_score_raw": 0.3697266213321517,
+    "flow_score_scaled": 3.697266213321517,
+    "first_seen": "2026-06-03",
+    "last_seen": "2026-06-03",
+    "seen_dates": [
+      "2026-06-03"
+    ],
+    "flow_score_history": [
+      0.3697266213321517
+    ],
+    "reject_reason": "price_validation_failed",
+    "checks_passed": "confirmation_volume, momentum_aligned, not_extended, trend_aligned, trend_continuation",
+    "checks_failed": "room_to_target",
+    "price_score": 6.62,
+    "repeat_flow_count": 2,
+    "dte_score": 0.7,
+    "flow_imbalance_ratio": 99.0,
+    "bullish_flow_intensity": 3.7e-05,
+    "bearish_flow_intensity": 0.0,
+    "bullish_premium_per_trade": 20371.361819816535,
+    "bearish_premium_per_trade": 0.0,
+    "bullish_vol_oi": 16.050216,
+    "bullish_sweep_count": 1,
+    "bearish_sweep_count": 0,
+    "bullish_breadth": 0.30764,
+    "bearish_breadth": 0.0,
+    "bullish_zscore_tier": 4,
+    "bearish_zscore_tier": 4,
+    "bullish_flow_intensity_tier": 1,
+    "bearish_flow_intensity_tier": 1,
+    "bullish_premium_per_trade_tier": 4,
+    "bearish_premium_per_trade_tier": 4,
+    "bullish_vol_oi_tier": 1,
+    "bearish_vol_oi_tier": 1,
+    "bullish_repeat_tier": 4,
+    "bearish_repeat_tier": 4,
+    "bullish_sweep_tier": 4,
+    "bearish_sweep_tier": 4,
+    "bullish_breadth_tier": 4,
+    "bearish_breadth_tier": 4,
+    "bullish_dte_tier": 4,
+    "bearish_dte_tier": 4,
+    "bullish_delta_intensity": 0.0,
+    "bearish_delta_intensity": 0.0,
+    "bullish_avg_delta": 0.206489,
+    "bearish_avg_delta": 0.0,
+    "bullish_delta_source_mix": 0.0,
+    "bearish_delta_source_mix": 0.0
+  },
+  {
     "ticker": "TXN",
     "direction": "LONG",
     "flow_score_raw": 0.3633372464586874,
     "flow_score_scaled": 3.6333724645868744,
-    "first_seen": "2026-06-02",
-    "last_seen": "2026-06-02",
+    "first_seen": "2026-06-03",
+    "last_seen": "2026-06-03",
     "seen_dates": [
-      "2026-06-02"
+      "2026-06-03"
     ],
     "flow_score_history": [
       0.3633372464586874
@@ -14740,7 +14740,7 @@
     "flow_imbalance_ratio": 99.0,
     "bullish_flow_intensity": 8e-06,
     "bearish_flow_intensity": 0.0,
-    "bullish_premium_per_trade": 0.0024873728794671023,
+    "bullish_premium_per_trade": 0.001982640722536931,
     "bearish_premium_per_trade": 0.0,
     "bullish_vol_oi": 2.720851,
     "bullish_sweep_count": 0,
@@ -14775,10 +14775,10 @@
     "direction": "LONG",
     "flow_score_raw": 0.3511273092353601,
     "flow_score_scaled": 3.5112730923536013,
-    "first_seen": "2026-06-02",
-    "last_seen": "2026-06-02",
+    "first_seen": "2026-06-03",
+    "last_seen": "2026-06-03",
     "seen_dates": [
-      "2026-06-02"
+      "2026-06-03"
     ],
     "flow_score_history": [
       0.3511273092353601
@@ -14789,11 +14789,11 @@
     "price_score": 5.88,
     "repeat_flow_count": 2,
     "dte_score": 1.0,
-    "flow_imbalance_ratio": 0.09697030461158378,
+    "flow_imbalance_ratio": 0.09697030461158411,
     "bullish_flow_intensity": 0.00039,
     "bearish_flow_intensity": 0.000241,
-    "bullish_premium_per_trade": 0.0011446707481203306,
-    "bearish_premium_per_trade": 0.011804343120353484,
+    "bullish_premium_per_trade": 0.0009123967129553955,
+    "bearish_premium_per_trade": 0.009409032142468904,
     "bullish_vol_oi": 3.845668,
     "bearish_vol_oi": 23.852679,
     "bullish_sweep_count": 0,
@@ -14824,66 +14824,14 @@
     "bearish_delta_source_mix": 0.0
   },
   {
-    "ticker": "TER",
-    "direction": "LONG",
-    "flow_score_raw": 0.3418476854685766,
-    "flow_score_scaled": 3.418476854685766,
-    "first_seen": "2026-06-02",
-    "last_seen": "2026-06-02",
-    "seen_dates": [
-      "2026-06-02"
-    ],
-    "flow_score_history": [
-      0.3418476854685766
-    ],
-    "reject_reason": "price_validation_failed",
-    "checks_passed": "momentum_aligned, not_extended, retest_and_confirm, room_to_target, trend_aligned",
-    "checks_failed": "confirmation_volume",
-    "price_score": 5.65,
-    "repeat_flow_count": 1,
-    "dte_score": 1.0,
-    "flow_imbalance_ratio": 99.0,
-    "bullish_flow_intensity": 2.1e-05,
-    "bearish_flow_intensity": 0.0,
-    "bullish_premium_per_trade": 892473.111638256,
-    "bearish_premium_per_trade": 0.0,
-    "bullish_vol_oi": 44.777778,
-    "bullish_sweep_count": 0,
-    "bearish_sweep_count": 0,
-    "bullish_breadth": 0.0,
-    "bearish_breadth": 0.0,
-    "bullish_zscore_tier": 4,
-    "bearish_zscore_tier": 4,
-    "bullish_flow_intensity_tier": 1,
-    "bearish_flow_intensity_tier": 1,
-    "bullish_premium_per_trade_tier": 4,
-    "bearish_premium_per_trade_tier": 4,
-    "bullish_vol_oi_tier": 1,
-    "bearish_vol_oi_tier": 1,
-    "bullish_repeat_tier": 4,
-    "bearish_repeat_tier": 4,
-    "bullish_sweep_tier": 4,
-    "bearish_sweep_tier": 4,
-    "bullish_breadth_tier": 4,
-    "bearish_breadth_tier": 4,
-    "bullish_dte_tier": 4,
-    "bearish_dte_tier": 4,
-    "bullish_delta_intensity": 5e-06,
-    "bearish_delta_intensity": 0.0,
-    "bullish_avg_delta": 0.307756,
-    "bearish_avg_delta": 0.0,
-    "bullish_delta_source_mix": 0.0,
-    "bearish_delta_source_mix": 0.0
-  },
-  {
     "ticker": "AKAM",
     "direction": "LONG",
     "flow_score_raw": 0.3399164217768732,
     "flow_score_scaled": 3.399164217768732,
-    "first_seen": "2026-06-02",
-    "last_seen": "2026-06-02",
+    "first_seen": "2026-06-03",
+    "last_seen": "2026-06-03",
     "seen_dates": [
-      "2026-06-02"
+      "2026-06-03"
     ],
     "flow_score_history": [
       0.3399164217768732
@@ -14894,11 +14842,11 @@
     "price_score": 6.33,
     "repeat_flow_count": 2,
     "dte_score": 1.0,
-    "flow_imbalance_ratio": 66.95651897871461,
+    "flow_imbalance_ratio": 66.95651897871413,
     "bullish_flow_intensity": 4.3e-05,
     "bearish_flow_intensity": 1.6e-05,
-    "bullish_premium_per_trade": 2.5023855667332913e-09,
-    "bearish_premium_per_trade": 3.7373292472519315e-11,
+    "bullish_premium_per_trade": 1.9946070687869545e-09,
+    "bearish_premium_per_trade": 2.9789587320407915e-11,
     "bullish_vol_oi": 8.797753,
     "bearish_vol_oi": 2.439024,
     "bullish_sweep_count": 0,
@@ -14931,15 +14879,15 @@
   {
     "ticker": "IBM",
     "direction": "LONG",
-    "flow_score_raw": 0.33268551026285553,
-    "flow_score_scaled": 3.3268551026285555,
-    "first_seen": "2026-06-02",
-    "last_seen": "2026-06-02",
+    "flow_score_raw": 0.33216316104379984,
+    "flow_score_scaled": 3.3216316104379984,
+    "first_seen": "2026-06-03",
+    "last_seen": "2026-06-03",
     "seen_dates": [
-      "2026-06-02"
+      "2026-06-03"
     ],
     "flow_score_history": [
-      0.33268551026285553
+      0.33216316104379984
     ],
     "reject_reason": "price_validation_failed",
     "checks_passed": "confirmation_volume, momentum_aligned, pullback_to_support, room_to_target, trend_aligned",
@@ -14950,7 +14898,7 @@
     "flow_imbalance_ratio": 99.0,
     "bullish_flow_intensity": 2e-06,
     "bearish_flow_intensity": 0.0,
-    "bullish_premium_per_trade": 187845.46693969128,
+    "bullish_premium_per_trade": 149728.2837538963,
     "bearish_premium_per_trade": 0.0,
     "bullish_vol_oi": 3.337985,
     "bullish_sweep_count": 0,
@@ -14981,17 +14929,69 @@
     "bearish_delta_source_mix": 0.0
   },
   {
-    "ticker": "CRWD",
+    "ticker": "TER",
     "direction": "LONG",
-    "flow_score_raw": 0.3310239711980006,
-    "flow_score_scaled": 3.3102397119800058,
-    "first_seen": "2026-06-02",
-    "last_seen": "2026-06-02",
+    "flow_score_raw": 0.330173885986955,
+    "flow_score_scaled": 3.30173885986955,
+    "first_seen": "2026-06-03",
+    "last_seen": "2026-06-03",
     "seen_dates": [
-      "2026-06-02"
+      "2026-06-03"
     ],
     "flow_score_history": [
-      0.3310239711980006
+      0.330173885986955
+    ],
+    "reject_reason": "price_validation_failed",
+    "checks_passed": "momentum_aligned, not_extended, retest_and_confirm, room_to_target, trend_aligned",
+    "checks_failed": "confirmation_volume",
+    "price_score": 5.65,
+    "repeat_flow_count": 1,
+    "dte_score": 1.0,
+    "flow_imbalance_ratio": 99.0,
+    "bullish_flow_intensity": 2.1e-05,
+    "bearish_flow_intensity": 0.0,
+    "bullish_premium_per_trade": 711374.458373263,
+    "bearish_premium_per_trade": 0.0,
+    "bullish_vol_oi": 44.777778,
+    "bullish_sweep_count": 0,
+    "bearish_sweep_count": 0,
+    "bullish_breadth": 0.0,
+    "bearish_breadth": 0.0,
+    "bullish_zscore_tier": 4,
+    "bearish_zscore_tier": 4,
+    "bullish_flow_intensity_tier": 1,
+    "bearish_flow_intensity_tier": 1,
+    "bullish_premium_per_trade_tier": 4,
+    "bearish_premium_per_trade_tier": 4,
+    "bullish_vol_oi_tier": 1,
+    "bearish_vol_oi_tier": 1,
+    "bullish_repeat_tier": 4,
+    "bearish_repeat_tier": 4,
+    "bullish_sweep_tier": 4,
+    "bearish_sweep_tier": 4,
+    "bullish_breadth_tier": 4,
+    "bearish_breadth_tier": 4,
+    "bullish_dte_tier": 4,
+    "bearish_dte_tier": 4,
+    "bullish_delta_intensity": 4e-06,
+    "bearish_delta_intensity": 0.0,
+    "bullish_avg_delta": 0.307756,
+    "bearish_avg_delta": 0.0,
+    "bullish_delta_source_mix": 0.0,
+    "bearish_delta_source_mix": 0.0
+  },
+  {
+    "ticker": "CRWD",
+    "direction": "LONG",
+    "flow_score_raw": 0.32987293942141654,
+    "flow_score_scaled": 3.2987293942141656,
+    "first_seen": "2026-06-03",
+    "last_seen": "2026-06-03",
+    "seen_dates": [
+      "2026-06-03"
+    ],
+    "flow_score_history": [
+      0.32987293942141654
     ],
     "reject_reason": "price_validation_failed",
     "checks_passed": "confirmation_volume, momentum_aligned, not_extended, trend_aligned, trend_continuation",
@@ -15002,7 +15002,7 @@
     "flow_imbalance_ratio": 99.0,
     "bullish_flow_intensity": 6e-06,
     "bearish_flow_intensity": 0.0,
-    "bullish_premium_per_trade": 268297.6694945398,
+    "bullish_premium_per_trade": 213855.30480479935,
     "bearish_premium_per_trade": 0.0,
     "bullish_vol_oi": 7.823865,
     "bullish_sweep_count": 0,
@@ -15033,66 +15033,14 @@
     "bearish_delta_source_mix": 0.0
   },
   {
-    "ticker": "SOXL",
-    "direction": "LONG",
-    "flow_score_raw": 0.3307343772650424,
-    "flow_score_scaled": 3.307343772650424,
-    "first_seen": "2026-06-02",
-    "last_seen": "2026-06-02",
-    "seen_dates": [
-      "2026-06-02"
-    ],
-    "flow_score_history": [
-      0.3307343772650424
-    ],
-    "reject_reason": "price_validation_failed",
-    "checks_passed": "momentum_aligned, not_extended, trend_aligned, trend_continuation",
-    "checks_failed": "confirmation_volume, room_to_target",
-    "price_score": 6.47,
-    "repeat_flow_count": 2,
-    "dte_score": 0.7,
-    "flow_imbalance_ratio": 2.1392167462209914,
-    "bullish_flow_intensity": 4.8e-05,
-    "bearish_flow_intensity": 2e-05,
-    "bullish_premium_per_trade": 597690.3941710227,
-    "bearish_premium_per_trade": 279396.83775702753,
-    "bullish_vol_oi": 5.615385,
-    "bullish_sweep_count": 0,
-    "bearish_sweep_count": 0,
-    "bullish_breadth": 0.0,
-    "bearish_breadth": 0.0,
-    "bullish_zscore_tier": 4,
-    "bearish_zscore_tier": 4,
-    "bullish_flow_intensity_tier": 1,
-    "bearish_flow_intensity_tier": 1,
-    "bullish_premium_per_trade_tier": 4,
-    "bearish_premium_per_trade_tier": 4,
-    "bullish_vol_oi_tier": 1,
-    "bearish_vol_oi_tier": 1,
-    "bullish_repeat_tier": 4,
-    "bearish_repeat_tier": 4,
-    "bullish_sweep_tier": 4,
-    "bearish_sweep_tier": 4,
-    "bullish_breadth_tier": 4,
-    "bearish_breadth_tier": 4,
-    "bullish_dte_tier": 4,
-    "bearish_dte_tier": 4,
-    "bullish_delta_intensity": 2e-06,
-    "bearish_delta_intensity": 8e-06,
-    "bullish_avg_delta": 0.074614,
-    "bearish_avg_delta": 0.734327,
-    "bullish_delta_source_mix": 0.0,
-    "bearish_delta_source_mix": 0.0
-  },
-  {
     "ticker": "CORZ",
     "direction": "LONG",
     "flow_score_raw": 0.31585371475731644,
     "flow_score_scaled": 3.1585371475731643,
-    "first_seen": "2026-06-02",
-    "last_seen": "2026-06-02",
+    "first_seen": "2026-06-03",
+    "last_seen": "2026-06-03",
     "seen_dates": [
-      "2026-06-02"
+      "2026-06-03"
     ],
     "flow_score_history": [
       0.31585371475731644
@@ -15106,7 +15054,7 @@
     "flow_imbalance_ratio": 99.0,
     "bullish_flow_intensity": 0.000172,
     "bearish_flow_intensity": 0.0,
-    "bullish_premium_per_trade": 0.0006715550466551692,
+    "bullish_premium_per_trade": 0.0005352845944066813,
     "bearish_premium_per_trade": 0.0,
     "bullish_vol_oi": 2.148215,
     "bullish_sweep_count": 0,
@@ -15141,10 +15089,10 @@
     "direction": "LONG",
     "flow_score_raw": 0.3156352419468044,
     "flow_score_scaled": 3.1563524194680443,
-    "first_seen": "2026-06-02",
-    "last_seen": "2026-06-02",
+    "first_seen": "2026-06-03",
+    "last_seen": "2026-06-03",
     "seen_dates": [
-      "2026-06-02"
+      "2026-06-03"
     ],
     "flow_score_history": [
       0.3156352419468044
@@ -15155,11 +15103,11 @@
     "price_score": 6.36,
     "repeat_flow_count": 4,
     "dte_score": 1.0,
-    "flow_imbalance_ratio": 8.180021799859721e-08,
+    "flow_imbalance_ratio": 8.18002179985976e-08,
     "bullish_flow_intensity": 0.000572,
     "bearish_flow_intensity": 5.8e-05,
-    "bullish_premium_per_trade": 9.928968595046487e-10,
-    "bearish_premium_per_trade": 0.03641421320619253,
+    "bullish_premium_per_trade": 7.914204433051047e-10,
+    "bearish_premium_per_trade": 0.0290251222796988,
     "bullish_vol_oi": 27.411392,
     "bearish_vol_oi": 2.803922,
     "bullish_sweep_count": 0,
@@ -15190,14 +15138,66 @@
     "bearish_delta_source_mix": 0.0
   },
   {
+    "ticker": "SOXL",
+    "direction": "LONG",
+    "flow_score_raw": 0.31431828496676084,
+    "flow_score_scaled": 3.1431828496676086,
+    "first_seen": "2026-06-03",
+    "last_seen": "2026-06-03",
+    "seen_dates": [
+      "2026-06-03"
+    ],
+    "flow_score_history": [
+      0.31431828496676084
+    ],
+    "reject_reason": "price_validation_failed",
+    "checks_passed": "momentum_aligned, not_extended, trend_aligned, trend_continuation",
+    "checks_failed": "confirmation_volume, room_to_target",
+    "price_score": 6.47,
+    "repeat_flow_count": 2,
+    "dte_score": 0.7,
+    "flow_imbalance_ratio": 2.1392167462209914,
+    "bullish_flow_intensity": 4.8e-05,
+    "bearish_flow_intensity": 2e-05,
+    "bullish_premium_per_trade": 476408.39245883207,
+    "bearish_premium_per_trade": 222702.25459875714,
+    "bullish_vol_oi": 5.615385,
+    "bullish_sweep_count": 0,
+    "bearish_sweep_count": 0,
+    "bullish_breadth": 0.0,
+    "bearish_breadth": 0.0,
+    "bullish_zscore_tier": 4,
+    "bearish_zscore_tier": 4,
+    "bullish_flow_intensity_tier": 1,
+    "bearish_flow_intensity_tier": 1,
+    "bullish_premium_per_trade_tier": 4,
+    "bearish_premium_per_trade_tier": 4,
+    "bullish_vol_oi_tier": 1,
+    "bearish_vol_oi_tier": 1,
+    "bullish_repeat_tier": 4,
+    "bearish_repeat_tier": 4,
+    "bullish_sweep_tier": 4,
+    "bearish_sweep_tier": 4,
+    "bullish_breadth_tier": 4,
+    "bearish_breadth_tier": 4,
+    "bullish_dte_tier": 4,
+    "bearish_dte_tier": 4,
+    "bullish_delta_intensity": 1e-06,
+    "bearish_delta_intensity": 6e-06,
+    "bullish_avg_delta": 0.074614,
+    "bearish_avg_delta": 0.734327,
+    "bullish_delta_source_mix": 0.0,
+    "bearish_delta_source_mix": 0.0
+  },
+  {
     "ticker": "CRCL",
     "direction": "LONG",
     "flow_score_raw": 0.3122296103311978,
     "flow_score_scaled": 3.122296103311978,
-    "first_seen": "2026-06-02",
-    "last_seen": "2026-06-02",
+    "first_seen": "2026-06-03",
+    "last_seen": "2026-06-03",
     "seen_dates": [
-      "2026-06-02"
+      "2026-06-03"
     ],
     "flow_score_history": [
       0.3122296103311978
@@ -15211,8 +15211,8 @@
     "flow_imbalance_ratio": 99.0,
     "bullish_flow_intensity": 8.9e-05,
     "bearish_flow_intensity": 1.4e-05,
-    "bullish_premium_per_trade": 4.81820902641169,
-    "bearish_premium_per_trade": 0.010470806560040112,
+    "bullish_premium_per_trade": 3.840508797179375,
+    "bearish_premium_per_trade": 0.008346093846689353,
     "bullish_vol_oi": 2.041248,
     "bearish_vol_oi": 3.281198,
     "bullish_sweep_count": 1,
@@ -15247,10 +15247,10 @@
     "direction": "LONG",
     "flow_score_raw": 0.30720870467660266,
     "flow_score_scaled": 3.0720870467660264,
-    "first_seen": "2026-06-02",
-    "last_seen": "2026-06-02",
+    "first_seen": "2026-06-03",
+    "last_seen": "2026-06-03",
     "seen_dates": [
-      "2026-06-02"
+      "2026-06-03"
     ],
     "flow_score_history": [
       0.30720870467660266
@@ -15261,11 +15261,11 @@
     "price_score": 6.36,
     "repeat_flow_count": 3,
     "dte_score": 1.0,
-    "flow_imbalance_ratio": 0.11365696562001808,
+    "flow_imbalance_ratio": 0.11365696562001806,
     "bullish_flow_intensity": 8.3e-05,
     "bearish_flow_intensity": 1.3e-05,
-    "bullish_premium_per_trade": 0.013090406752062604,
-    "bearish_premium_per_trade": 0.23034939707658406,
+    "bullish_premium_per_trade": 0.010434130610434265,
+    "bearish_premium_per_trade": 0.18360741118706292,
     "bullish_vol_oi": 2.955834,
     "bearish_vol_oi": 1.297456,
     "bullish_sweep_count": 1,
@@ -15300,10 +15300,10 @@
     "direction": "LONG",
     "flow_score_raw": 0.3071713144849789,
     "flow_score_scaled": 3.071713144849789,
-    "first_seen": "2026-06-02",
-    "last_seen": "2026-06-02",
+    "first_seen": "2026-06-03",
+    "last_seen": "2026-06-03",
     "seen_dates": [
-      "2026-06-02"
+      "2026-06-03"
     ],
     "flow_score_history": [
       0.3071713144849789
@@ -15314,11 +15314,11 @@
     "price_score": 5.85,
     "repeat_flow_count": 2,
     "dte_score": 1.0,
-    "flow_imbalance_ratio": 0.29395787151772357,
+    "flow_imbalance_ratio": 0.2939578715177235,
     "bullish_flow_intensity": 7.3e-05,
     "bearish_flow_intensity": 1.8e-05,
-    "bullish_premium_per_trade": 0.008721627086851305,
-    "bearish_premium_per_trade": 0.029669649742056502,
+    "bullish_premium_per_trade": 0.006951853970875956,
+    "bearish_premium_per_trade": 0.023649150590807737,
     "bullish_vol_oi": 2.170326,
     "bearish_vol_oi": 4.683377,
     "bullish_sweep_count": 0,
@@ -15353,10 +15353,10 @@
     "direction": "LONG",
     "flow_score_raw": 0.3063899606193158,
     "flow_score_scaled": 3.063899606193158,
-    "first_seen": "2026-06-02",
-    "last_seen": "2026-06-02",
+    "first_seen": "2026-06-03",
+    "last_seen": "2026-06-03",
     "seen_dates": [
-      "2026-06-02"
+      "2026-06-03"
     ],
     "flow_score_history": [
       0.3063899606193158
@@ -15370,7 +15370,7 @@
     "flow_imbalance_ratio": 99.0,
     "bullish_flow_intensity": 2.4e-05,
     "bearish_flow_intensity": 0.0,
-    "bullish_premium_per_trade": 5.4597219541493995,
+    "bullish_premium_per_trade": 4.351847352434194,
     "bearish_premium_per_trade": 0.0,
     "bullish_vol_oi": 2.75641,
     "bullish_sweep_count": 0,
@@ -15405,10 +15405,10 @@
     "direction": "LONG",
     "flow_score_raw": 0.30580255967698555,
     "flow_score_scaled": 3.0580255967698555,
-    "first_seen": "2026-06-02",
-    "last_seen": "2026-06-02",
+    "first_seen": "2026-06-03",
+    "last_seen": "2026-06-03",
     "seen_dates": [
-      "2026-06-02"
+      "2026-06-03"
     ],
     "flow_score_history": [
       0.30580255967698555
@@ -15422,7 +15422,7 @@
     "flow_imbalance_ratio": 99.0,
     "bullish_flow_intensity": 7e-06,
     "bearish_flow_intensity": 0.0,
-    "bullish_premium_per_trade": 5.205610254685824e-25,
+    "bullish_premium_per_trade": 4.149299432261654e-25,
     "bearish_premium_per_trade": 0.0,
     "bullish_vol_oi": 4.727784,
     "bullish_sweep_count": 1,
@@ -15457,10 +15457,10 @@
     "direction": "LONG",
     "flow_score_raw": 0.3058009145729596,
     "flow_score_scaled": 3.058009145729596,
-    "first_seen": "2026-06-02",
-    "last_seen": "2026-06-02",
+    "first_seen": "2026-06-03",
+    "last_seen": "2026-06-03",
     "seen_dates": [
-      "2026-06-02"
+      "2026-06-03"
     ],
     "flow_score_history": [
       0.3058009145729596
@@ -15474,7 +15474,7 @@
     "flow_imbalance_ratio": 99.0,
     "bullish_flow_intensity": 0.0,
     "bearish_flow_intensity": 0.0,
-    "bullish_premium_per_trade": 0.0016224464757182361,
+    "bullish_premium_per_trade": 0.0012932232555275974,
     "bearish_premium_per_trade": 0.0,
     "bullish_vol_oi": 6.579259,
     "bullish_sweep_count": 1,
@@ -15507,15 +15507,15 @@
   {
     "ticker": "MCHP",
     "direction": "LONG",
-    "flow_score_raw": 0.30315623141833803,
-    "flow_score_scaled": 3.0315623141833803,
-    "first_seen": "2026-06-02",
-    "last_seen": "2026-06-02",
+    "flow_score_raw": 0.29891420264923807,
+    "flow_score_scaled": 2.989142026492381,
+    "first_seen": "2026-06-03",
+    "last_seen": "2026-06-03",
     "seen_dates": [
-      "2026-06-02"
+      "2026-06-03"
     ],
     "flow_score_history": [
-      0.30315623141833803
+      0.29891420264923807
     ],
     "reject_reason": "price_validation_failed",
     "checks_passed": "confirmation_volume, ema_pullback, momentum_aligned, not_extended, room_to_target, trend_aligned",
@@ -15526,7 +15526,7 @@
     "flow_imbalance_ratio": 99.0,
     "bullish_flow_intensity": 7e-06,
     "bearish_flow_intensity": 0.0,
-    "bullish_premium_per_trade": 255631.21213070312,
+    "bullish_premium_per_trade": 203759.09671829778,
     "bearish_premium_per_trade": 0.0,
     "bullish_vol_oi": 10.714286,
     "bullish_sweep_count": 0,
@@ -15549,7 +15549,7 @@
     "bearish_breadth_tier": 4,
     "bullish_dte_tier": 4,
     "bearish_dte_tier": 4,
-    "bullish_delta_intensity": 2e-06,
+    "bullish_delta_intensity": 1e-06,
     "bearish_delta_intensity": 0.0,
     "bullish_avg_delta": 0.323796,
     "bearish_avg_delta": 0.0,
@@ -15561,10 +15561,10 @@
     "direction": "LONG",
     "flow_score_raw": 0.29337668685308393,
     "flow_score_scaled": 2.9337668685308396,
-    "first_seen": "2026-06-02",
-    "last_seen": "2026-06-02",
+    "first_seen": "2026-06-03",
+    "last_seen": "2026-06-03",
     "seen_dates": [
-      "2026-06-02"
+      "2026-06-03"
     ],
     "flow_score_history": [
       0.29337668685308393
@@ -15578,7 +15578,7 @@
     "flow_imbalance_ratio": 99.0,
     "bullish_flow_intensity": 5.7e-05,
     "bearish_flow_intensity": 0.0,
-    "bullish_premium_per_trade": 0.010384103716187759,
+    "bullish_premium_per_trade": 0.008276984550531767,
     "bearish_premium_per_trade": 0.0,
     "bullish_vol_oi": 13.857143,
     "bullish_sweep_count": 1,
@@ -15613,10 +15613,10 @@
     "direction": "LONG",
     "flow_score_raw": 0.2894449338046211,
     "flow_score_scaled": 2.8944493380462113,
-    "first_seen": "2026-06-02",
-    "last_seen": "2026-06-02",
+    "first_seen": "2026-06-03",
+    "last_seen": "2026-06-03",
     "seen_dates": [
-      "2026-06-02"
+      "2026-06-03"
     ],
     "flow_score_history": [
       0.2894449338046211
@@ -15627,11 +15627,11 @@
     "price_score": 4.27,
     "repeat_flow_count": 2,
     "dte_score": 0.7,
-    "flow_imbalance_ratio": 2.7631220246911394,
+    "flow_imbalance_ratio": 2.763122024691178,
     "bullish_flow_intensity": 8e-06,
     "bearish_flow_intensity": 3e-06,
-    "bullish_premium_per_trade": 1.5469647528595573e-27,
-    "bearish_premium_per_trade": 5.598611784191747e-28,
+    "bullish_premium_per_trade": 1.2330581155189536e-27,
+    "bearish_premium_per_trade": 4.462553967940547e-28,
     "bullish_vol_oi": 15.894737,
     "bearish_vol_oi": 7.578947,
     "bullish_sweep_count": 0,
@@ -15666,10 +15666,10 @@
     "direction": "LONG",
     "flow_score_raw": 0.2893654770008621,
     "flow_score_scaled": 2.893654770008621,
-    "first_seen": "2026-06-02",
-    "last_seen": "2026-06-02",
+    "first_seen": "2026-06-03",
+    "last_seen": "2026-06-03",
     "seen_dates": [
-      "2026-06-02"
+      "2026-06-03"
     ],
     "flow_score_history": [
       0.2893654770008621
@@ -15680,11 +15680,11 @@
     "price_score": 5.9,
     "repeat_flow_count": 3,
     "dte_score": 1.0,
-    "flow_imbalance_ratio": 20.88799147985137,
+    "flow_imbalance_ratio": 20.88799147985122,
     "bullish_flow_intensity": 0.000275,
     "bearish_flow_intensity": 0.000174,
-    "bullish_premium_per_trade": 5.093515038801513e-18,
-    "bearish_premium_per_trade": 4.8769792382525005e-19,
+    "bullish_premium_per_trade": 4.0599503275703845e-18,
+    "bearish_premium_per_trade": 3.8873534887130304e-19,
     "bullish_vol_oi": 3.201801,
     "bearish_vol_oi": 13.002469,
     "bullish_sweep_count": 0,
@@ -15719,10 +15719,10 @@
     "direction": "LONG",
     "flow_score_raw": 0.28814793162782826,
     "flow_score_scaled": 2.8814793162782824,
-    "first_seen": "2026-06-02",
-    "last_seen": "2026-06-02",
+    "first_seen": "2026-06-03",
+    "last_seen": "2026-06-03",
     "seen_dates": [
-      "2026-06-02"
+      "2026-06-03"
     ],
     "flow_score_history": [
       0.28814793162782826
@@ -15736,7 +15736,7 @@
     "flow_imbalance_ratio": 99.0,
     "bullish_flow_intensity": 0.000106,
     "bearish_flow_intensity": 0.0,
-    "bullish_premium_per_trade": 0.4897442592964153,
+    "bullish_premium_per_trade": 0.3903664465127497,
     "bearish_premium_per_trade": 0.0,
     "bullish_vol_oi": 27.476636,
     "bullish_sweep_count": 0,
@@ -15771,10 +15771,10 @@
     "direction": "LONG",
     "flow_score_raw": 0.286940505410905,
     "flow_score_scaled": 2.86940505410905,
-    "first_seen": "2026-06-02",
-    "last_seen": "2026-06-02",
+    "first_seen": "2026-06-03",
+    "last_seen": "2026-06-03",
     "seen_dates": [
-      "2026-06-02"
+      "2026-06-03"
     ],
     "flow_score_history": [
       0.286940505410905
@@ -15788,7 +15788,7 @@
     "flow_imbalance_ratio": 99.0,
     "bullish_flow_intensity": 8.4e-05,
     "bearish_flow_intensity": 0.0,
-    "bullish_premium_per_trade": 6.445513403756228e-21,
+    "bullish_premium_per_trade": 5.137604199770252e-21,
     "bearish_premium_per_trade": 0.0,
     "bullish_vol_oi": 4.681499,
     "bullish_sweep_count": 0,
@@ -15823,10 +15823,10 @@
     "direction": "LONG",
     "flow_score_raw": 0.28218757364796104,
     "flow_score_scaled": 2.8218757364796105,
-    "first_seen": "2026-06-02",
-    "last_seen": "2026-06-02",
+    "first_seen": "2026-06-03",
+    "last_seen": "2026-06-03",
     "seen_dates": [
-      "2026-06-02"
+      "2026-06-03"
     ],
     "flow_score_history": [
       0.28218757364796104
@@ -15840,8 +15840,8 @@
     "flow_imbalance_ratio": 0.2847158324362193,
     "bullish_flow_intensity": 1.2e-05,
     "bearish_flow_intensity": 2e-06,
-    "bullish_premium_per_trade": 48823.42732073529,
-    "bearish_premium_per_trade": 171481.25168512532,
+    "bullish_premium_per_trade": 38916.28634330461,
+    "bearish_premium_per_trade": 136684.65856046995,
     "bullish_vol_oi": 1.682203,
     "bullish_sweep_count": 0,
     "bearish_sweep_count": 0,
@@ -15875,10 +15875,10 @@
     "direction": "LONG",
     "flow_score_raw": 0.28207071571653114,
     "flow_score_scaled": 2.8207071571653115,
-    "first_seen": "2026-06-02",
-    "last_seen": "2026-06-02",
+    "first_seen": "2026-06-03",
+    "last_seen": "2026-06-03",
     "seen_dates": [
-      "2026-06-02"
+      "2026-06-03"
     ],
     "flow_score_history": [
       0.28207071571653114
@@ -15892,7 +15892,7 @@
     "flow_imbalance_ratio": 99.0,
     "bullish_flow_intensity": 1.3e-05,
     "bearish_flow_intensity": 0.0,
-    "bullish_premium_per_trade": 0.0031504921455597565,
+    "bullish_premium_per_trade": 0.0025112013061579074,
     "bearish_premium_per_trade": 0.0,
     "bullish_vol_oi": 37.457627,
     "bullish_sweep_count": 0,
@@ -15927,10 +15927,10 @@
     "direction": "SHORT",
     "flow_score_raw": 0.5382678865464483,
     "flow_score_scaled": 5.382678865464483,
-    "first_seen": "2026-06-02",
-    "last_seen": "2026-06-02",
+    "first_seen": "2026-06-03",
+    "last_seen": "2026-06-03",
     "seen_dates": [
-      "2026-06-02"
+      "2026-06-03"
     ],
     "flow_score_history": [
       0.5382678865464483
@@ -15945,7 +15945,7 @@
     "bullish_flow_intensity": 0.0,
     "bearish_flow_intensity": 0.000119,
     "bullish_premium_per_trade": 0.0,
-    "bearish_premium_per_trade": 280014.57967442676,
+    "bearish_premium_per_trade": 223194.64570407305,
     "bearish_vol_oi": 10.893048,
     "bullish_sweep_count": 0,
     "bearish_sweep_count": 0,
@@ -15968,7 +15968,7 @@
     "bullish_dte_tier": 4,
     "bearish_dte_tier": 4,
     "bullish_delta_intensity": 0.0,
-    "bearish_delta_intensity": 3.7e-05,
+    "bearish_delta_intensity": 2.9e-05,
     "bullish_avg_delta": 0.0,
     "bearish_avg_delta": 0.471495,
     "bullish_delta_source_mix": 0.0,
@@ -15977,15 +15977,15 @@
   {
     "ticker": "INFQ",
     "direction": "SHORT",
-    "flow_score_raw": 0.5167281217700663,
-    "flow_score_scaled": 5.167281217700664,
-    "first_seen": "2026-06-02",
-    "last_seen": "2026-06-02",
+    "flow_score_raw": 0.5071442563282903,
+    "flow_score_scaled": 5.071442563282903,
+    "first_seen": "2026-06-03",
+    "last_seen": "2026-06-03",
     "seen_dates": [
-      "2026-06-02"
+      "2026-06-03"
     ],
     "flow_score_history": [
-      0.5167281217700663
+      0.5071442563282903
     ],
     "reject_reason": "price_validation_failed",
     "checks_passed": "confirmation_volume, not_extended, room_to_target",
@@ -15993,11 +15993,11 @@
     "price_score": 1.92,
     "repeat_flow_count": 2,
     "dte_score": 1.0,
-    "flow_imbalance_ratio": 6.592613313133676e-07,
+    "flow_imbalance_ratio": 6.592613313133707e-07,
     "bullish_flow_intensity": 7.2e-05,
     "bearish_flow_intensity": 0.000142,
-    "bullish_premium_per_trade": 0.1489344675419988,
-    "bearish_premium_per_trade": 225911.1227489931,
+    "bullish_premium_per_trade": 0.11871301756791065,
+    "bearish_premium_per_trade": 180069.74158701577,
     "bullish_vol_oi": 9.342246,
     "bearish_vol_oi": 1.517904,
     "bullish_sweep_count": 1,
@@ -16032,10 +16032,10 @@
     "direction": "SHORT",
     "flow_score_raw": 0.5065163738543761,
     "flow_score_scaled": 5.065163738543761,
-    "first_seen": "2026-06-02",
-    "last_seen": "2026-06-02",
+    "first_seen": "2026-06-03",
+    "last_seen": "2026-06-03",
     "seen_dates": [
-      "2026-06-02"
+      "2026-06-03"
     ],
     "flow_score_history": [
       0.5065163738543761
@@ -16050,7 +16050,7 @@
     "bullish_flow_intensity": 0.0,
     "bearish_flow_intensity": 0.000141,
     "bullish_premium_per_trade": 0.0,
-    "bearish_premium_per_trade": 1.357875536666993e-27,
+    "bearish_premium_per_trade": 1.082338461336535e-27,
     "bearish_vol_oi": 1610.333333,
     "bullish_sweep_count": 0,
     "bearish_sweep_count": 0,
@@ -16080,66 +16080,14 @@
     "bearish_delta_source_mix": 0.0
   },
   {
-    "ticker": "GTLB",
-    "direction": "SHORT",
-    "flow_score_raw": 0.4204701766431212,
-    "flow_score_scaled": 4.204701766431212,
-    "first_seen": "2026-06-02",
-    "last_seen": "2026-06-02",
-    "seen_dates": [
-      "2026-06-02"
-    ],
-    "flow_score_history": [
-      0.4204701766431212
-    ],
-    "reject_reason": "price_validation_failed",
-    "checks_passed": "confirmation_volume, room_to_target",
-    "checks_failed": "continuation_pattern, momentum_aligned, not_extended, trend_aligned",
-    "price_score": 2.56,
-    "repeat_flow_count": 1,
-    "dte_score": 1.0,
-    "flow_imbalance_ratio": 0.0,
-    "bullish_flow_intensity": 0.0,
-    "bearish_flow_intensity": 5.1e-05,
-    "bullish_premium_per_trade": 0.0,
-    "bearish_premium_per_trade": 119616.22387215646,
-    "bearish_vol_oi": 3.080692,
-    "bullish_sweep_count": 0,
-    "bearish_sweep_count": 0,
-    "bullish_breadth": 0.0,
-    "bearish_breadth": 0.0,
-    "bullish_zscore_tier": 4,
-    "bearish_zscore_tier": 4,
-    "bullish_flow_intensity_tier": 1,
-    "bearish_flow_intensity_tier": 1,
-    "bullish_premium_per_trade_tier": 4,
-    "bearish_premium_per_trade_tier": 4,
-    "bullish_vol_oi_tier": 1,
-    "bearish_vol_oi_tier": 1,
-    "bullish_repeat_tier": 4,
-    "bearish_repeat_tier": 4,
-    "bullish_sweep_tier": 4,
-    "bearish_sweep_tier": 4,
-    "bullish_breadth_tier": 4,
-    "bearish_breadth_tier": 4,
-    "bullish_dte_tier": 4,
-    "bearish_dte_tier": 4,
-    "bullish_delta_intensity": 0.0,
-    "bearish_delta_intensity": 1.3e-05,
-    "bullish_avg_delta": 0.0,
-    "bearish_avg_delta": 0.57944,
-    "bullish_delta_source_mix": 0.0,
-    "bearish_delta_source_mix": 0.0
-  },
-  {
     "ticker": "SPY",
     "direction": "SHORT",
     "flow_score_raw": 0.41521885655708435,
     "flow_score_scaled": 4.152188565570843,
-    "first_seen": "2026-06-02",
-    "last_seen": "2026-06-02",
+    "first_seen": "2026-06-03",
+    "last_seen": "2026-06-03",
     "seen_dates": [
-      "2026-06-02"
+      "2026-06-03"
     ],
     "flow_score_history": [
       0.41521885655708435
@@ -16154,7 +16102,7 @@
     "bullish_flow_intensity": 0.0,
     "bearish_flow_intensity": 0.0,
     "bullish_premium_per_trade": 0.0,
-    "bearish_premium_per_trade": 621306.3391182695,
+    "bearish_premium_per_trade": 495232.24252976826,
     "bearish_vol_oi": 24.082372,
     "bullish_sweep_count": 0,
     "bearish_sweep_count": 1,
@@ -16184,29 +16132,30 @@
     "bearish_delta_source_mix": 0.0
   },
   {
-    "ticker": "ALNY",
+    "ticker": "GTLB",
     "direction": "SHORT",
-    "flow_score_raw": 0.4080185657567473,
-    "flow_score_scaled": 4.080185657567473,
-    "first_seen": "2026-06-02",
-    "last_seen": "2026-06-02",
+    "flow_score_raw": 0.404004225842304,
+    "flow_score_scaled": 4.04004225842304,
+    "first_seen": "2026-06-03",
+    "last_seen": "2026-06-03",
     "seen_dates": [
-      "2026-06-02"
+      "2026-06-03"
     ],
     "flow_score_history": [
-      0.4080185657567473
+      0.404004225842304
     ],
     "reject_reason": "price_validation_failed",
-    "checks_passed": "confirmation_volume, flag_breakdown, momentum_aligned, not_extended, trend_aligned",
-    "checks_failed": "room_to_target",
-    "price_score": 5.94,
+    "checks_passed": "confirmation_volume, room_to_target",
+    "checks_failed": "continuation_pattern, momentum_aligned, not_extended, trend_aligned",
+    "price_score": 2.56,
     "repeat_flow_count": 1,
     "dte_score": 1.0,
     "flow_imbalance_ratio": 0.0,
     "bullish_flow_intensity": 0.0,
-    "bearish_flow_intensity": 1.7e-05,
+    "bearish_flow_intensity": 5.1e-05,
     "bullish_premium_per_trade": 0.0,
-    "bearish_premium_per_trade": 282506.15976913896,
+    "bearish_premium_per_trade": 95343.96651290977,
+    "bearish_vol_oi": 3.080692,
     "bullish_sweep_count": 0,
     "bearish_sweep_count": 0,
     "bullish_breadth": 0.0,
@@ -16228,7 +16177,58 @@
     "bullish_dte_tier": 4,
     "bearish_dte_tier": 4,
     "bullish_delta_intensity": 0.0,
-    "bearish_delta_intensity": 6e-06,
+    "bearish_delta_intensity": 1.1e-05,
+    "bullish_avg_delta": 0.0,
+    "bearish_avg_delta": 0.57944,
+    "bullish_delta_source_mix": 0.0,
+    "bearish_delta_source_mix": 0.0
+  },
+  {
+    "ticker": "ALNY",
+    "direction": "SHORT",
+    "flow_score_raw": 0.40222580424841975,
+    "flow_score_scaled": 4.022258042484197,
+    "first_seen": "2026-06-03",
+    "last_seen": "2026-06-03",
+    "seen_dates": [
+      "2026-06-03"
+    ],
+    "flow_score_history": [
+      0.40222580424841975
+    ],
+    "reject_reason": "price_validation_failed",
+    "checks_passed": "confirmation_volume, flag_breakdown, momentum_aligned, not_extended, trend_aligned",
+    "checks_failed": "room_to_target",
+    "price_score": 5.94,
+    "repeat_flow_count": 1,
+    "dte_score": 1.0,
+    "flow_imbalance_ratio": 0.0,
+    "bullish_flow_intensity": 0.0,
+    "bearish_flow_intensity": 1.7e-05,
+    "bullish_premium_per_trade": 0.0,
+    "bearish_premium_per_trade": 225180.6399231212,
+    "bullish_sweep_count": 0,
+    "bearish_sweep_count": 0,
+    "bullish_breadth": 0.0,
+    "bearish_breadth": 0.0,
+    "bullish_zscore_tier": 4,
+    "bearish_zscore_tier": 4,
+    "bullish_flow_intensity_tier": 1,
+    "bearish_flow_intensity_tier": 1,
+    "bullish_premium_per_trade_tier": 4,
+    "bearish_premium_per_trade_tier": 4,
+    "bullish_vol_oi_tier": 1,
+    "bearish_vol_oi_tier": 1,
+    "bullish_repeat_tier": 4,
+    "bearish_repeat_tier": 4,
+    "bullish_sweep_tier": 4,
+    "bearish_sweep_tier": 4,
+    "bullish_breadth_tier": 4,
+    "bearish_breadth_tier": 4,
+    "bullish_dte_tier": 4,
+    "bearish_dte_tier": 4,
+    "bullish_delta_intensity": 0.0,
+    "bearish_delta_intensity": 5e-06,
     "bullish_avg_delta": 0.0,
     "bearish_avg_delta": 0.817864,
     "bullish_delta_source_mix": 0.0,
@@ -16237,15 +16237,15 @@
   {
     "ticker": "IGV",
     "direction": "SHORT",
-    "flow_score_raw": 0.38136218912841907,
-    "flow_score_scaled": 3.813621891284191,
-    "first_seen": "2026-06-02",
-    "last_seen": "2026-06-02",
+    "flow_score_raw": 0.37440002673042744,
+    "flow_score_scaled": 3.7440002673042745,
+    "first_seen": "2026-06-03",
+    "last_seen": "2026-06-03",
     "seen_dates": [
-      "2026-06-02"
+      "2026-06-03"
     ],
     "flow_score_history": [
-      0.38136218912841907
+      0.37440002673042744
     ],
     "reject_reason": "price_validation_failed",
     "checks_passed": "confirmation_volume, room_to_target",
@@ -16253,11 +16253,11 @@
     "price_score": 1.82,
     "repeat_flow_count": 3,
     "dte_score": 1.0,
-    "flow_imbalance_ratio": 0.08550677095916592,
+    "flow_imbalance_ratio": 0.0855067709591659,
     "bullish_flow_intensity": 3e-05,
     "bearish_flow_intensity": 8.5e-05,
-    "bullish_premium_per_trade": 19998.905104883743,
-    "bearish_premium_per_trade": 116943.40039126431,
+    "bullish_premium_per_trade": 15940.771886034625,
+    "bearish_premium_per_trade": 93213.50641136481,
     "bullish_vol_oi": 314.34375,
     "bearish_vol_oi": 11.100917,
     "bullish_sweep_count": 1,
@@ -16280,8 +16280,8 @@
     "bearish_breadth_tier": 4,
     "bullish_dte_tier": 4,
     "bearish_dte_tier": 4,
-    "bullish_delta_intensity": 1e-06,
-    "bearish_delta_intensity": 6e-06,
+    "bullish_delta_intensity": 0.0,
+    "bearish_delta_intensity": 4e-06,
     "bullish_avg_delta": 0.335696,
     "bearish_avg_delta": 0.332952,
     "bullish_delta_source_mix": 0.0,
@@ -16292,10 +16292,10 @@
     "direction": "SHORT",
     "flow_score_raw": 0.3689760979362529,
     "flow_score_scaled": 3.689760979362529,
-    "first_seen": "2026-06-02",
-    "last_seen": "2026-06-02",
+    "first_seen": "2026-06-03",
+    "last_seen": "2026-06-03",
     "seen_dates": [
-      "2026-06-02"
+      "2026-06-03"
     ],
     "flow_score_history": [
       0.3689760979362529
@@ -16310,7 +16310,7 @@
     "bullish_flow_intensity": 0.0,
     "bearish_flow_intensity": 1.7e-05,
     "bullish_premium_per_trade": 0.0,
-    "bearish_premium_per_trade": 3.368938063852646e-30,
+    "bearish_premium_per_trade": 2.685320665926828e-30,
     "bearish_vol_oi": 5.827869,
     "bullish_sweep_count": 0,
     "bearish_sweep_count": 0,
@@ -16344,10 +16344,10 @@
     "direction": "SHORT",
     "flow_score_raw": 0.35279677136156734,
     "flow_score_scaled": 3.5279677136156735,
-    "first_seen": "2026-06-02",
-    "last_seen": "2026-06-02",
+    "first_seen": "2026-06-03",
+    "last_seen": "2026-06-03",
     "seen_dates": [
-      "2026-06-02"
+      "2026-06-03"
     ],
     "flow_score_history": [
       0.35279677136156734
@@ -16362,7 +16362,7 @@
     "bullish_flow_intensity": 0.0,
     "bearish_flow_intensity": 1.4e-05,
     "bullish_premium_per_trade": 0.0,
-    "bearish_premium_per_trade": 6.445298284523234e-09,
+    "bearish_premium_per_trade": 5.1374327320521475e-09,
     "bearish_vol_oi": 20.849265,
     "bullish_sweep_count": 0,
     "bearish_sweep_count": 0,
@@ -16396,10 +16396,10 @@
     "direction": "SHORT",
     "flow_score_raw": 0.35246462825191566,
     "flow_score_scaled": 3.5246462825191567,
-    "first_seen": "2026-06-02",
-    "last_seen": "2026-06-02",
+    "first_seen": "2026-06-03",
+    "last_seen": "2026-06-03",
     "seen_dates": [
-      "2026-06-02"
+      "2026-06-03"
     ],
     "flow_score_history": [
       0.35246462825191566
@@ -16414,7 +16414,7 @@
     "bullish_flow_intensity": 0.0,
     "bearish_flow_intensity": 1.9e-05,
     "bullish_premium_per_trade": 0.0,
-    "bearish_premium_per_trade": 0.0010686656610601633,
+    "bearish_premium_per_trade": 0.0008518144086417228,
     "bearish_vol_oi": 7.694444,
     "bullish_sweep_count": 0,
     "bearish_sweep_count": 0,
@@ -16446,15 +16446,15 @@
   {
     "ticker": "CCJ",
     "direction": "SHORT",
-    "flow_score_raw": 0.3490100764262991,
-    "flow_score_scaled": 3.490100764262991,
-    "first_seen": "2026-06-02",
-    "last_seen": "2026-06-02",
+    "flow_score_raw": 0.34725387430540916,
+    "flow_score_scaled": 3.4725387430540917,
+    "first_seen": "2026-06-03",
+    "last_seen": "2026-06-03",
     "seen_dates": [
-      "2026-06-02"
+      "2026-06-03"
     ],
     "flow_score_history": [
-      0.3490100764262991
+      0.34725387430540916
     ],
     "reject_reason": "price_validation_failed",
     "checks_passed": "confirmation_volume, not_extended, pullback_to_resistance, room_to_target",
@@ -16466,7 +16466,7 @@
     "bullish_flow_intensity": 0.0,
     "bearish_flow_intensity": 3.5e-05,
     "bullish_premium_per_trade": 0.0,
-    "bearish_premium_per_trade": 101826.10096191407,
+    "bearish_premium_per_trade": 81163.7756649898,
     "bearish_vol_oi": 1.745873,
     "bullish_sweep_count": 0,
     "bearish_sweep_count": 1,
@@ -16500,10 +16500,10 @@
     "direction": "SHORT",
     "flow_score_raw": 0.3455624700014051,
     "flow_score_scaled": 3.455624700014051,
-    "first_seen": "2026-06-02",
-    "last_seen": "2026-06-02",
+    "first_seen": "2026-06-03",
+    "last_seen": "2026-06-03",
     "seen_dates": [
-      "2026-06-02"
+      "2026-06-03"
     ],
     "flow_score_history": [
       0.3455624700014051
@@ -16514,11 +16514,11 @@
     "price_score": 2.02,
     "repeat_flow_count": 5,
     "dte_score": 1.0,
-    "flow_imbalance_ratio": 1.98674011587327e-18,
+    "flow_imbalance_ratio": 1.9867401158732447e-18,
     "bullish_flow_intensity": 2e-06,
     "bearish_flow_intensity": 1.7e-05,
-    "bullish_premium_per_trade": 1.9518208439386623e-20,
-    "bearish_premium_per_trade": 0.0024560595876939105,
+    "bullish_premium_per_trade": 1.5557617115766728e-20,
+    "bearish_premium_per_trade": 0.0019576814540900067,
     "bullish_vol_oi": 1.045738,
     "bearish_vol_oi": 7.021782,
     "bullish_sweep_count": 0,
@@ -16553,10 +16553,10 @@
     "direction": "SHORT",
     "flow_score_raw": 0.34430263505798364,
     "flow_score_scaled": 3.4430263505798364,
-    "first_seen": "2026-06-02",
-    "last_seen": "2026-06-02",
+    "first_seen": "2026-06-03",
+    "last_seen": "2026-06-03",
     "seen_dates": [
-      "2026-06-02"
+      "2026-06-03"
     ],
     "flow_score_history": [
       0.34430263505798364
@@ -16571,7 +16571,7 @@
     "bullish_flow_intensity": 0.0,
     "bearish_flow_intensity": 2.2e-05,
     "bullish_premium_per_trade": 0.0,
-    "bearish_premium_per_trade": 2.5266528214602368e-18,
+    "bearish_premium_per_trade": 2.013950066309786e-18,
     "bearish_vol_oi": 15.541667,
     "bullish_sweep_count": 0,
     "bearish_sweep_count": 0,
@@ -16603,15 +16603,15 @@
   {
     "ticker": "GLW",
     "direction": "SHORT",
-    "flow_score_raw": 0.3428492793768259,
-    "flow_score_scaled": 3.428492793768259,
-    "first_seen": "2026-06-02",
-    "last_seen": "2026-06-02",
+    "flow_score_raw": 0.34189394752772423,
+    "flow_score_scaled": 3.4189394752772424,
+    "first_seen": "2026-06-03",
+    "last_seen": "2026-06-03",
     "seen_dates": [
-      "2026-06-02"
+      "2026-06-03"
     ],
     "flow_score_history": [
-      0.3428492793768259
+      0.34189394752772423
     ],
     "reject_reason": "price_validation_failed",
     "checks_passed": "not_extended, room_to_target",
@@ -16619,11 +16619,11 @@
     "price_score": 1.92,
     "repeat_flow_count": 4,
     "dte_score": 1.0,
-    "flow_imbalance_ratio": 1.778285248874013e-25,
+    "flow_imbalance_ratio": 1.7782852488740273e-25,
     "bullish_flow_intensity": 2e-06,
     "bearish_flow_intensity": 1.8e-05,
-    "bullish_premium_per_trade": 9.088508492131947e-20,
-    "bearish_premium_per_trade": 170360.90428286974,
+    "bullish_premium_per_trade": 7.244288619679774e-20,
+    "bearish_premium_per_trade": 135791.64955428653,
     "bullish_vol_oi": 5.229508,
     "bearish_vol_oi": 3.133871,
     "bullish_sweep_count": 1,
@@ -16658,10 +16658,10 @@
     "direction": "SHORT",
     "flow_score_raw": 0.33049389859814576,
     "flow_score_scaled": 3.3049389859814577,
-    "first_seen": "2026-06-02",
-    "last_seen": "2026-06-02",
+    "first_seen": "2026-06-03",
+    "last_seen": "2026-06-03",
     "seen_dates": [
-      "2026-06-02"
+      "2026-06-03"
     ],
     "flow_score_history": [
       0.33049389859814576
@@ -16676,7 +16676,7 @@
     "bullish_flow_intensity": 0.0,
     "bearish_flow_intensity": 1.9e-05,
     "bullish_premium_per_trade": 0.0,
-    "bearish_premium_per_trade": 4.587653161300218e-28,
+    "bearish_premium_per_trade": 3.6567368139906026e-28,
     "bearish_vol_oi": 9.400837,
     "bullish_sweep_count": 0,
     "bearish_sweep_count": 1,
@@ -16710,10 +16710,10 @@
     "direction": "SHORT",
     "flow_score_raw": 0.32234111731319776,
     "flow_score_scaled": 3.2234111731319777,
-    "first_seen": "2026-06-02",
-    "last_seen": "2026-06-02",
+    "first_seen": "2026-06-03",
+    "last_seen": "2026-06-03",
     "seen_dates": [
-      "2026-06-02"
+      "2026-06-03"
     ],
     "flow_score_history": [
       0.32234111731319776
@@ -16724,11 +16724,11 @@
     "price_score": 2.56,
     "repeat_flow_count": 3,
     "dte_score": 1.0,
-    "flow_imbalance_ratio": 9.90249732675963,
+    "flow_imbalance_ratio": 9.90249732675958,
     "bullish_flow_intensity": 1e-05,
     "bearish_flow_intensity": 2.4e-05,
-    "bullish_premium_per_trade": 0.04852528534732345,
-    "bearish_premium_per_trade": 0.0098006156924058,
+    "bullish_premium_per_trade": 0.038678642674169296,
+    "bearish_premium_per_trade": 0.007811896615139246,
     "bullish_vol_oi": 1.28694,
     "bearish_vol_oi": 8.596215,
     "bullish_sweep_count": 1,
@@ -16763,10 +16763,10 @@
     "direction": "SHORT",
     "flow_score_raw": 0.31653348456922226,
     "flow_score_scaled": 3.1653348456922226,
-    "first_seen": "2026-06-02",
-    "last_seen": "2026-06-02",
+    "first_seen": "2026-06-03",
+    "last_seen": "2026-06-03",
     "seen_dates": [
-      "2026-06-02"
+      "2026-06-03"
     ],
     "flow_score_history": [
       0.31653348456922226
@@ -16781,7 +16781,7 @@
     "bullish_flow_intensity": 0.0,
     "bearish_flow_intensity": 0.000121,
     "bullish_premium_per_trade": 0.0,
-    "bearish_premium_per_trade": 3.3856010049065625e-26,
+    "bearish_premium_per_trade": 2.6986024001466706e-26,
     "bearish_vol_oi": 2.564457,
     "bullish_sweep_count": 0,
     "bearish_sweep_count": 1,
@@ -16815,10 +16815,10 @@
     "direction": "SHORT",
     "flow_score_raw": 0.3162098508185846,
     "flow_score_scaled": 3.162098508185846,
-    "first_seen": "2026-06-02",
-    "last_seen": "2026-06-02",
+    "first_seen": "2026-06-03",
+    "last_seen": "2026-06-03",
     "seen_dates": [
-      "2026-06-02"
+      "2026-06-03"
     ],
     "flow_score_history": [
       0.3162098508185846
@@ -16833,7 +16833,7 @@
     "bullish_flow_intensity": 0.0,
     "bearish_flow_intensity": 5.1e-05,
     "bullish_premium_per_trade": 0.0,
-    "bearish_premium_per_trade": 1.3261746616003546e-25,
+    "bearish_premium_per_trade": 1.0570702571336178e-25,
     "bearish_vol_oi": 2.008538,
     "bullish_sweep_count": 0,
     "bearish_sweep_count": 0,
@@ -16867,10 +16867,10 @@
     "direction": "SHORT",
     "flow_score_raw": 0.3149494409939788,
     "flow_score_scaled": 3.149494409939788,
-    "first_seen": "2026-06-02",
-    "last_seen": "2026-06-02",
+    "first_seen": "2026-06-03",
+    "last_seen": "2026-06-03",
     "seen_dates": [
-      "2026-06-02"
+      "2026-06-03"
     ],
     "flow_score_history": [
       0.3149494409939788
@@ -16881,11 +16881,11 @@
     "price_score": 1.59,
     "repeat_flow_count": 2,
     "dte_score": 1.0,
-    "flow_imbalance_ratio": 2.341086897686005e-09,
+    "flow_imbalance_ratio": 2.3410868976859962e-09,
     "bullish_flow_intensity": 6e-06,
     "bearish_flow_intensity": 1.6e-05,
-    "bullish_premium_per_trade": 7.923866389925082e-17,
-    "bearish_premium_per_trade": 3.384695543662754e-08,
+    "bullish_premium_per_trade": 6.315973095265403e-17,
+    "bearish_premium_per_trade": 2.6978806730789485e-08,
     "bullish_vol_oi": 1.893855,
     "bearish_vol_oi": 104.644068,
     "bullish_sweep_count": 0,
@@ -16920,10 +16920,10 @@
     "direction": "SHORT",
     "flow_score_raw": 0.30947332966977903,
     "flow_score_scaled": 3.0947332966977905,
-    "first_seen": "2026-06-02",
-    "last_seen": "2026-06-02",
+    "first_seen": "2026-06-03",
+    "last_seen": "2026-06-03",
     "seen_dates": [
-      "2026-06-02"
+      "2026-06-03"
     ],
     "flow_score_history": [
       0.30947332966977903
@@ -16938,7 +16938,7 @@
     "bullish_flow_intensity": 0.0,
     "bearish_flow_intensity": 1.4e-05,
     "bullish_premium_per_trade": 0.0,
-    "bearish_premium_per_trade": 24623.973859250535,
+    "bearish_premium_per_trade": 19627.33200439747,
     "bearish_vol_oi": 2.935673,
     "bullish_sweep_count": 0,
     "bearish_sweep_count": 1,
@@ -16972,10 +16972,10 @@
     "direction": "SHORT",
     "flow_score_raw": 0.30933669125060564,
     "flow_score_scaled": 3.0933669125060566,
-    "first_seen": "2026-06-02",
-    "last_seen": "2026-06-02",
+    "first_seen": "2026-06-03",
+    "last_seen": "2026-06-03",
     "seen_dates": [
-      "2026-06-02"
+      "2026-06-03"
     ],
     "flow_score_history": [
       0.30933669125060564
@@ -16986,11 +16986,11 @@
     "price_score": 3.79,
     "repeat_flow_count": 5,
     "dte_score": 1.0,
-    "flow_imbalance_ratio": 0.3489480413159602,
+    "flow_imbalance_ratio": 0.34894804131596063,
     "bullish_flow_intensity": 3e-06,
     "bearish_flow_intensity": 2e-05,
-    "bullish_premium_per_trade": 13693.518301676075,
-    "bearish_premium_per_trade": 9810.571116859397,
+    "bullish_premium_per_trade": 10914.860109564364,
+    "bearish_premium_per_trade": 7819.831907067024,
     "bullish_vol_oi": 61.0,
     "bearish_vol_oi": 1.965474,
     "bullish_sweep_count": 0,
@@ -17025,10 +17025,10 @@
     "direction": "SHORT",
     "flow_score_raw": 0.30625796746641487,
     "flow_score_scaled": 3.062579674664149,
-    "first_seen": "2026-06-02",
-    "last_seen": "2026-06-02",
+    "first_seen": "2026-06-03",
+    "last_seen": "2026-06-03",
     "seen_dates": [
-      "2026-06-02"
+      "2026-06-03"
     ],
     "flow_score_history": [
       0.30625796746641487
@@ -17043,7 +17043,7 @@
     "bullish_flow_intensity": 0.0,
     "bearish_flow_intensity": 8.6e-05,
     "bullish_premium_per_trade": 0.0,
-    "bearish_premium_per_trade": 0.011593098971750723,
+    "bearish_premium_per_trade": 0.009240653185347234,
     "bearish_vol_oi": 18.100363,
     "bullish_sweep_count": 0,
     "bearish_sweep_count": 0,
@@ -17077,10 +17077,10 @@
     "direction": "SHORT",
     "flow_score_raw": 0.3048021200579992,
     "flow_score_scaled": 3.048021200579992,
-    "first_seen": "2026-06-02",
-    "last_seen": "2026-06-02",
+    "first_seen": "2026-06-03",
+    "last_seen": "2026-06-03",
     "seen_dates": [
-      "2026-06-02"
+      "2026-06-03"
     ],
     "flow_score_history": [
       0.3048021200579992
@@ -17095,7 +17095,7 @@
     "bullish_flow_intensity": 0.0,
     "bearish_flow_intensity": 8.8e-05,
     "bullish_premium_per_trade": 0.0,
-    "bearish_premium_per_trade": 0.023687084004303003,
+    "bearish_premium_per_trade": 0.01888055374920125,
     "bearish_vol_oi": 7.088009,
     "bullish_sweep_count": 0,
     "bearish_sweep_count": 0,
@@ -17129,10 +17129,10 @@
     "direction": "SHORT",
     "flow_score_raw": 0.30362239663379376,
     "flow_score_scaled": 3.0362239663379373,
-    "first_seen": "2026-06-02",
-    "last_seen": "2026-06-02",
+    "first_seen": "2026-06-03",
+    "last_seen": "2026-06-03",
     "seen_dates": [
-      "2026-06-02"
+      "2026-06-03"
     ],
     "flow_score_history": [
       0.30362239663379376
@@ -17143,11 +17143,11 @@
     "price_score": 5.1,
     "repeat_flow_count": 6,
     "dte_score": 1.0,
-    "flow_imbalance_ratio": 1.4053201547080983e-08,
+    "flow_imbalance_ratio": 1.405320154708094e-08,
     "bullish_flow_intensity": 9e-06,
     "bearish_flow_intensity": 2.1e-05,
-    "bullish_premium_per_trade": 0.0006235584201903368,
-    "bearish_premium_per_trade": 44371.27142176775,
+    "bullish_premium_per_trade": 0.000497027336333673,
+    "bearish_premium_per_trade": 35367.551989383726,
     "bullish_vol_oi": 1.693937,
     "bearish_vol_oi": 2.712866,
     "bullish_sweep_count": 2,
@@ -17182,10 +17182,10 @@
     "direction": "SHORT",
     "flow_score_raw": 0.3007500554171062,
     "flow_score_scaled": 3.007500554171062,
-    "first_seen": "2026-06-02",
-    "last_seen": "2026-06-02",
+    "first_seen": "2026-06-03",
+    "last_seen": "2026-06-03",
     "seen_dates": [
-      "2026-06-02"
+      "2026-06-03"
     ],
     "flow_score_history": [
       0.3007500554171062
@@ -17200,7 +17200,7 @@
     "bullish_flow_intensity": 0.0,
     "bearish_flow_intensity": 9e-06,
     "bullish_premium_per_trade": 0.0,
-    "bearish_premium_per_trade": 24424.349919779335,
+    "bearish_premium_per_trade": 19468.215309487758,
     "bearish_vol_oi": 24.809524,
     "bullish_sweep_count": 0,
     "bearish_sweep_count": 0,
@@ -17234,10 +17234,10 @@
     "direction": "SHORT",
     "flow_score_raw": 0.2973532335275915,
     "flow_score_scaled": 2.973532335275915,
-    "first_seen": "2026-06-02",
-    "last_seen": "2026-06-02",
+    "first_seen": "2026-06-03",
+    "last_seen": "2026-06-03",
     "seen_dates": [
-      "2026-06-02"
+      "2026-06-03"
     ],
     "flow_score_history": [
       0.2973532335275915
@@ -17252,7 +17252,7 @@
     "bullish_flow_intensity": 0.0,
     "bearish_flow_intensity": 9.4e-05,
     "bullish_premium_per_trade": 0.0,
-    "bearish_premium_per_trade": 0.023717651058731627,
+    "bearish_premium_per_trade": 0.018904918205121246,
     "bearish_vol_oi": 9.033654,
     "bullish_sweep_count": 0,
     "bearish_sweep_count": 0,
@@ -17286,10 +17286,10 @@
     "direction": "SHORT",
     "flow_score_raw": 0.29716322572128245,
     "flow_score_scaled": 2.9716322572128244,
-    "first_seen": "2026-06-02",
-    "last_seen": "2026-06-02",
+    "first_seen": "2026-06-03",
+    "last_seen": "2026-06-03",
     "seen_dates": [
-      "2026-06-02"
+      "2026-06-03"
     ],
     "flow_score_history": [
       0.29716322572128245
@@ -17304,7 +17304,7 @@
     "bullish_flow_intensity": 0.0,
     "bearish_flow_intensity": 2e-06,
     "bullish_premium_per_trade": 0.0,
-    "bearish_premium_per_trade": 0.0013733896780696877,
+    "bearish_premium_per_trade": 0.0010947045077681333,
     "bearish_vol_oi": 1.255353,
     "bullish_sweep_count": 0,
     "bearish_sweep_count": 0,
@@ -17336,15 +17336,15 @@
   {
     "ticker": "ARM",
     "direction": "SHORT",
-    "flow_score_raw": 0.29114383784239894,
-    "flow_score_scaled": 2.9114383784239894,
-    "first_seen": "2026-06-02",
-    "last_seen": "2026-06-02",
+    "flow_score_raw": 0.2905556981406709,
+    "flow_score_scaled": 2.905556981406709,
+    "first_seen": "2026-06-03",
+    "last_seen": "2026-06-03",
     "seen_dates": [
-      "2026-06-02"
+      "2026-06-03"
     ],
     "flow_score_history": [
-      0.29114383784239894
+      0.2905556981406709
     ],
     "reject_reason": "price_validation_failed",
     "checks_passed": "confirmation_volume, room_to_target, shooting_star_at_resistance",
@@ -17356,7 +17356,7 @@
     "bullish_flow_intensity": 0.0,
     "bearish_flow_intensity": 1e-06,
     "bullish_premium_per_trade": 0.0,
-    "bearish_premium_per_trade": 298875.6163185036,
+    "bearish_premium_per_trade": 238228.4428594958,
     "bearish_vol_oi": 1.506667,
     "bullish_sweep_count": 0,
     "bearish_sweep_count": 0,
@@ -17390,10 +17390,10 @@
     "direction": "SHORT",
     "flow_score_raw": 0.2872155814891977,
     "flow_score_scaled": 2.872155814891977,
-    "first_seen": "2026-06-02",
-    "last_seen": "2026-06-02",
+    "first_seen": "2026-06-03",
+    "last_seen": "2026-06-03",
     "seen_dates": [
-      "2026-06-02"
+      "2026-06-03"
     ],
     "flow_score_history": [
       0.2872155814891977
@@ -17408,7 +17408,7 @@
     "bullish_flow_intensity": 0.0,
     "bearish_flow_intensity": 3.8e-05,
     "bullish_premium_per_trade": 0.0,
-    "bearish_premium_per_trade": 0.002498473575142854,
+    "bearish_premium_per_trade": 0.0019914888898048596,
     "bearish_vol_oi": 6.885246,
     "bullish_sweep_count": 0,
     "bearish_sweep_count": 0,
@@ -17442,10 +17442,10 @@
     "direction": "SHORT",
     "flow_score_raw": 0.2816294100873398,
     "flow_score_scaled": 2.816294100873398,
-    "first_seen": "2026-06-02",
-    "last_seen": "2026-06-02",
+    "first_seen": "2026-06-03",
+    "last_seen": "2026-06-03",
     "seen_dates": [
-      "2026-06-02"
+      "2026-06-03"
     ],
     "flow_score_history": [
       0.2816294100873398
@@ -17460,7 +17460,7 @@
     "bullish_flow_intensity": 0.0,
     "bearish_flow_intensity": 1.5e-05,
     "bullish_premium_per_trade": 0.0,
-    "bearish_premium_per_trade": 0.010015375146017672,
+    "bearish_premium_per_trade": 0.007983077559418027,
     "bearish_vol_oi": 3.80402,
     "bullish_sweep_count": 0,
     "bearish_sweep_count": 0,
@@ -17494,10 +17494,10 @@
     "direction": "SHORT",
     "flow_score_raw": 0.27677548865713897,
     "flow_score_scaled": 2.7677548865713897,
-    "first_seen": "2026-06-02",
-    "last_seen": "2026-06-02",
+    "first_seen": "2026-06-03",
+    "last_seen": "2026-06-03",
     "seen_dates": [
-      "2026-06-02"
+      "2026-06-03"
     ],
     "flow_score_history": [
       0.27677548865713897
@@ -17508,11 +17508,11 @@
     "price_score": 3.7,
     "repeat_flow_count": 2,
     "dte_score": 1.0,
-    "flow_imbalance_ratio": 3.4992538850791425e-06,
+    "flow_imbalance_ratio": 3.499253885079139e-06,
     "bullish_flow_intensity": 0.0,
     "bearish_flow_intensity": 1e-06,
-    "bullish_premium_per_trade": 3.759359096388784,
-    "bearish_premium_per_trade": 1074331.6203544799,
+    "bullish_premium_per_trade": 2.9965183333255867,
+    "bearish_premium_per_trade": 856330.6441132429,
     "bullish_vol_oi": 32.677419,
     "bearish_vol_oi": 6.216146,
     "bullish_sweep_count": 0,
@@ -17547,10 +17547,10 @@
     "direction": "SHORT",
     "flow_score_raw": 0.2679715967544665,
     "flow_score_scaled": 2.679715967544665,
-    "first_seen": "2026-06-02",
-    "last_seen": "2026-06-02",
+    "first_seen": "2026-06-03",
+    "last_seen": "2026-06-03",
     "seen_dates": [
-      "2026-06-02"
+      "2026-06-03"
     ],
     "flow_score_history": [
       0.2679715967544665
@@ -17565,7 +17565,7 @@
     "bullish_flow_intensity": 0.0,
     "bearish_flow_intensity": 3e-06,
     "bullish_premium_per_trade": 0.0,
-    "bearish_premium_per_trade": 5.61140850663632e-28,
+    "bearish_premium_per_trade": 4.472754008008141e-28,
     "bearish_vol_oi": 13.487805,
     "bullish_sweep_count": 0,
     "bearish_sweep_count": 0,
@@ -17599,10 +17599,10 @@
     "direction": "SHORT",
     "flow_score_raw": 0.2677222609648411,
     "flow_score_scaled": 2.677222609648411,
-    "first_seen": "2026-06-02",
-    "last_seen": "2026-06-02",
+    "first_seen": "2026-06-03",
+    "last_seen": "2026-06-03",
     "seen_dates": [
-      "2026-06-02"
+      "2026-06-03"
     ],
     "flow_score_history": [
       0.2677222609648411
@@ -17613,11 +17613,11 @@
     "price_score": 1.36,
     "repeat_flow_count": 2,
     "dte_score": 1.0,
-    "flow_imbalance_ratio": 5.79304636372999e-07,
+    "flow_imbalance_ratio": 5.793046363729968e-07,
     "bullish_flow_intensity": 1e-06,
     "bearish_flow_intensity": 4e-06,
-    "bullish_premium_per_trade": 2.1998597173601005e-08,
-    "bearish_premium_per_trade": 0.03797414312326803,
+    "bullish_premium_per_trade": 1.753469090022852e-08,
+    "bearish_premium_per_trade": 0.03026851469722825,
     "bullish_vol_oi": 13.090909,
     "bearish_vol_oi": 1.072238,
     "bullish_sweep_count": 0,
