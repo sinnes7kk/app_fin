@@ -92,7 +92,6 @@ snapshot_date,ticker,st_messages,st_bullish,st_bearish,st_sentiment,rd_mentions,
 2026-06-04,NEE,0,0,0,0.5,0,0,0,—,neutral
 2026-06-04,HTZ,0,0,0,0.5,0,0,0,—,neutral
 2026-06-04,AVBP,0,0,0,0.5,0,0,0,—,neutral
-2026-06-04,BTDR,0,0,0,0.5,0,0,0,—,neutral
 2026-06-04,CRWD,0,0,0,0.5,0,0,0,—,neutral
 2026-06-04,FROG,0,0,0,0.5,0,0,0,—,neutral
 2026-06-04,CDNS,0,0,0,0.5,0,0,0,—,neutral
@@ -102,5 +101,6 @@ snapshot_date,ticker,st_messages,st_bullish,st_bearish,st_sentiment,rd_mentions,
 2026-06-04,AAOI,0,0,0,0.5,0,0,0,—,neutral
 2026-06-04,CHTR,0,0,0,0.5,0,0,0,—,neutral
 2026-06-04,PSNL,0,0,0,0.5,0,0,0,—,neutral
+2026-06-04,BTDR,0,0,0,0.5,0,0,0,—,neutral
 2026-06-04,COIN,0,0,0,0.5,0,0,0,—,neutral
 2026-06-04,FIVE,0,0,0,0.5,0,0,0,—,neutral
