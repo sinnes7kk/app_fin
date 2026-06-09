@@ -93,7 +93,6 @@ snapshot_date,ticker,st_messages,st_bullish,st_bearish,st_sentiment,rd_mentions,
 2026-06-09,UNM,0,0,0,0.5,0,0,0,—,neutral
 2026-06-09,SRAD,0,0,0,0.5,0,0,0,—,neutral
 2026-06-09,SGHC,0,0,0,0.5,0,0,0,—,neutral
-2026-06-09,KRMN,0,0,0,0.5,0,0,0,—,neutral
 2026-06-09,RGEN,0,0,0,0.5,0,0,0,—,neutral
 2026-06-09,SNDX,0,0,0,0.5,0,0,0,—,neutral
 2026-06-09,BKH,0,0,0,0.5,0,0,0,—,neutral
@@ -104,3 +103,4 @@ snapshot_date,ticker,st_messages,st_bullish,st_bearish,st_sentiment,rd_mentions,
 2026-06-09,COHR,0,0,0,0.5,0,0,0,—,neutral
 2026-06-09,PIPR,0,0,0,0.5,0,0,0,—,neutral
 2026-06-09,TYRA,0,0,0,0.5,0,0,0,—,neutral
+2026-06-09,UPBD,0,0,0,0.5,0,0,0,—,neutral
