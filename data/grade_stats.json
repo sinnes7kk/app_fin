@@ -2,8 +2,8 @@
   "window_days": 5,
   "history_days": 90,
   "evaluations": 150,
-  "computed_at": "2026-06-09T23:39:03.722634Z",
-  "as_of": "2026-06-09",
+  "computed_at": "2026-06-10T17:20:30.510920Z",
+  "as_of": "2026-06-10",
   "stats": {
     "A": {
       "count": 150,
