@@ -1,6 +1,6 @@
 {
   "lottery": {
-    "n": 1,
+    "n": 2,
     "MAX_HOLD_DAYS": 3,
     "TIME_STOP_MIN_R": 0.5,
     "ATR_TRAIL_MULT": 1.5,
@@ -9,39 +9,39 @@
     "observed_mean_r": NaN
   },
   "swing": {
-    "n": 19,
+    "n": 21,
     "MAX_HOLD_DAYS": 5,
     "TIME_STOP_MIN_R": 0.5,
-    "ATR_TRAIL_MULT": 2.1,
+    "ATR_TRAIL_MULT": 2.2,
     "confidence": "medium",
     "observed_median_d_to_mfe": 1.0,
-    "observed_mean_r": -0.3274533333333334
+    "observed_mean_r": -0.21540000000000004
   },
   "position": {
-    "n": 203,
+    "n": 247,
     "MAX_HOLD_DAYS": 10,
     "TIME_STOP_MIN_R": 0.5,
-    "ATR_TRAIL_MULT": 2.1,
+    "ATR_TRAIL_MULT": 2.2,
     "confidence": "high",
     "observed_median_d_to_mfe": 1.0,
-    "observed_mean_r": 0.4194468253968254
+    "observed_mean_r": 0.3467147887323943
   },
   "leap": {
-    "n": 113,
+    "n": 124,
     "MAX_HOLD_DAYS": 15,
     "TIME_STOP_MIN_R": 0.5,
-    "ATR_TRAIL_MULT": 2.1,
+    "ATR_TRAIL_MULT": 2.2,
     "confidence": "high",
     "observed_median_d_to_mfe": 1.0,
-    "observed_mean_r": 0.10923684210526312
+    "observed_mean_r": 0.09702241379310342
   },
   "unknown": {
-    "n": 154,
+    "n": 155,
     "MAX_HOLD_DAYS": 5,
     "TIME_STOP_MIN_R": 1.0,
     "ATR_TRAIL_MULT": 2.1,
     "confidence": "high",
     "observed_median_d_to_mfe": 1.0,
-    "observed_mean_r": 0.4947371212121212
+    "observed_mean_r": 0.48930375939849624
   }
 }
