@@ -584,7 +584,6 @@ as_of,ticker,direction,sector,conviction_score,conviction_grade,conviction_stack
 2026-06-12,WULF,BULLISH,Financial Services,6.0,B+,,27.42,0.4,52.7,0.0,0.0,0.0,-2.2,56011311.0,27.42,0.09,31.9,1.04,0.7,,31-90,per_ticker_api,false,not_evaluated,,
 2026-06-12,LUNR,BEARISH,nan,5.8,B,,29.95,0.8,48.8,0.0,0.0,0.0,-1.54,28434685.0,29.95,0.63,64.8,3.81,1.491,,91+,per_ticker_api,false,not_evaluated,,
 2026-06-12,PRIM,BULLISH,Industrials,5.8,B,,8.31,0.6,64.5,0.0,0.0,0.0,7.74,7099839.0,8.31,0.02,74.8,39.1,1.496,,unknown,screener,false,not_evaluated,,
-2026-06-15,EYPT,BEARISH,Healthcare,8.1,A,,29.99,0.5,75.8,1.0,0.0,0.0,-2.11,3209887.0,29.99,165.1,32.2,0.09,104.725,,91+,screener,false,not_evaluated,,
 2026-06-15,LMB,BULLISH,Industrials,8.0,A,,27.05,0.5,75.9,0.0,1.0,0.0,-0.85,2689997.0,27.05,0.07,66.9,0.46,107.792,,31-90,per_ticker_api,false,price_validation_failed,,
 2026-06-15,TRIP,BEARISH,Consumer Cyclical,7.9,A,,56.08,0.75,71.1,0.0,0.5,0.0,0.28,10914051.0,56.08,0.74,54.4,8.09,3.164,,31-90,screener,false,not_evaluated,,
 2026-06-15,COIN,BULLISH,Technology,7.5,A,,42.13,1.0,64.0,0.667,0.0,0.0,7.82,289677478.0,42.13,0.43,40.9,-7.02,0.93,,31-90,per_ticker_api,false,not_evaluated,,
@@ -599,3 +598,4 @@ as_of,ticker,direction,sector,conviction_score,conviction_grade,conviction_stack
 2026-06-15,ARM,BULLISH,Technology,6.6,B+,,8.34,1.0,64.9,0.6,0.0,0.0,24.21,635677563.0,8.34,0.51,88.9,-5.22,1.155,,31-90,per_ticker_api,false,weak_bullish_flow,,
 2026-06-15,CRCL,BULLISH,Financial Services,6.6,B+,,25.41,0.75,56.1,1.0,0.0,0.0,8.06,90743749.0,25.41,0.33,0.0,-6.39,1.807,,91+,per_ticker_api,false,not_evaluated,,
 2026-06-15,PRIM,BULLISH,Industrials,6.6,B+,,11.3,0.75,65.2,0.0,0.0,0.0,3.23,9506897.0,11.3,0.02,85.6,39.1,1.513,,unknown,screener,false,not_evaluated,,
+2026-06-15,POET,BULLISH,Technology,6.5,B+,,240.78,0.5,53.6,0.0,0.0,0.0,-3.73,69245452.0,240.78,0.14,65.7,-5.53,2.09,,31-90,per_ticker_api,false,price_validation_failed,,
