@@ -90,6 +90,7 @@ snapshot_date,ticker,st_messages,st_bullish,st_bearish,st_sentiment,rd_mentions,
 2026-06-15,ALAB,0,0,0,0.5,0,0,0,—,neutral
 2026-06-15,LUNR,0,0,0,0.5,0,0,0,—,neutral
 2026-06-16,MYE,0,0,0,0.5,0,0,0,—,neutral
+2026-06-16,HOOD,0,0,0,0.5,0,0,0,—,neutral
 2026-06-16,HIMS,0,0,0,0.5,0,0,0,—,neutral
 2026-06-16,TRIP,0,0,0,0.5,0,0,0,—,neutral
 2026-06-16,TLN,0,0,0,0.5,0,0,0,—,neutral
@@ -97,10 +98,9 @@ snapshot_date,ticker,st_messages,st_bullish,st_bearish,st_sentiment,rd_mentions,
 2026-06-16,AAOI,0,0,0,0.5,0,0,0,—,neutral
 2026-06-16,WDC,0,0,0,0.5,0,0,0,—,neutral
 2026-06-16,KRYS,0,0,0,0.5,0,0,0,—,neutral
-2026-06-16,HOOD,0,0,0,0.5,0,0,0,—,neutral
 2026-06-16,BTDR,0,0,0,0.5,0,0,0,—,neutral
+2026-06-16,CXW,0,0,0,0.5,0,0,0,—,neutral
+2026-06-16,GTES,0,0,0,0.5,0,0,0,—,neutral
+2026-06-16,HAS,0,0,0,0.5,0,0,0,—,neutral
+2026-06-16,KLAC,0,0,0,0.5,0,0,0,—,neutral
 2026-06-16,PRIM,0,0,0,0.5,0,0,0,—,neutral
-2026-06-16,CRCL,0,0,0,0.5,0,0,0,—,neutral
-2026-06-16,MU,0,0,0,0.5,0,0,0,—,neutral
-2026-06-16,NTLA,0,0,0,0.5,0,0,0,—,neutral
-2026-06-16,AMD,0,0,0,0.5,0,0,0,—,neutral
