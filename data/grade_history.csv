@@ -628,4 +628,4 @@ as_of,ticker,direction,sector,conviction_score,conviction_grade,conviction_stack
 2026-06-17,KRYS,BEARISH,Healthcare,6.7,B+,,6.08,0.5,70.7,0.0,0.0,0.0,5.41,6768828.0,6.08,2.65,15.9,2.6,1.539,,91+,screener,false,not_evaluated,,
 2026-06-17,SNDK,BEARISH,Technology,6.7,B+,,93.95,0.75,55.2,0.417,0.0,0.0,-2.87,5525408042.0,93.95,1.27,82.1,4.65,0.737,,31-90,per_ticker_api,false,price_validation_failed,,
 2026-06-17,SOFI,BULLISH,Financial Services,6.7,B+,,29.67,0.75,56.2,0.0,0.0,0.0,1.38,133887426.0,29.67,0.4,28.0,0.58,1.767,,31-90,per_ticker_api,false,not_evaluated,,
-2026-06-17,BTDR,BULLISH,Technology,6.6,B+,,35.13,0.75,54.7,0.0,0.0,0.0,-4.38,28859746.0,35.13,0.02,79.9,-1.05,5.566,,31-90,screener,false,price_validation_failed,,
+2026-06-17,CRCL,BULLISH,Financial Services,6.6,B+,,30.98,0.5,55.2,1.0,0.0,0.0,-4.83,94025641.0,30.98,0.88,14.7,0.3,1.212,,91+,per_ticker_api,false,not_evaluated,,
