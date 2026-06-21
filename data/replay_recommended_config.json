@@ -1,12 +1,12 @@
 {
   "lottery": {
-    "n": 2,
+    "n": 6,
     "MAX_HOLD_DAYS": 3,
     "TIME_STOP_MIN_R": 0.5,
     "ATR_TRAIL_MULT": 1.5,
     "confidence": "low",
-    "observed_median_d_to_mfe": null,
-    "observed_mean_r": NaN
+    "observed_median_d_to_mfe": 1.5,
+    "observed_mean_r": 0.1648
   },
   "swing": {
     "n": 21,
@@ -18,30 +18,30 @@
     "observed_mean_r": -0.21540000000000004
   },
   "position": {
-    "n": 247,
+    "n": 290,
     "MAX_HOLD_DAYS": 10,
     "TIME_STOP_MIN_R": 0.5,
     "ATR_TRAIL_MULT": 2.2,
     "confidence": "high",
     "observed_median_d_to_mfe": 1.0,
-    "observed_mean_r": 0.3467147887323943
+    "observed_mean_r": 0.32169473684210526
   },
   "leap": {
-    "n": 124,
+    "n": 139,
     "MAX_HOLD_DAYS": 15,
     "TIME_STOP_MIN_R": 0.5,
-    "ATR_TRAIL_MULT": 2.2,
+    "ATR_TRAIL_MULT": 2.0,
     "confidence": "high",
     "observed_median_d_to_mfe": 1.0,
-    "observed_mean_r": 0.09702241379310342
+    "observed_mean_r": 0.17700434782608693
   },
   "unknown": {
-    "n": 155,
+    "n": 172,
     "MAX_HOLD_DAYS": 5,
     "TIME_STOP_MIN_R": 1.0,
     "ATR_TRAIL_MULT": 2.1,
     "confidence": "high",
     "observed_median_d_to_mfe": 1.0,
-    "observed_mean_r": 0.48930375939849624
+    "observed_mean_r": 0.4640578231292517
   }
 }
