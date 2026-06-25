@@ -15,3 +15,4 @@ NAMS,SHORT,flow_promoted,2026-06-23,2026-06-24,30.82,31.64,113,0.02,-0.0266,-92.
 LSCC,LONG,flow_promoted,2026-06-23,2026-06-24,155.27,146.5,22,0.02,-0.0565,-192.94,-1.0,1,stop,atr_chandelier,8.0,8.0,0.0
 EWC,SHORT,flow_promoted,2026-06-23,2026-06-25,57.89,57.84,273,0.02,0.0009,13.65,0.07,2,health_weak_deteriorating,,8.9,8.9,0.0
 NAMS,SHORT,flow_promoted,2026-06-24,2026-06-25,31.4,31.7,116,0.02,-0.0096,-34.8,-0.17,1,stop,ema_trail,8.2,8.2,0.0
+FCNCA,LONG,flow_promoted,2026-06-23,2026-06-25,2084.99,2089.21,3,0.02,0.002,12.66,0.08,2,health_weak_deteriorating,,8.4,8.4,0.0
