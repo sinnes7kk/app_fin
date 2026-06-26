@@ -76,9 +76,11 @@ snapshot_date,ticker,st_messages,st_bullish,st_bearish,st_sentiment,rd_mentions,
 2026-06-24,ZBH,0,0,0,0.5,0,0,0,—,neutral
 2026-06-25,BE,0,0,0,0.5,0,0,0,—,neutral
 2026-06-25,ON,0,0,0,0.5,0,0,0,—,neutral
-2026-06-25,TMUS,0,0,0,0.5,0,0,0,—,neutral
 2026-06-25,CCK,0,0,0,0.5,0,0,0,—,neutral
 2026-06-25,HUT,0,0,0,0.5,0,0,0,—,neutral
+2026-06-25,TMUS,0,0,0,0.5,0,0,0,—,neutral
+2026-06-25,ACGL,0,0,0,0.5,0,0,0,—,neutral
+2026-06-25,MTD,0,0,0,0.5,0,0,0,—,neutral
 2026-06-25,QLYS,0,0,0,0.5,0,0,0,—,neutral
 2026-06-25,AYI,0,0,0,0.5,0,0,0,—,neutral
 2026-06-25,BCRX,0,0,0,0.5,0,0,0,—,neutral
@@ -87,5 +89,3 @@ snapshot_date,ticker,st_messages,st_bullish,st_bearish,st_sentiment,rd_mentions,
 2026-06-25,PRSU,0,0,0,0.5,0,0,0,—,neutral
 2026-06-25,LRCX,0,0,0,0.5,0,0,0,—,neutral
 2026-06-25,COHR,0,0,0,0.5,0,0,0,—,neutral
-2026-06-25,HIMS,0,0,0,0.5,0,0,0,—,neutral
-2026-06-25,IREN,0,0,0,0.5,0,0,0,—,neutral
