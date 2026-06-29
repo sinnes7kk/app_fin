@@ -726,6 +726,7 @@ as_of,ticker,direction,sector,conviction_score,conviction_grade,conviction_stack
 2026-06-29,ASTS,BULLISH,Communication Services,6.9,A-,,83.34,0.75,58.1,0.0,0.0,0.0,21.59,332306089.0,83.34,0.36,58.0,-6.59,1.363,,91+,per_ticker_api,false,watchlist_reeval_failed,,
 2026-06-29,ERAS,BULLISH,Healthcare,6.9,A-,,11.2,0.75,68.9,0.0,0.0,0.0,21.13,8908302.0,11.2,0.3,28.3,42.82,3.127,,8-30,screener,false,not_evaluated,,
 2026-06-29,MU,BEARISH,Technology,6.9,A-,,40.22,0.75,57.8,0.0,0.0,0.0,-0.07,9719115947.0,40.22,0.8,81.0,-12.25,0.66,,31-90,per_ticker_api,false,price_validation_failed,,
+2026-06-29,RKLB,BULLISH,Industrials,6.9,A-,,30.35,0.75,57.5,0.0,0.0,0.0,17.04,282947223.0,30.35,0.36,46.6,-7.29,1.255,,31-90,per_ticker_api,false,weak_bullish_flow,,
 2026-06-29,NFG,BULLISH,Energy,6.7,B+,,2.99,0.5,74.8,0.0,0.0,0.0,0.98,2237162.0,2.99,0.01,63.3,0.22,52.193,,91+,screener,false,not_evaluated,,
 2026-06-29,CRDO,BEARISH,Technology,6.5,B+,,14.23,0.75,59.2,0.0,0.0,0.0,1.1,113991134.0,14.23,0.62,67.7,-9.31,1.001,,31-90,per_ticker_api,false,not_evaluated,,
 2026-06-29,KVYO,BULLISH,Technology,6.5,B+,,23.0,0.5,76.2,0.0,0.0,0.0,-1.74,5073385.0,23.0,8.08,59.6,0.72,3.215,,unknown,screener,false,not_evaluated,,
@@ -733,4 +734,3 @@ as_of,ticker,direction,sector,conviction_score,conviction_grade,conviction_stack
 2026-06-29,GLUE,BEARISH,Healthcare,6.3,B+,,14.9,0.5,78.6,0.0,0.0,0.0,2.71,3029592.0,14.9,0.0,37.0,3.39,34.709,,unknown,screener,false,not_evaluated,,
 2026-06-29,IRDM,BULLISH,Communication Services,6.3,B+,,21.72,0.5,59.0,0.0,0.0,0.0,-0.09,18799078.0,21.72,0.15,0.0,4.98,3.174,,unknown,screener,false,not_evaluated,,
 2026-06-29,KD,BEARISH,Technology,6.1,B+,,3.6,0.5,72.6,0.0,1.0,0.0,-0.81,944531.0,3.6,11.79,45.4,0.87,8.605,,8-30,screener,false,not_evaluated,,
-2026-06-29,LITE,BULLISH,Technology,6.1,B+,,18.55,0.5,52.6,0.0,0.0,0.0,1.15,210237522.0,18.55,0.65,69.6,-10.71,1.258,,31-90,per_ticker_api,false,not_evaluated,,
