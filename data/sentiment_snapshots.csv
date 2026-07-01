@@ -95,6 +95,7 @@ snapshot_date,ticker,st_messages,st_bullish,st_bearish,st_sentiment,rd_mentions,
 2026-06-30,CRCL,0,0,0,0.5,0,0,0,—,neutral
 2026-06-30,VSAT,0,0,0,0.5,0,0,0,—,neutral
 2026-06-30,MU,0,0,0,0.5,0,0,0,—,neutral
+2026-06-30,CGNX,0,0,0,0.5,0,0,0,—,neutral
 2026-06-30,SMCI,0,0,0,0.5,0,0,0,—,neutral
 2026-06-30,ALB,0,0,0,0.5,0,0,0,—,neutral
 2026-06-30,TLN,0,0,0,0.5,0,0,0,—,neutral
@@ -102,5 +103,4 @@ snapshot_date,ticker,st_messages,st_bullish,st_bearish,st_sentiment,rd_mentions,
 2026-06-30,DELL,0,0,0,0.5,0,0,0,—,neutral
 2026-06-30,MRVL,0,0,0,0.5,0,0,0,—,neutral
 2026-06-30,ALAB,0,0,0,0.5,0,0,0,—,neutral
-2026-06-30,CGNX,0,0,0,0.5,0,0,0,—,neutral
 2026-06-30,CSCO,0,0,0,0.5,0,0,0,—,neutral
