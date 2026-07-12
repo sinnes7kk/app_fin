@@ -1,7 +1,7 @@
 {
   "global": {
-    "n_train": 265,
-    "n_val": 178,
+    "n_train": 272,
+    "n_val": 182,
     "weights": {
       "persistence_proxy": 0.25,
       "intensity_proxy": 0.2,
@@ -10,11 +10,11 @@
       "mass_proxy": 0.05,
       "oi_change_proxy": 0.05
     },
-    "oos_spearman": 0.056732328215927774,
-    "oos_spearman_legacy": 0.08265927182173946,
+    "oos_spearman": 0.010598196404919887,
+    "oos_spearman_legacy": 0.04495178362895476,
     "accept": false,
     "confidence": "high",
-    "reason": "tight_threshold_unmet (need spearman>=0.10 and lift>=0.05, got new=0.057, legacy=0.083)",
+    "reason": "tight_threshold_unmet (need spearman>=0.10 and lift>=0.05, got new=0.011, legacy=0.045)",
     "threshold_regime": "tight",
     "accept_threshold": 0.1,
     "accept_lift_threshold": 0.05
@@ -61,8 +61,8 @@
       "accept_lift_threshold": 0.0
     },
     "position": {
-      "n_train": 98,
-      "n_val": 66,
+      "n_train": 100,
+      "n_val": 67,
       "weights": {
         "persistence_proxy": 0.25,
         "intensity_proxy": 0.2,
@@ -71,18 +71,18 @@
         "mass_proxy": 0.05,
         "oi_change_proxy": 0.05
       },
-      "oos_spearman": 0.050343935700315035,
-      "oos_spearman_legacy": 0.0574562660103282,
+      "oos_spearman": 0.07622295214156541,
+      "oos_spearman_legacy": 0.059253241878447195,
       "accept": false,
       "confidence": "high",
-      "reason": "tight_threshold_unmet (need spearman>=0.10 and lift>=0.05, got new=0.050, legacy=0.057)",
+      "reason": "tight_threshold_unmet (need spearman>=0.10 and lift>=0.05, got new=0.076, legacy=0.059)",
       "threshold_regime": "tight",
       "accept_threshold": 0.1,
       "accept_lift_threshold": 0.05
     },
     "leap": {
-      "n_train": 49,
-      "n_val": 33,
+      "n_train": 51,
+      "n_val": 35,
       "weights": {
         "persistence_proxy": 0.25,
         "intensity_proxy": 0.2,
@@ -91,8 +91,8 @@
         "mass_proxy": 0.05,
         "oi_change_proxy": 0.05
       },
-      "oos_spearman": -0.19966887814934803,
-      "oos_spearman_legacy": 0.15360206095975837,
+      "oos_spearman": -0.2362693871187688,
+      "oos_spearman_legacy": 0.1600067000864326,
       "accept": false,
       "confidence": "medium",
       "reason": "oos_spearman_not_better_than_legacy",
@@ -101,8 +101,8 @@
       "accept_lift_threshold": 0.0
     },
     "unknown": {
-      "n_train": 103,
-      "n_val": 70,
+      "n_train": 106,
+      "n_val": 71,
       "weights": {
         "persistence_proxy": 0.25,
         "intensity_proxy": 0.2,
@@ -111,11 +111,11 @@
         "mass_proxy": 0.05,
         "oi_change_proxy": 0.05
       },
-      "oos_spearman": -0.04419299662736083,
-      "oos_spearman_legacy": 0.022666381506959366,
+      "oos_spearman": 0.014718186047428559,
+      "oos_spearman_legacy": 0.027420676107644586,
       "accept": false,
       "confidence": "high",
-      "reason": "tight_threshold_unmet (need spearman>=0.10 and lift>=0.05, got new=-0.044, legacy=0.023)",
+      "reason": "tight_threshold_unmet (need spearman>=0.10 and lift>=0.05, got new=0.015, legacy=0.027)",
       "threshold_regime": "tight",
       "accept_threshold": 0.1,
       "accept_lift_threshold": 0.05
