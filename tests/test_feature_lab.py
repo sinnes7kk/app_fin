@@ -268,6 +268,74 @@ def test_compute_lab_features_topn_gates_uw():
     print("  PASS: test_compute_lab_features_topn_gates_uw")
 
 
+def test_prem_momentum_z3d_scores_today_vs_trailing():
+    """Today's daily premium is z-scored against the 3 prior days."""
+    hist = pd.DataFrame(
+        {
+            "ticker": ["AAA"] * 4,
+            "day": pd.to_datetime(
+                ["2026-05-01", "2026-05-02", "2026-05-03", "2026-05-04"]
+            ).normalize(),
+            "daily_premium": [100.0, 200.0, 300.0, 500.0],
+        }
+    )
+    # prior 3 = [100, 200, 300] -> mean 200, sample std 100; today 500 -> z=3.0
+    z = fl._prem_momentum_z3d("AAA", "2026-05-04", hist)
+    assert z is not None and abs(z - 3.0) < 1e-9
+    # Case-insensitive ticker match.
+    assert fl._prem_momentum_z3d("aaa", "2026-05-04", hist) is not None
+    print("  PASS: test_prem_momentum_z3d_scores_today_vs_trailing")
+
+
+def test_prem_momentum_z3d_requires_three_prior_days():
+    """Fewer than 3 prior trading days -> None (can't z-score)."""
+    hist = pd.DataFrame(
+        {
+            "ticker": ["AAA"] * 3,
+            "day": pd.to_datetime(
+                ["2026-05-01", "2026-05-02", "2026-05-03"]
+            ).normalize(),
+            "daily_premium": [100.0, 200.0, 300.0],
+        }
+    )
+    # Only 2 prior days before 2026-05-03.
+    assert fl._prem_momentum_z3d("AAA", "2026-05-03", hist) is None
+    # Ticker absent from history -> None.
+    assert fl._prem_momentum_z3d("ZZZ", "2026-05-03", hist) is None
+    # Empty / None history -> None.
+    assert fl._prem_momentum_z3d("AAA", "2026-05-03", None) is None
+    print("  PASS: test_prem_momentum_z3d_requires_three_prior_days")
+
+
+def test_load_screener_premium_history_builds_daily_series(monkeypatch):
+    """daily_premium = bull + bear, deduped to one row per (ticker, day)."""
+    with tempfile.TemporaryDirectory() as td:
+        live = Path(td) / "screener_snapshots.csv"
+        pd.DataFrame(
+            {
+                "snapshot_date": [
+                    "2026-05-01", "2026-05-02", "2026-05-02", "2026-05-01",
+                ],
+                "ticker": ["AAA", "AAA", "AAA", "BBB"],
+                "total_bullish_premium": [100.0, 300.0, 999.0, 10.0],
+                "total_bearish_premium": [50.0, 50.0, 1.0, 5.0],
+            }
+        ).to_csv(live, index=False)
+        monkeypatch.setattr(fl, "SCREENER_SNAPSHOTS_PATH", live)
+        monkeypatch.setattr(fl, "SNAPSHOTS_ARCHIVE_PATH", Path(td) / "does_not_exist.csv.gz")
+
+        out = fl.load_screener_premium_history(days=None)
+        assert out is not None and not out.empty
+        # AAA on 05-01: 100 + 50 = 150
+        aaa1 = out[(out["ticker"] == "AAA") & (out["day"] == pd.Timestamp("2026-05-01"))]
+        assert abs(float(aaa1["daily_premium"].iloc[0]) - 150.0) < 1e-9
+        # Two AAA rows on 05-02 -> deduped to one (keep last: 999 + 1 = 1000)
+        aaa2 = out[(out["ticker"] == "AAA") & (out["day"] == pd.Timestamp("2026-05-02"))]
+        assert len(aaa2) == 1
+        assert abs(float(aaa2["daily_premium"].iloc[0]) - 1000.0) < 1e-9
+    print("  PASS: test_load_screener_premium_history_builds_daily_series")
+
+
 # Minimal monkeypatch helper.
 class _Monkeypatch:
     def __init__(self):
@@ -298,6 +366,9 @@ def main():
         ("test_compute_lab_features_full_schema", test_compute_lab_features_full_schema, False),
         ("test_persist_feature_lab_idempotent_on_as_of", test_persist_feature_lab_idempotent_on_as_of, True),
         ("test_compute_lab_features_topn_gates_uw", test_compute_lab_features_topn_gates_uw, False),
+        ("test_prem_momentum_z3d_scores_today_vs_trailing", test_prem_momentum_z3d_scores_today_vs_trailing, False),
+        ("test_prem_momentum_z3d_requires_three_prior_days", test_prem_momentum_z3d_requires_three_prior_days, False),
+        ("test_load_screener_premium_history_builds_daily_series", test_load_screener_premium_history_builds_daily_series, True),
     ]
     failures = 0
     for name, fn, needs_mp in tests:

@@ -49,6 +49,14 @@ DATA_DIR = Path(__file__).resolve().parents[2] / "data"
 FEATURE_LAB_PATH = DATA_DIR / "feature_lab.csv"
 RAW_FLOW_DIR = DATA_DIR / "raw_flow"
 GRADE_HISTORY_PATH = DATA_DIR / "grade_history.csv"
+# Screener premium history feeds ``prem_momentum_z3d``.  The live rolling
+# file covers ~15 trading days (enough for a 3-day trailing window); the
+# gzip archive holds the full multi-day history and is only loaded for
+# backfills.  Sourcing momentum from these (2000+ tickers) instead of
+# ``grade_history.csv`` (~300 graded tickers) is what lets the feature
+# populate for the transient names that never accumulate 3 graded days.
+SCREENER_SNAPSHOTS_PATH = DATA_DIR / "screener_snapshots.csv"
+SNAPSHOTS_ARCHIVE_PATH = DATA_DIR / "snapshots_archive.csv.gz"
 
 # Top-N candidates by conviction_score that get the expensive UW endpoint
 # fetches.  At ~10 hourly scans/day this caps the extra UW load at ~1800
@@ -295,22 +303,56 @@ def _sector_relative_pct_lookup(grades: Iterable[dict]) -> dict[str, float]:
     return out
 
 
-def _prem_momentum_z3d(ticker: str, today_premium: float | None,
-                       history_df: pd.DataFrame | None) -> float | None:
-    """Z-score of today's cumulative_premium vs the trailing 3 days."""
-    if today_premium is None:
+_PREM_MOMENTUM_WINDOW = 3
+
+
+def _prem_momentum_z3d(
+    ticker: str,
+    as_of_day: object,
+    premium_history_df: pd.DataFrame | None,
+    window: int = _PREM_MOMENTUM_WINDOW,
+) -> float | None:
+    """Z-score of ``as_of_day``'s daily premium vs the trailing ``window`` days.
+
+    ``premium_history_df`` is the tidy frame produced by
+    ``load_screener_premium_history`` — one ``daily_premium`` value per
+    ``(ticker, day)``.  Today's premium is scored against the mean/std of
+    the ``window`` *prior* trading days (strictly before ``as_of_day``),
+    so the statistic answers "is today's options premium unusually high
+    versus this ticker's own recent baseline?".
+
+    Sourcing the baseline from the screener snapshot universe (2000+
+    tickers) rather than the graded-only ``grade_history`` (~300 tickers)
+    is what lets this populate for the transient names that never
+    accumulate three graded days.
+    """
+    if premium_history_df is None or premium_history_df.empty:
         return None
-    if history_df is None or history_df.empty or "ticker" not in history_df.columns:
+    if not {"ticker", "day", "daily_premium"}.issubset(premium_history_df.columns):
         return None
-    sub = history_df[history_df["ticker"].astype(str).str.upper() == ticker.upper()].copy()
-    if sub.empty or "cumulative_premium" not in sub.columns:
+
+    as_of_ts = pd.to_datetime(as_of_day, errors="coerce")
+    if pd.isna(as_of_ts):
         return None
-    sub["cumulative_premium"] = pd.to_numeric(sub["cumulative_premium"], errors="coerce")
-    sub = sub.dropna(subset=["cumulative_premium"]).tail(3)
-    if len(sub) < 3:
+    as_of_ts = as_of_ts.normalize()
+
+    sub = premium_history_df[
+        premium_history_df["ticker"].astype(str).str.upper() == ticker.upper()
+    ]
+    if sub.empty:
         return None
-    mu = sub["cumulative_premium"].mean()
-    sigma = sub["cumulative_premium"].std()
+    sub = sub.dropna(subset=["daily_premium"]).sort_values("day")
+
+    today = sub[sub["day"] == as_of_ts]
+    if today.empty:
+        return None
+    today_premium = float(today["daily_premium"].iloc[-1])
+
+    prior = sub[sub["day"] < as_of_ts].tail(window)
+    if len(prior) < window:
+        return None
+    mu = prior["daily_premium"].mean()
+    sigma = prior["daily_premium"].std()
     if sigma is None or sigma == 0 or math.isnan(sigma):
         return None
     return float((today_premium - mu) / sigma)
@@ -346,6 +388,8 @@ def compute_lab_features(
     *,
     raw_flow_df: pd.DataFrame | None = None,
     grade_history_df: pd.DataFrame | None = None,
+    premium_history_df: pd.DataFrame | None = None,
+    as_of: object | None = None,
     fetch_uw: bool = True,
     topn_cutoff: int = FEATURE_LAB_TOPN_DEFAULT,
     ohlcv_loader=None,
@@ -362,9 +406,17 @@ def compute_lab_features(
         frame across all tickers) used for far-OTM share and dollar-
         delta-weighted flow.  If None, those columns are NaN.
     grade_history_df:
-        Optional DataFrame of recent ``grade_history.csv`` rows
-        (latest 7+ days) used for the 3-day premium momentum z-score.
-        If None, that column is NaN.
+        Deprecated.  Formerly the source for the momentum z-score; kept
+        for backward compatibility but no longer used (the momentum
+        baseline now comes from ``premium_history_df``).
+    premium_history_df:
+        Optional tidy frame from ``load_screener_premium_history`` used
+        for the ``prem_momentum_z3d`` column.  If None, that column is
+        NaN.
+    as_of:
+        The scan day (date/str/Timestamp) that today's premium is scored
+        against the trailing baseline for.  Defaults to the latest day in
+        ``premium_history_df`` when omitted.
     fetch_uw:
         If True, fetch the 6 UW endpoints for top-N candidates.
     topn_cutoff:
@@ -396,6 +448,12 @@ def compute_lab_features(
             uw_loader = _uw
         except Exception:
             uw_loader = None
+
+    # Resolve the reference day for the premium-momentum baseline.
+    momentum_as_of = pd.to_datetime(as_of, errors="coerce") if as_of is not None else pd.NaT
+    if pd.isna(momentum_as_of) and premium_history_df is not None and not premium_history_df.empty:
+        momentum_as_of = pd.to_datetime(premium_history_df["day"], errors="coerce").max()
+    momentum_as_of = momentum_as_of.normalize() if not pd.isna(momentum_as_of) else pd.NaT
 
     sector_rel = _sector_relative_pct_lookup(grades)
 
@@ -444,8 +502,8 @@ def compute_lab_features(
             "sector_relative_pct": sector_rel.get(g.get("ticker")),
             "prem_momentum_z3d": _prem_momentum_z3d(
                 ticker,
-                _safe_float(g.get("cumulative_premium")),
-                grade_history_df,
+                momentum_as_of,
+                premium_history_df,
             ),
             "realized_vol_regime": _realized_vol_regime(ohlcv),
         }
@@ -558,3 +616,68 @@ def load_latest_raw_flow() -> pd.DataFrame | None:
         return pd.read_csv(files[-1])
     except Exception:
         return None
+
+
+_SNAP_PREMIUM_COLS = ["snapshot_date", "ticker", "total_bullish_premium", "total_bearish_premium"]
+
+
+def _read_snapshot_premium(path: Path) -> pd.DataFrame | None:
+    """Read the premium columns from a screener-snapshot file (csv or gz)."""
+    if not path.exists():
+        return None
+    try:
+        df = pd.read_csv(path, usecols=lambda c: c in _SNAP_PREMIUM_COLS)
+    except Exception:
+        return None
+    if df.empty or "snapshot_date" not in df.columns or "ticker" not in df.columns:
+        return None
+    return df
+
+
+def load_screener_premium_history(
+    days: int | None = 60,
+    *,
+    include_archive: bool = False,
+) -> pd.DataFrame | None:
+    """Load a tidy per-``(ticker, day)`` daily-premium series for momentum.
+
+    ``daily_premium`` mirrors ``flow_tracker``'s ``cum_total`` for a single
+    day: ``total_bullish_premium + total_bearish_premium``.  The live
+    ``screener_snapshots.csv`` (rolling ~15 trading days) is enough for the
+    3-day trailing window used live; pass ``include_archive=True`` to also
+    fold in ``snapshots_archive.csv.gz`` for full-history backfills.
+
+    Returns a frame with columns ``ticker`` (upper), ``day`` (normalized
+    Timestamp), ``daily_premium`` (float), deduped to one row per
+    ``(ticker, day)`` keeping the last observation.  Returns None when no
+    source file is available.
+    """
+    frames = []
+    live = _read_snapshot_premium(SCREENER_SNAPSHOTS_PATH)
+    if live is not None:
+        frames.append(live)
+    if include_archive:
+        arch = _read_snapshot_premium(SNAPSHOTS_ARCHIVE_PATH)
+        if arch is not None:
+            frames.append(arch)
+    if not frames:
+        return None
+
+    df = pd.concat(frames, ignore_index=True)
+    df["day"] = pd.to_datetime(df["snapshot_date"], errors="coerce").dt.normalize()
+    df = df.dropna(subset=["day"])
+    if df.empty:
+        return None
+    df["ticker"] = df["ticker"].astype(str).str.upper().str.strip()
+    bull = pd.to_numeric(df.get("total_bullish_premium"), errors="coerce").fillna(0.0)
+    bear = pd.to_numeric(df.get("total_bearish_premium"), errors="coerce").fillna(0.0)
+    df["daily_premium"] = bull + bear
+
+    # One row per (ticker, day); keep the last observation of the day.
+    df = df.sort_values("day").drop_duplicates(subset=["ticker", "day"], keep="last")
+
+    if days is not None:
+        cutoff = df["day"].max() - pd.Timedelta(days=days)
+        df = df[df["day"] >= cutoff]
+
+    return df[["ticker", "day", "daily_premium"]].reset_index(drop=True)

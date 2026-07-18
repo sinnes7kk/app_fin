@@ -2087,7 +2087,7 @@ def run_flow_to_price_pipeline(
             from app.features.feature_lab import (
                 compute_lab_features,
                 load_latest_raw_flow,
-                load_recent_grade_history,
+                load_screener_premium_history,
                 persist_feature_lab,
             )
             from app.utils.market_calendar import current_trading_day
@@ -2096,7 +2096,8 @@ def run_flow_to_price_pipeline(
                 lab_rows = compute_lab_features(
                     qualified_enriched,
                     raw_flow_df=load_latest_raw_flow(),
-                    grade_history_df=load_recent_grade_history(days=7),
+                    premium_history_df=load_screener_premium_history(),
+                    as_of=as_of_today,
                     fetch_uw=True,
                 )
                 wrote_lab = persist_feature_lab(lab_rows, as_of=as_of_today)
