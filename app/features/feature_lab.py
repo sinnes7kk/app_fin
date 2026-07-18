@@ -92,6 +92,19 @@ FREE_FEATURE_COLS = (
     "realized_vol_regime",
 )
 
+# Aggressor-signed premium features (Spec 1). Computed from the per-ticker
+# raw_flow slice, which already classifies every print into LONG/SHORT via
+# aggressor side (CALL@ASK / PUT@BID = bullish; PUT@ASK / CALL@BID = bearish;
+# see app/vendors/unusual_whales.py _infer_direction). These distinguish
+# genuine directional aggression from the crude call/put split that feeds
+# bullish_premium_share. Shadow-logged; feed the momentum score once proven.
+AGGRESSOR_FEATURE_COLS = (
+    "aggressor_bull_share",     # LONG premium / (LONG + SHORT) premium, 0..1
+    "aggressor_net_prem_bps",   # signed net bullish aggression / marketcap, bps
+    "ask_side_ratio",           # buyer-initiated premium share (ASK / (ASK+BID))
+    "directional_sweep_share",  # signed sweep pressure / total premium
+)
+
 UW_FEATURE_COLS = (
     "gex_total",
     "vanna_total",
@@ -107,7 +120,21 @@ UW_FEATURE_COLS = (
     "dealer_net_gamma_at_spot",
 )
 
-LAB_COLS = ID_COLS + FREE_FEATURE_COLS + UW_FEATURE_COLS
+# Shadow momentum score (Spec 2): cross-sectional composite of the
+# validated free features + aggressor family. Never affects live grades
+# until it clears the promotion gate; see app/features/momentum_score.py.
+MOMENTUM_COLS = (
+    "momentum_composite",  # mean cross-sectional percentile, 0..1
+    "momentum_score",      # momentum_composite * 100, 0..100
+)
+
+LAB_COLS = (
+    ID_COLS
+    + FREE_FEATURE_COLS
+    + AGGRESSOR_FEATURE_COLS
+    + UW_FEATURE_COLS
+    + MOMENTUM_COLS
+)
 
 
 # --- Free feature helpers ---------------------------------------------
@@ -270,6 +297,81 @@ def _dollar_delta_weighted_flow(rows: pd.DataFrame, direction: str) -> float | N
     direction_sign = 1.0 if str(direction).upper() == "BULLISH" else -1.0
     weighted = (df["premium"] * delta_signed * direction_sign).sum()
     return float(weighted)
+
+
+def _aggressor_signed_features(rows: pd.DataFrame) -> dict[str, float | None]:
+    """Aggressor-signed premium features for a ticker's raw flow rows.
+
+    Uses the per-print ``direction`` (LONG/SHORT from aggressor side) that
+    ``normalize_flow_response`` already derives, plus ``ask_side_premium`` /
+    ``bid_side_premium`` and the ``is_sweep`` / ``is_multileg`` flags.
+
+    All four are direction-neutral in storage (positive = net bullish); the
+    momentum score orients them to the trade's direction downstream.
+
+    - ``aggressor_bull_share``: LONG premium / (LONG + SHORT) premium.
+    - ``aggressor_net_prem_bps``: confidence-weighted (LONG - SHORT) premium
+      / marketcap, in basis points.
+    - ``ask_side_ratio``: buyer-initiated share = ASK / (ASK + BID) premium.
+    - ``directional_sweep_share``: (LONG - SHORT) *sweep* premium / total
+      premium; captures urgency-weighted directional pressure.
+    """
+    empty = {c: None for c in AGGRESSOR_FEATURE_COLS}
+    if rows is None or rows.empty:
+        return empty
+
+    df = rows.copy()
+    prem = pd.to_numeric(df.get("premium"), errors="coerce")
+
+    # --- ask_side_ratio (direction-agnostic buyer urgency) -------------
+    ask = pd.to_numeric(df.get("ask_side_premium"), errors="coerce").fillna(0.0)
+    bid = pd.to_numeric(df.get("bid_side_premium"), errors="coerce").fillna(0.0)
+    ask_bid_total = float(ask.sum() + bid.sum())
+    ask_side_ratio = float(ask.sum() / ask_bid_total) if ask_bid_total > 0 else None
+
+    out = dict(empty)
+    out["ask_side_ratio"] = ask_side_ratio
+
+    if "direction" not in df.columns or prem.isna().all():
+        return out
+
+    df["_prem"] = prem.fillna(0.0)
+    df["_dir"] = df["direction"].astype(str).str.upper().str.strip()
+
+    # Exclude multi-leg prints from directional attribution: a spread's
+    # short leg misattributes direction. ask_side_ratio above keeps them.
+    directional = df
+    if "is_multileg" in df.columns:
+        ml = df["is_multileg"].astype(str).str.lower().isin(["true", "1", "1.0"])
+        directional = df[~ml]
+
+    conf = pd.to_numeric(directional.get("direction_confidence"), errors="coerce").fillna(1.0)
+    long_mask = directional["_dir"] == "LONG"
+    short_mask = directional["_dir"] == "SHORT"
+
+    long_prem = float(directional.loc[long_mask, "_prem"].sum())
+    short_prem = float(directional.loc[short_mask, "_prem"].sum())
+    dir_total = long_prem + short_prem
+    if dir_total > 0:
+        out["aggressor_bull_share"] = long_prem / dir_total
+
+    # Confidence-weighted net, normalized by marketcap (bps).
+    long_w = float((directional.loc[long_mask, "_prem"] * conf[long_mask]).sum())
+    short_w = float((directional.loc[short_mask, "_prem"] * conf[short_mask]).sum())
+    mcap = pd.to_numeric(df.get("marketcap"), errors="coerce").dropna()
+    mcap_val = float(mcap.iloc[0]) if not mcap.empty else 0.0
+    if mcap_val > 0:
+        out["aggressor_net_prem_bps"] = (long_w - short_w) / mcap_val * 1e4
+
+    # Directional sweep pressure.
+    total_prem = float(df["_prem"].sum())
+    if "is_sweep" in directional.columns and total_prem > 0:
+        sw = directional["is_sweep"].astype(str).str.lower().isin(["true", "1", "1.0"])
+        long_sw = float(directional.loc[sw & long_mask, "_prem"].sum())
+        short_sw = float(directional.loc[sw & short_mask, "_prem"].sum())
+        out["directional_sweep_share"] = (long_sw - short_sw) / total_prem
+
+    return out
 
 
 def _sector_relative_pct_lookup(grades: Iterable[dict]) -> dict[str, float]:
@@ -485,6 +587,7 @@ def compute_lab_features(
 
         far_call, far_put = _far_otm_shares(ticker_flow)
         ddw = _dollar_delta_weighted_flow(ticker_flow, direction)
+        aggressor = _aggressor_signed_features(ticker_flow)
 
         row: dict[str, Any] = {
             "as_of": "",
@@ -506,6 +609,7 @@ def compute_lab_features(
                 premium_history_df,
             ),
             "realized_vol_regime": _realized_vol_regime(ohlcv),
+            **{c: aggressor.get(c) for c in AGGRESSOR_FEATURE_COLS},
         }
         # UW columns — populated for top-N only.
         for col in UW_FEATURE_COLS:
@@ -526,6 +630,19 @@ def compute_lab_features(
                     row[col] = _safe_float(uw_data.get(col))
 
         out_rows.append(row)
+
+    # Shadow momentum score: cross-sectional across this day's universe.
+    try:
+        from app.features.momentum_score import compute_day_scores
+        day_scores = compute_day_scores(out_rows)
+        for row, sc in zip(out_rows, day_scores):
+            row["momentum_composite"] = sc.get("momentum_composite")
+            row["momentum_score"] = sc.get("momentum_score")
+    except Exception:
+        for row in out_rows:
+            row.setdefault("momentum_composite", None)
+            row.setdefault("momentum_score", None)
+
     return out_rows
 
 

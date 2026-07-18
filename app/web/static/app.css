@@ -1740,6 +1740,26 @@ dl.detail-grid dd {
   color: var(--good);
   font-weight: 700;
 }
+/* Shadow momentum score + aggressor-signed premium badges. */
+.lab-momentum-hi {
+  background: rgba(88, 166, 255, 0.18);
+  color: #58a6ff;
+  font-weight: 700;
+}
+.lab-momentum-mid {
+  background: rgba(88, 166, 255, 0.10);
+  color: #58a6ff;
+}
+.lab-agg-bull {
+  background: rgba(63, 185, 80, 0.12);
+  color: var(--good);
+  font-weight: 700;
+}
+.lab-agg-bear {
+  background: rgba(248, 81, 73, 0.12);
+  color: var(--bad);
+  font-weight: 700;
+}
 
 /* Multi-day DP summary chart */
 .dp-aggregate-chart {

@@ -1095,6 +1095,15 @@
                 {% if ft.lab.prem_momentum_z3d is not none and ft.lab.prem_momentum_z3d > 1.5 %}
                   <span class="badge badge-lab lab-prem-mom" title="Today's cumulative premium z-score vs the trailing 3 days. >1.5σ = unusually accelerating flow.">Prem-mom {{ "{:+.1f}".format(ft.lab.prem_momentum_z3d) }}σ</span>
                 {% endif %}
+                {% if ft.lab.momentum_score is not none and ft.lab.momentum_score >= 60 %}
+                  {% set _mo_b = "lab-momentum-hi" if ft.lab.momentum_score >= 80 else "lab-momentum-mid" %}
+                  <span class="badge badge-lab {{ _mo_b }}" title="SHADOW cross-sectional momentum score (0-100): this candidate's percentile rank vs the day's universe across the validated flow features (bullish/aggressor premium, sector strength, dollar-delta) minus the fades (far-OTM lottery, high realized vol). Direction-aware. Informational only — not yet feeding live grades; validating out-of-sample.">Momo {{ "{:.0f}".format(ft.lab.momentum_score) }}</span>
+                {% endif %}
+                {% if ft.lab.aggressor_bull_share is not none and (ft.lab.aggressor_bull_share >= 0.70 or ft.lab.aggressor_bull_share <= 0.30) %}
+                  {% set _agg_b = "lab-agg-bull" if ft.lab.aggressor_bull_share >= 0.70 else "lab-agg-bear" %}
+                  {% set _agg_label = "Aggr buy" if ft.lab.aggressor_bull_share >= 0.70 else "Aggr sell" %}
+                  <span class="badge badge-lab {{ _agg_b }}" title="Aggressor-signed premium: share of directional premium initiated on the bullish side (CALL@ask / PUT@bid). ≥70% = buyers lifting offers; ≤30% = sellers hitting bids. Distinguishes genuine aggression from the crude call/put split.">{{ _agg_label }} {{ "{:.0%}".format(ft.lab.aggressor_bull_share) }}</span>
+                {% endif %}
               {% endif %}
             </span>
           </header>

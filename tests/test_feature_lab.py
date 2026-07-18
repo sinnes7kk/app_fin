@@ -268,6 +268,50 @@ def test_compute_lab_features_topn_gates_uw():
     print("  PASS: test_compute_lab_features_topn_gates_uw")
 
 
+def test_aggressor_signed_features_basic():
+    """Aggressor features from a per-ticker raw-flow slice."""
+    rows = pd.DataFrame({
+        "ticker": ["AAA", "AAA", "AAA"],
+        "premium": [1000.0, 400.0, 200.0],
+        "direction": ["LONG", "SHORT", "LONG"],
+        "ask_side_premium": [1000.0, 0.0, 200.0],
+        "bid_side_premium": [0.0, 400.0, 0.0],
+        "is_sweep": [True, False, True],
+        "is_multileg": [False, False, True],   # 3rd row excluded from directional
+        "marketcap": [1e9, 1e9, 1e9],
+        "direction_confidence": [1.0, 0.6, 1.0],
+    })
+    out = fl._aggressor_signed_features(rows)
+    # Directional rows = 1 & 2 (multileg row 3 excluded).
+    # bull_share = 1000 / (1000 + 400)
+    assert abs(out["aggressor_bull_share"] - (1000.0 / 1400.0)) < 1e-9
+    # net = 1000*1.0 - 400*0.6 = 760; /1e9 * 1e4
+    assert abs(out["aggressor_net_prem_bps"] - (760.0 / 1e9 * 1e4)) < 1e-9
+    # ask_side_ratio uses ALL rows: ask=1200, bid=400 -> 0.75
+    assert abs(out["ask_side_ratio"] - 0.75) < 1e-9
+    # directional sweep: long_sw=1000 (row1), short_sw=0; total_prem=1600
+    assert abs(out["directional_sweep_share"] - (1000.0 / 1600.0)) < 1e-9
+    print("  PASS: test_aggressor_signed_features_basic")
+
+
+def test_aggressor_signed_features_empty_and_missing():
+    """Empty rows -> all None; missing direction col -> only ask_side_ratio."""
+    allnone = fl._aggressor_signed_features(pd.DataFrame())
+    assert all(v is None for v in allnone.values())
+
+    # No direction column: only ask_side_ratio computable.
+    rows = pd.DataFrame({
+        "premium": [100.0, 50.0],
+        "ask_side_premium": [80.0, 0.0],
+        "bid_side_premium": [0.0, 50.0],
+    })
+    out = fl._aggressor_signed_features(rows)
+    assert out["aggressor_bull_share"] is None
+    assert out["aggressor_net_prem_bps"] is None
+    assert abs(out["ask_side_ratio"] - (80.0 / 130.0)) < 1e-9
+    print("  PASS: test_aggressor_signed_features_empty_and_missing")
+
+
 def test_prem_momentum_z3d_scores_today_vs_trailing():
     """Today's daily premium is z-scored against the 3 prior days."""
     hist = pd.DataFrame(
@@ -366,6 +410,8 @@ def main():
         ("test_compute_lab_features_full_schema", test_compute_lab_features_full_schema, False),
         ("test_persist_feature_lab_idempotent_on_as_of", test_persist_feature_lab_idempotent_on_as_of, True),
         ("test_compute_lab_features_topn_gates_uw", test_compute_lab_features_topn_gates_uw, False),
+        ("test_aggressor_signed_features_basic", test_aggressor_signed_features_basic, False),
+        ("test_aggressor_signed_features_empty_and_missing", test_aggressor_signed_features_empty_and_missing, False),
         ("test_prem_momentum_z3d_scores_today_vs_trailing", test_prem_momentum_z3d_scores_today_vs_trailing, False),
         ("test_prem_momentum_z3d_requires_three_prior_days", test_prem_momentum_z3d_requires_three_prior_days, False),
         ("test_load_screener_premium_history_builds_daily_series", test_load_screener_premium_history_builds_daily_series, True),

@@ -39,7 +39,9 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from app.features.feature_lab import (  # noqa: E402
+    AGGRESSOR_FEATURE_COLS,
     FREE_FEATURE_COLS,
+    MOMENTUM_COLS,
     UW_FEATURE_COLS,
 )
 
@@ -48,7 +50,12 @@ LAB_PATH = DATA_DIR / "feature_lab.csv"
 REPLAY_PATH = DATA_DIR / "grade_history_with_replay.csv"
 
 DTE_BUCKETS = ("lottery", "swing", "position", "leap", "unknown")
-ALL_FEATURE_COLS = list(FREE_FEATURE_COLS) + list(UW_FEATURE_COLS)
+ALL_FEATURE_COLS = (
+    list(FREE_FEATURE_COLS)
+    + list(AGGRESSOR_FEATURE_COLS)
+    + list(UW_FEATURE_COLS)
+    + list(MOMENTUM_COLS)
+)
 
 
 def _spearman(a: pd.Series, b: pd.Series) -> tuple[float, int]:

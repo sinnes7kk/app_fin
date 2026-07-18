@@ -541,6 +541,10 @@ _LAB_DASHBOARD_COLS = (
     "expiry_concentration_top1",
     "max_pain_dist_pct",
     "dealer_net_gamma_at_spot",
+    # Shadow momentum + aggressor family (informational only; never scored).
+    "momentum_score",
+    "aggressor_bull_share",
+    "aggressor_net_prem_bps",
 )
 
 

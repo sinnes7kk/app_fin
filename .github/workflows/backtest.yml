@@ -65,6 +65,14 @@ jobs:
         if: env.MODE == 'feature_lab' || env.MODE == 'both'
         run: python scripts/feature_lab_report.py
 
+      - name: Run momentum shadow head-to-head
+        if: env.MODE == 'feature_lab' || env.MODE == 'both'
+        run: python scripts/momentum_shadow_report.py
+
+      - name: Run meta-labeling shadow report
+        if: env.MODE == 'feature_lab' || env.MODE == 'both'
+        run: python scripts/meta_label_report.py
+
       - name: Commit backtest artifacts
         run: |
           git config user.name "github-actions[bot]"
@@ -79,7 +87,9 @@ jobs:
             data/conviction_recalibration.json \
             data/diagnostic_replay_*.md \
             data/diagnostic_recalibration_*.md \
-            data/diagnostic_feature_lab_*.md; do
+            data/diagnostic_feature_lab_*.md \
+            data/momentum_shadow_*.md \
+            data/meta_label_shadow_*.md; do
             # Tolerate absent files (e.g. recal-only runs don't refresh
             # diagnostic_replay) — same idiom as hourly_scan.
             for path in $f; do
