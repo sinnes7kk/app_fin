@@ -67,6 +67,22 @@ HISTORY_COLS = [
     # Categorical / tag
     "dominant_dte_bucket",
     "premium_source",
+    # Flow-tracker mode / streak flags. Added 2026-07-21 to close the
+    # "modes/horizons/streaks are never backtested" gap: compute_multi_day_flow
+    # already computes these on every row but they were discarded at persist
+    # time, so grade_history had no way to ask "do Strong survivors actually
+    # outperform Activity?" or "does a longer active-day streak predict higher
+    # R?".  ``flow_horizon`` records which lookback window generated the row
+    # (the enriched persist call uses the default 5d horizon).  These are
+    # blank on all rows written before 2026-07-21, so the replay report only
+    # segments on them where present.
+    "flow_horizon",
+    "passes_strong",
+    "passes_activity",
+    "passes_all",
+    "active_days",
+    "day_persistence",
+    "has_flips",
     # Promotion outcome — filled in later by stamp_promotion_outcomes() once
     # the pipeline knows which graded rows survived price-validation /
     # extension / regime gates and which were rejected. Keeping these as
@@ -91,6 +107,21 @@ def _coerce(value: Any) -> Any:
     return value
 
 
+def _as_bool_str(value: Any) -> str:
+    """Normalize a truthy flow-tracker flag to ``"true"``/``"false"``.
+
+    Kept consistent with ``is_promoted`` so the replay report can parse
+    every boolean column the same way.  ``None`` / missing stays blank so
+    pre-2026-07-21 rows (which never had these columns) remain
+    distinguishable from a genuine ``false``.
+    """
+    if value is None or value == "":
+        return ""
+    if isinstance(value, str):
+        return "true" if value.strip().lower() in ("true", "1", "yes") else "false"
+    return "true" if bool(value) else "false"
+
+
 def _load_rows() -> list[dict[str, Any]]:
     if not GRADE_HISTORY_PATH.exists():
         return []
@@ -109,7 +140,11 @@ def _write_rows(rows: list[dict[str, Any]]) -> None:
         writer.writerows(rows)
 
 
-def persist_grade_history(grades: list[dict[str, Any]], as_of: str) -> int:
+def persist_grade_history(
+    grades: list[dict[str, Any]],
+    as_of: str,
+    horizon: str = "5d",
+) -> int:
     """Append one row per graded ticker from today's scan.
 
     ``grades`` is the output of ``compute_multi_day_flow()``.  Only rows
@@ -117,6 +152,11 @@ def persist_grade_history(grades: list[dict[str, Any]], as_of: str) -> int:
     dilute the attribution signal.  Idempotent on ``(as_of, ticker,
     direction)``: if today's rows are already on disk they are
     replaced (keeps hourly-scan double-writes from doubling samples).
+
+    ``horizon`` records which flow-tracker lookback window produced these
+    rows (stamped into ``flow_horizon``).  Defaults to ``"5d"`` because the
+    enriched persist call in ``pipeline.py`` runs ``compute_multi_day_flow()``
+    with its default horizon (``FLOW_TRACKER_HORIZON_DEFAULT``).
 
     Returns the number of rows written.
     """
@@ -171,6 +211,13 @@ def persist_grade_history(grades: list[dict[str, Any]], as_of: str) -> int:
             "perc_30_day_total_latest": g.get("perc_30_day_total_latest"),
             "dominant_dte_bucket": dte_bucket,
             "premium_source": g.get("premium_source"),
+            "flow_horizon": horizon,
+            "passes_strong": _as_bool_str(g.get("passes_strong")),
+            "passes_activity": _as_bool_str(g.get("passes_activity")),
+            "passes_all": _as_bool_str(g.get("passes_all")),
+            "active_days": g.get("active_days"),
+            "day_persistence": g.get("day_persistence"),
+            "has_flips": _as_bool_str(g.get("has_flips")),
             "is_promoted": "",
             "reject_reason": "",
             "forward_excess_return": "",

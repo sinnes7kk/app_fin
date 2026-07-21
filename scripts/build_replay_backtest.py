@@ -543,6 +543,146 @@ def section_7_recommendations(panel: pd.DataFrame) -> str:
     return "\n".join(out)
 
 
+def _parse_bool_col(panel: pd.DataFrame, col: str) -> "pd.Series | None":
+    """Parse a ``"true"``/``"false"`` flow-tracker flag column to nullable bool.
+
+    Returns None when the column is absent or entirely blank (pre-2026-07-21
+    rows never carried these fields). Blank cells map to ``pd.NA`` so they
+    are dropped from cohorts rather than silently counted as ``False``.
+    """
+    if col not in panel.columns:
+        return None
+    raw = panel[col].astype(str).str.strip().str.lower()
+    mapped = raw.map({"true": True, "false": False, "1": True, "0": False})
+    if mapped.notna().sum() == 0:
+        return None
+    return mapped
+
+
+def section_8_flow_tracker_modes(panel: pd.DataFrame) -> str:
+    """Per-mode / per-streak realized-R breakdown for Flow Tracker.
+
+    Closes the gap where Strong / Activity / All modes and multi-day
+    streaks were computed but never joined to realized outcomes. Only
+    segments on rows that carry the flags (added 2026-07-21), so this
+    section is intentionally thin until forward data accumulates.
+    """
+    out = ["## 8. Flow-tracker mode / streak realized R (forward-only)", ""]
+    out.append(
+        "The Strong ⊂ Activity ⊂ All gates and the multi-day streak fields "
+        "(`active_days`, `day_persistence`) are stamped onto `grade_history` "
+        "since 2026-07-21. Rows written before then have blank flags and are "
+        "excluded here. **The core question:** does tightening the mode gate "
+        "(All → Activity → Strong) actually raise realized R?"
+    )
+    out.append("")
+
+    strong = _parse_bool_col(panel, "passes_strong")
+    activity = _parse_bool_col(panel, "passes_activity")
+    passes_all = _parse_bool_col(panel, "passes_all")
+    has_flags = any(s is not None for s in (strong, activity, passes_all))
+    if not has_flags:
+        out.append(
+            "_No rows carry mode flags yet. This populates automatically once "
+            "the hourly scan writes graded rows with the new schema and their "
+            "5-day forward window closes (≈ 1 week after first collection)._"
+        )
+        return "\n".join(out)
+
+    p = panel.copy()
+    r = p["replay_realized_r"]
+
+    # Mutually-exclusive tiers so the nested gates read cleanly:
+    #   Strong          = passes_strong
+    #   Activity-only   = passes_activity & !passes_strong
+    #   All-only        = passes_all & !passes_activity
+    def _mask_r(mask) -> list[float]:
+        if mask is None:
+            return []
+        return r[mask.fillna(False)].dropna().tolist()
+
+    rows = []
+    if strong is not None:
+        rows.append(["Strong", _summary_signed_r(_mask_r(strong == True))])  # noqa: E712
+    if activity is not None and strong is not None:
+        rows.append(["Activity-only", _summary_signed_r(_mask_r((activity == True) & (strong != True)))])  # noqa: E712
+    elif activity is not None:
+        rows.append(["Activity", _summary_signed_r(_mask_r(activity == True))])  # noqa: E712
+    if passes_all is not None and activity is not None:
+        rows.append(["All-only", _summary_signed_r(_mask_r((passes_all == True) & (activity != True)))])  # noqa: E712
+    elif passes_all is not None:
+        rows.append(["All", _summary_signed_r(_mask_r(passes_all == True))])  # noqa: E712
+
+    table_rows = [
+        [label, s.get("n", 0),
+         f"{s.get('hit_rate', 0):.1%}" if s.get("n") else "—",
+         _fmt_r(s.get("mean_r")) if s.get("n") else "—",
+         _fmt_r(s.get("median_r")) if s.get("n") else "—"]
+        for label, s in rows
+    ]
+    out.append(_table(["Mode tier", "n", "Hit", "Mean R", "Median R"], table_rows))
+    out.append("")
+    out.append(
+        "**Read this as:** if the mode gates add value, `Mean R` should climb "
+        "monotonically from All-only → Activity-only → Strong. If Strong's R is "
+        "no better (or worse) than the looser tiers at comparable `n`, the "
+        "Strong gate is costing signal without improving quality."
+    )
+    out.append("")
+
+    # Active-day streak cohorts.
+    if "active_days" in p.columns:
+        ad = pd.to_numeric(p["active_days"], errors="coerce")
+        if ad.notna().sum() > 0:
+            def _ad_bucket(v: float) -> str:
+                if v <= 2:
+                    return "2 days"
+                if v == 3:
+                    return "3 days"
+                if v == 4:
+                    return "4 days"
+                return "5+ days"
+            p["_ad_bucket"] = ad.map(lambda v: _ad_bucket(v) if pd.notna(v) else None)
+            srows = []
+            for b in ("2 days", "3 days", "4 days", "5+ days"):
+                sub = p[p["_ad_bucket"] == b]
+                s = _summary_signed_r(sub["replay_realized_r"].dropna().tolist())
+                if s.get("n"):
+                    srows.append([b, s["n"], f"{s['hit_rate']:.1%}", _fmt_r(s["mean_r"])])
+            if srows:
+                out.append("**Active-day streak vs realized R** "
+                           "(does a longer directional streak predict a better trade?):")
+                out.append("")
+                out.append(_table(["Streak", "n", "Hit", "Mean R"], srows))
+                out.append("")
+
+    # Day-persistence cohorts (fraction of window days leaning the trade way).
+    if "day_persistence" in p.columns:
+        dp = pd.to_numeric(p["day_persistence"], errors="coerce")
+        if dp.notna().sum() > 0:
+            def _dp_bucket(v: float) -> str:
+                if v >= 1.0:
+                    return "1.0 (pure)"
+                if v >= 0.75:
+                    return "0.75–0.99"
+                if v >= 0.5:
+                    return "0.50–0.74"
+                return "< 0.50"
+            p["_dp_bucket"] = dp.map(lambda v: _dp_bucket(v) if pd.notna(v) else None)
+            drows = []
+            for b in ("1.0 (pure)", "0.75–0.99", "0.50–0.74", "< 0.50"):
+                sub = p[p["_dp_bucket"] == b]
+                s = _summary_signed_r(sub["replay_realized_r"].dropna().tolist())
+                if s.get("n"):
+                    drows.append([b, s["n"], f"{s['hit_rate']:.1%}", _fmt_r(s["mean_r"])])
+            if drows:
+                out.append("**Day-persistence vs realized R** "
+                           "(higher = more of the window's days leaned the trade's way):")
+                out.append("")
+                out.append(_table(["Persistence", "n", "Hit", "Mean R"], drows))
+    return "\n".join(out)
+
+
 def write_report(panel: pd.DataFrame, out_path: Path) -> None:
     today = datetime.now().strftime("%Y-%m-%d %H:%M")
     n_replayed = len(panel[panel["replay_realized_r"].notna()])
@@ -554,6 +694,7 @@ def write_report(panel: pd.DataFrame, out_path: Path) -> None:
         section_5_time_to_mfe(panel),
         section_6_path_metrics(panel),
         section_7_recommendations(panel),
+        section_8_flow_tracker_modes(panel),
     ]
     header = [
         f"# Faithful Replay Backtest — {today}",

@@ -224,6 +224,50 @@ def test_attribution_recovers_known_correlations():
     )
 
 
+def test_persist_stamps_flow_tracker_mode_and_streak_fields():
+    """Mode/horizon/streak flags from compute_multi_day_flow are persisted."""
+    from app.analytics import grade_history as gh
+
+    tmp_path = Path(tempfile.mkdtemp()) / "grade_history.csv"
+    with patch.object(gh, "GRADE_HISTORY_PATH", tmp_path):
+        row = _grade_row("NVDA", 8.5)
+        row.update({
+            "passes_strong": True,
+            "passes_activity": True,
+            "passes_all": True,
+            "active_days": 4,
+            "day_persistence": 1.0,
+            "has_flips": False,
+        })
+        gh.persist_grade_history([row], as_of="2025-02-01", horizon="5d")
+        rows = gh.load_history()
+
+    assert "flow_horizon" in gh.HISTORY_COLS
+    assert {"passes_strong", "passes_activity", "passes_all",
+            "active_days", "day_persistence", "has_flips"} <= set(gh.HISTORY_COLS)
+    r = rows[0]
+    assert r["flow_horizon"] == "5d"
+    assert r["passes_strong"] == "true"
+    assert r["has_flips"] == "false"
+    assert str(r["active_days"]) == "4"
+    assert float(r["day_persistence"]) == 1.0
+
+
+def test_persist_leaves_mode_flags_blank_when_absent():
+    """A grade row without the new keys writes blanks (not the string 'None')."""
+    from app.analytics import grade_history as gh
+
+    tmp_path = Path(tempfile.mkdtemp()) / "grade_history.csv"
+    with patch.object(gh, "GRADE_HISTORY_PATH", tmp_path):
+        gh.persist_grade_history([_grade_row("AAPL", 8.0)], as_of="2025-02-02")
+        rows = gh.load_history()
+
+    r = rows[0]
+    assert r["passes_strong"] == ""
+    assert r["has_flips"] == ""
+    assert r["active_days"] == ""
+
+
 def test_attribution_reports_insufficient_history_below_threshold():
     from app.analytics import grade_attribution as ga
     from app.analytics import grade_history as gh
@@ -249,6 +293,8 @@ if __name__ == "__main__":
     tests = [
         test_persist_grade_history_is_idempotent_for_same_day,
         test_persist_grade_history_appends_across_days,
+        test_persist_stamps_flow_tracker_mode_and_streak_fields,
+        test_persist_leaves_mode_flags_blank_when_absent,
         test_attach_forward_returns_fills_matured_rows,
         test_attribution_recovers_known_correlations,
         test_attribution_reports_insufficient_history_below_threshold,
