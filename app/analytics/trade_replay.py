@@ -78,6 +78,8 @@ def _empty_result(reason: str = "no_data") -> dict[str, Any]:
     return {
         "exit_reason": "no_exit_yet",
         "reason_detail": reason,
+        "is_matured": False,
+        "max_hold_days_used": None,
         "entry_price": None,
         "stop_price": None,
         "target_1": None,
@@ -410,6 +412,15 @@ def replay_trade_plan(
         exit_price = float(df.iloc[exit_idx_actual]["close"])
         days_held = exit_idx_actual - entry_idx
 
+    # Maturity: a trade is "matured" if a real exit fired, OR it held the full
+    # max-hold horizon without one (a legitimate held-to-horizon outcome). It
+    # is NOT matured when the OHLCV simply ran out before max_hold — those rows
+    # carry a truncated mark-to-market R (often 0-3 days held) that pollutes any
+    # feature study if mixed with completed trades. Downstream sweeps/attribution
+    # filter on this flag so recent, still-open signals don't bias the target.
+    real_exit = exit_reason in ("T2", "T1_then_stop", "stop", "time_stop")
+    is_matured = bool(real_exit or (exit_reason == "no_exit_yet" and days_held >= max_hold_days))
+
     # Realized R
     if is_long:
         full_pnl = (exit_price - entry_price) / risk_per_share
@@ -457,6 +468,8 @@ def replay_trade_plan(
         "atr_at_entry": round(atr_at_entry, 4),
         "exit_reason": exit_reason,
         "reason_detail": reason_detail,
+        "is_matured": is_matured,
+        "max_hold_days_used": int(max_hold_days),
         "exit_price": round(exit_price, 4) if exit_price is not None else None,
         "exit_date": df.index[exit_idx_actual].strftime("%Y-%m-%d"),
         "days_held": int(days_held),

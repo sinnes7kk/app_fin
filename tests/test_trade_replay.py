@@ -209,6 +209,50 @@ def test_partial_pnl_blends_correctly():
     print("  PASS: test_partial_pnl_blends_correctly")
 
 
+def test_real_exit_is_matured():
+    # A trade that hits a real exit (T2 / stop / T1_then_stop) is matured.
+    closes = _ramp_up_setup() + [101.5, 103.0, 104.5, 106.0, 108.0]
+    df = _make_ohlcv(closes)
+    spy = _flat_spy(len(closes))
+    as_of = df.index[19].strftime("%Y-%m-%d")
+    res = replay_trade_plan("TEST", as_of, "BULLISH", df, spy)
+    assert res["exit_reason"] in ("T2", "T1_then_stop", "stop")
+    assert res["is_matured"] is True, f"real exit should be matured, got {res['is_matured']}"
+    print("  PASS: test_real_exit_is_matured")
+
+
+def test_ran_out_of_bars_is_not_matured():
+    # Only 1 bar after the entry bar -> engine can't run exits -> no_exit_yet,
+    # days_held < max_hold -> NOT matured (truncated mark-to-market).
+    closes = _ramp_up_setup() + [100.0]
+    df = _make_ohlcv(closes)
+    spy = _flat_spy(len(closes))
+    as_of = df.index[19].strftime("%Y-%m-%d")
+    res = replay_trade_plan("TEST", as_of, "BULLISH", df, spy, max_hold_days=20)
+    assert res["exit_reason"] == "no_exit_yet"
+    assert res["is_matured"] is False, f"truncated row must not be matured, got {res['is_matured']}"
+    print("  PASS: test_ran_out_of_bars_is_not_matured")
+
+
+def test_held_full_horizon_is_matured():
+    # Flat series, enough bars to reach max_hold without a real exit firing.
+    # Held-to-horizon (days_held >= max_hold) counts as matured.
+    closes = [100.0] * 40
+    df = _make_ohlcv(closes)
+    spy = _flat_spy(len(closes))
+    as_of = df.index[10].strftime("%Y-%m-%d")
+    res = replay_trade_plan(
+        "TEST", as_of, "BULLISH", df, spy,
+        max_hold_days=5, time_stop_min_r=1.0,
+    )
+    # In perfectly flat data either time_stop fires (real exit) or it holds the
+    # full horizon as no_exit_yet; both are matured.
+    if res["exit_reason"] == "no_exit_yet":
+        assert res["days_held"] >= 5
+    assert res["is_matured"] is True, f"held-to-horizon should be matured, got {res}"
+    print("  PASS: test_held_full_horizon_is_matured")
+
+
 def main():
     tests = [
         test_long_hits_t2,
@@ -222,6 +266,9 @@ def main():
         test_empty_ohlcv_returns_no_exit_cleanly,
         test_hit_at_r_levels,
         test_partial_pnl_blends_correctly,
+        test_real_exit_is_matured,
+        test_ran_out_of_bars_is_not_matured,
+        test_held_full_horizon_is_matured,
     ]
     failures = 0
     for t in tests:

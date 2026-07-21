@@ -174,6 +174,40 @@ def _tercile_spread(df: pd.DataFrame, feat: str) -> tuple[float, int]:
     return float(top.mean() - bot.mean()), len(sub)
 
 
+_REAL_EXITS = ("T2", "T1_then_stop", "stop", "time_stop")
+
+
+def _matured_mask(df: pd.DataFrame) -> pd.Series:
+    """Boolean mask of matured (completed / held-to-horizon) replay rows.
+
+    Prefers the explicit ``replay_is_matured`` flag stamped by the replay
+    engine. Falls back (for CSVs written before that flag existed) to
+    deriving maturity from ``replay_exit_reason`` — a real exit fired, or a
+    ``no_exit_yet`` row that nonetheless held the full ``max_hold`` horizon —
+    while dropping ``days_held == 0`` degenerate marks.
+    """
+    if "replay_is_matured" in df.columns:
+        raw = df["replay_is_matured"].astype(str).str.strip().str.lower()
+        m = raw.map({"true": True, "false": False, "1": True, "0": False})
+        if m.notna().any():
+            return m.fillna(False).astype(bool)
+
+    exit_reason = df.get("replay_exit_reason")
+    if exit_reason is None:
+        return pd.Series(True, index=df.index)  # nothing to filter on
+    er = exit_reason.astype(str).str.strip()
+    real_exit = er.isin(_REAL_EXITS)
+    days_held = pd.to_numeric(df.get("replay_days_held"), errors="coerce").fillna(0)
+    if "replay_max_hold_days_used" in df.columns:
+        max_hold = pd.to_numeric(df["replay_max_hold_days_used"], errors="coerce").fillna(1e9)
+    else:
+        # Column absent (pre-flag CSV): can't confirm held-to-horizon, so no
+        # no_exit_yet row qualifies — only real exits count as matured.
+        max_hold = pd.Series(1e9, index=df.index)
+    held_to_horizon = (er == "no_exit_yet") & (days_held >= max_hold)
+    return (real_exit | held_to_horizon) & (days_held > 0)
+
+
 def build_panel() -> pd.DataFrame:
     rep = pd.read_csv(REPLAY_PATH)
     lab = pd.read_csv(LAB_PATH)
@@ -189,6 +223,18 @@ def build_panel() -> pd.DataFrame:
         on=["__t", "__d", "__a"], how="left",
     )
     merged = merged[pd.to_numeric(merged[TARGET], errors="coerce").notna()].copy()
+
+    # Matured-only: exclude trades whose OHLCV ran out before an exit fired.
+    # Those "no_exit_yet" rows carry a truncated mark-to-market R (typically
+    # 0-3 days held) and, being the most recent signals, would otherwise
+    # dominate the time-based OOS window and bias every feature verdict.
+    before = len(merged)
+    mask = _matured_mask(merged)
+    merged = merged[mask].copy()
+    dropped = before - len(merged)
+    if dropped:
+        print(f"  [feature_sweep] matured filter: kept {len(merged)}, dropped {dropped} immature rows")
+
     merged["__dt"] = pd.to_datetime(merged["as_of"], errors="coerce")
     return merged
 

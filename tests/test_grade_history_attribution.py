@@ -238,14 +238,15 @@ def test_attribution_prefers_replay_realized_r_source():
     tmp_attr = tmp_dir / "grade_attribution.json"
 
     # sweep_share monotonically increasing with realized R -> strong +rho.
+    # Rows are flagged matured so the new maturity filter keeps them.
     n = 20
     header = ["as_of", "ticker", "direction", "sweep_share",
-              "conviction_score", "replay_realized_r"]
+              "conviction_score", "replay_realized_r", "replay_is_matured"]
     lines = [",".join(header)]
     for i in range(n):
         lines.append(
             f"2026-06-{i+1:02d},T{i:02d},BULLISH,{(i+1)/20:.3f},"
-            f"{float(i+1)},{(i+1)/10:.3f}"
+            f"{float(i+1)},{(i+1)/10:.3f},true"
         )
     tmp_replay.write_text("\n".join(lines) + "\n")
 
@@ -257,6 +258,34 @@ def test_attribution_prefers_replay_realized_r_source():
     assert report.get("target") == "replay_realized_r", report.get("target")
     rho = report["numeric"].get("sweep_share", {}).get("rho")
     assert rho is not None and rho > 0.9, f"expected strong +rho, got {rho}"
+
+
+def test_attribution_drops_immature_replay_rows():
+    """no_exit_yet rows that ran out of bars (days_held < max_hold) are excluded
+    so their truncated mark-to-market R can't bias attribution."""
+    from app.analytics import grade_attribution as ga
+
+    tmp_dir = Path(tempfile.mkdtemp())
+    tmp_replay = tmp_dir / "grade_history_with_replay.csv"
+    tmp_attr = tmp_dir / "grade_attribution.json"
+
+    header = ["as_of", "ticker", "direction", "sweep_share", "conviction_score",
+              "replay_realized_r", "replay_exit_reason", "replay_days_held",
+              "replay_max_hold_days_used"]
+    lines = [",".join(header)]
+    # 12 matured (real exit) + 12 immature (no_exit_yet, 1 day held) rows.
+    for i in range(12):
+        lines.append(f"2026-06-{i+1:02d},M{i:02d},BULLISH,{(i+1)/20:.3f},"
+                     f"{float(i+1)},{(i+1)/10:.3f},stop,5,20")
+    for i in range(12):
+        lines.append(f"2026-06-{i+1:02d},I{i:02d},BULLISH,0.5,"
+                     f"5.0,0.05,no_exit_yet,1,20")
+    tmp_replay.write_text("\n".join(lines) + "\n")
+
+    with patch.object(ga, "REPLAY_PATH", tmp_replay):
+        rows = ga._load_replay_rows()
+    assert len(rows) == 12, f"expected only 12 matured rows, got {len(rows)}"
+    assert all(str(r["ticker"]).startswith("M") for r in rows)
 
 
 def test_persist_stamps_flow_tracker_mode_and_streak_fields():
@@ -335,6 +364,7 @@ if __name__ == "__main__":
         test_attach_forward_returns_fills_matured_rows,
         test_attribution_recovers_known_correlations,
         test_attribution_prefers_replay_realized_r_source,
+        test_attribution_drops_immature_replay_rows,
         test_attribution_reports_insufficient_history_below_threshold,
     ]
     failures = 0

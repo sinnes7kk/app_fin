@@ -227,8 +227,39 @@ def _attrib_categorical(
     return {"levels": levels, "n": sum(lv["n"] for lv in levels.values())}
 
 
+_REAL_EXITS = ("T2", "T1_then_stop", "stop", "time_stop")
+
+
+def _row_is_matured(r: dict[str, Any]) -> bool:
+    """Matured = a real exit fired, or held the full max-hold horizon.
+
+    Excludes ``no_exit_yet`` rows whose OHLCV ran out early (truncated
+    mark-to-market R, usually 0-3 days held) so they can't bias attribution.
+    Prefers the explicit ``replay_is_matured`` flag, falls back to deriving
+    it from exit reason + days_held for pre-flag CSVs.
+    """
+    flag = str(r.get("replay_is_matured") or "").strip().lower()
+    if flag in ("true", "1"):
+        return True
+    if flag in ("false", "0"):
+        return False
+    exit_reason = str(r.get("replay_exit_reason") or "").strip()
+    days_held = _to_float(r.get("replay_days_held")) or 0.0
+    if days_held <= 0:
+        return False
+    if exit_reason in _REAL_EXITS:
+        return True
+    max_hold = _to_float(r.get("replay_max_hold_days_used"))
+    return exit_reason == "no_exit_yet" and max_hold is not None and days_held >= max_hold
+
+
 def _load_replay_rows() -> list[dict[str, Any]]:
-    """Rows from the bar-by-bar replay panel that carry a realized R."""
+    """Matured replay-panel rows that carry a realized R.
+
+    Immature ``no_exit_yet`` rows (OHLCV ran out before an exit) are dropped
+    — their truncated R would otherwise pollute the correlation, and because
+    they are the most recent signals they would dominate any recent window.
+    """
     if not REPLAY_PATH.exists():
         return []
     try:
@@ -238,7 +269,10 @@ def _load_replay_rows() -> list[dict[str, Any]]:
             rows = list(csv.DictReader(f))
     except Exception:
         return []
-    return [r for r in rows if _to_float(r.get("replay_realized_r")) is not None]
+    return [
+        r for r in rows
+        if _to_float(r.get("replay_realized_r")) is not None and _row_is_matured(r)
+    ]
 
 
 def refresh_attribution(
