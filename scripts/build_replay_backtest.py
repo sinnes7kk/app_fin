@@ -224,6 +224,14 @@ def replay_panel(panel: pd.DataFrame, max_rows: int | None = None) -> pd.DataFra
 
 def section_1_replay_summary(panel: pd.DataFrame) -> str:
     out = ["## 1. Replay summary by exit_reason", ""]
+    out.append(
+        "_Fills are **conservative** (2026-07-21): on a bar spanning both the "
+        "stop and a target the stop is credited first (`intrabar_priority="
+        "\"stop_first\"`), and stops that gap through fill at the worse open "
+        "(`gap_fill`). Realized R is therefore a lower bound, not the optimistic "
+        "target-first estimate used previously._"
+    )
+    out.append("")
     counts = Counter(panel["replay_exit_reason"].fillna("error").tolist())
     rows = []
     n_total = sum(counts.values())

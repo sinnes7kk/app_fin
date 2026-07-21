@@ -177,6 +177,8 @@ def replay_trade_plan(
     trail_atr_mult: float | None = None,
     post_t1_trail_atr_mult: float = DEFAULT_POST_T1_TRAIL_ATR_MULT,
     partial_pct: float = DEFAULT_PARTIAL_PCT,
+    intrabar_priority: str = "stop_first",
+    gap_fill: bool = True,
 ) -> dict[str, Any]:
     """Replay a trade plan from the OHLCV bar at ``as_of`` forward.
 
@@ -188,6 +190,14 @@ def replay_trade_plan(
         df_ohlcv: DataFrame with at least ``open / high / low / close``
             columns and a DatetimeIndex (or a ``date`` column).
         spy_ohlcv: Optional same-shape SPY frame for excess-return calc.
+        intrabar_priority: How to resolve a daily bar whose range spans BOTH
+            the stop and a profit target (the intrabar path is unknown from
+            OHLC). ``"stop_first"`` (default) assumes the adverse fill happened
+            first — a conservative lower bound on realized R. ``"target_first"``
+            reproduces the legacy optimistic behaviour (target credited first).
+        gap_fill: When True (default), a stop that gaps through (bar opens
+            beyond the stop) fills at the worse open price rather than exactly
+            at the stop level, modelling real gap slippage.
 
     Returns:
         Dict with plan, exit, MFE/MAE, hit-at-R, multi-horizon return
@@ -302,6 +312,7 @@ def replay_trade_plan(
         high = float(bar["high"])
         low = float(bar["low"])
         close = float(bar["close"])
+        bar_open = float(bar["open"])
 
         if is_long:
             best_price = max(best_price, high)
@@ -328,33 +339,51 @@ def replay_trade_plan(
         if offset <= 10 and bar_excursion_high >= 3.0:
             hit_flags["hit_3r_within_10d"] = True
 
-        # ----- Order matches positions.py _check_exits -----
+        def _stop_exit_price(level: float) -> float:
+            """Fill price for a stop. With ``gap_fill`` a bar that opens beyond
+            the stop fills at the (worse) open, modelling gap slippage."""
+            if not gap_fill:
+                return level
+            return min(bar_open, level) if is_long else max(bar_open, level)
 
-        # 1. T2 hit -> full close at target
-        if is_long and high >= target_2:
-            exit_reason = "T2"
-            exit_price = target_2
+        # Level snapshots at the *start* of this bar (the stop as trailed by the
+        # prior bar; targets are fixed). Used to detect a bar that spans both.
+        stop_hit = (is_long and low <= active_stop) or (not is_long and high >= active_stop)
+        t2_hit = (is_long and high >= target_2) or (not is_long and low <= target_2)
+        t1_hit = (not partial_filled) and (
+            (is_long and high >= target_1) or (not is_long and low <= target_1)
+        )
+
+        # ----- Conservative intrabar ordering -------------------------------
+        # A single daily bar can straddle both the stop and a target; the true
+        # path is unknowable from OHLC. ``stop_first`` credits the adverse fill
+        # first (lower bound). ``target_first`` reproduces the legacy optimistic
+        # order (T2 -> T1 -> trail -> stop). Non-ambiguous bars behave the same
+        # either way.
+        if intrabar_priority == "stop_first" and stop_hit:
+            exit_reason = "stop" if not partial_filled else "T1_then_stop"
+            exit_price = _stop_exit_price(active_stop)
             exit_idx_actual = bar_idx
             break
-        if not is_long and low <= target_2:
+
+        # 1. T2 hit -> full close at target
+        if t2_hit:
             exit_reason = "T2"
             exit_price = target_2
             exit_idx_actual = bar_idx
             break
 
         # 2. T1 partial (intraday) — fills before stop check on same bar
-        if not partial_filled:
-            t1_hit = (is_long and high >= target_1) or (not is_long and low <= target_1)
-            if t1_hit:
-                partial_filled = True
-                partial_pnl_pct = partial_pct
-                # After partial, tighten trail to T1 ± post_t1_trail_atr*ATR
-                if is_long:
-                    new_trail = target_1 - post_t1_trail_atr_mult * atr_at_entry
-                    initial_stop = max(initial_stop, new_trail)
-                else:
-                    new_trail = target_1 + post_t1_trail_atr_mult * atr_at_entry
-                    initial_stop = min(initial_stop, new_trail)
+        if t1_hit:
+            partial_filled = True
+            partial_pnl_pct = partial_pct
+            # After partial, tighten trail to T1 ± post_t1_trail_atr*ATR
+            if is_long:
+                new_trail = target_1 - post_t1_trail_atr_mult * atr_at_entry
+                initial_stop = max(initial_stop, new_trail)
+            else:
+                new_trail = target_1 + post_t1_trail_atr_mult * atr_at_entry
+                initial_stop = min(initial_stop, new_trail)
 
         # 3. Update active stop using ATR / EMA / hybrid trail
         # EMA trail only counts when it is on the *favorable* side of entry
@@ -387,15 +416,22 @@ def replay_trade_plan(
                 trail_hybrid = best_price + 2.0 * atr_at_entry
             active_stop = min(initial_stop, trail_atr, trail_ema, trail_hybrid)
 
-        # 4. Stop hit
-        if is_long and low <= active_stop:
-            exit_reason = "stop" if not partial_filled else "T1_then_stop"
-            exit_price = active_stop
-            exit_idx_actual = bar_idx
-            break
-        if not is_long and high >= active_stop:
-            exit_reason = "stop" if not partial_filled else "T1_then_stop"
-            exit_price = active_stop
+        # 4. Stop hit.
+        #    target_first: check against the freshly-updated trail (legacy).
+        #    stop_first: the entering-stop case was handled above; here we only
+        #    catch a post-T1 trail that tightened onto this same bar so a
+        #    partial that immediately reverses still closes.
+        if intrabar_priority != "stop_first":
+            if (is_long and low <= active_stop) or (not is_long and high >= active_stop):
+                exit_reason = "stop" if not partial_filled else "T1_then_stop"
+                exit_price = _stop_exit_price(active_stop)
+                exit_idx_actual = bar_idx
+                break
+        elif partial_filled and (
+            (is_long and low <= active_stop) or (not is_long and high >= active_stop)
+        ):
+            exit_reason = "T1_then_stop"
+            exit_price = _stop_exit_price(active_stop)
             exit_idx_actual = bar_idx
             break
 

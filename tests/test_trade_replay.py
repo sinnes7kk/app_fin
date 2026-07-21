@@ -209,6 +209,60 @@ def test_partial_pnl_blends_correctly():
     print("  PASS: test_partial_pnl_blends_correctly")
 
 
+def _make_controlled(special_bars: list[dict], start: str = "2026-01-01") -> pd.DataFrame:
+    """20 warmup bars with TR=2 (ATR->2), an entry bar, then explicit bars.
+
+    Warmup close=100/high=101/low=99 gives a clean ATR of 2.0 so the plan is
+    stop=98, T1=103, T2=106 for a long entered at open=100.
+    """
+    rows = [{"open": 100, "high": 101, "low": 99, "close": 100, "volume": 1e6} for _ in range(20)]
+    rows.append({"open": 100, "high": 101, "low": 99, "close": 100, "volume": 1e6})  # entry bar
+    rows.extend(special_bars)
+    idx = pd.date_range(start=start, periods=len(rows), freq="B")
+    return pd.DataFrame(rows, index=idx)
+
+
+def test_intrabar_priority_flips_outside_bar():
+    # An outside bar that spans BOTH the stop (98) and T2 (106).
+    outside = [{"open": 100, "high": 107, "low": 97, "close": 100, "volume": 1e6}]
+    df = _make_controlled(outside)
+    as_of = df.index[19].strftime("%Y-%m-%d")
+    # target_first (legacy, optimistic): credits T2 -> +3R.
+    r_opt = replay_trade_plan("T", as_of, "BULLISH", df, intrabar_priority="target_first")
+    assert r_opt["exit_reason"] == "T2", r_opt["exit_reason"]
+    assert r_opt["realized_r"] > 2.5, r_opt["realized_r"]
+    # stop_first (conservative): credits the stop -> ~-1R.
+    r_con = replay_trade_plan("T", as_of, "BULLISH", df, intrabar_priority="stop_first")
+    assert r_con["exit_reason"] == "stop", r_con["exit_reason"]
+    assert r_con["realized_r"] < 0, r_con["realized_r"]
+    print("  PASS: test_intrabar_priority_flips_outside_bar")
+
+
+def test_gap_fill_worsens_stop_price():
+    # Bar gaps down: opens at 95 (below the 98 stop), low 94.
+    gap = [{"open": 95, "high": 96, "low": 94, "close": 95, "volume": 1e6}]
+    df = _make_controlled(gap)
+    as_of = df.index[19].strftime("%Y-%m-%d")
+    r_gap = replay_trade_plan("T", as_of, "BULLISH", df, gap_fill=True)
+    r_nogap = replay_trade_plan("T", as_of, "BULLISH", df, gap_fill=False)
+    assert r_gap["exit_reason"] == "stop"
+    assert r_nogap["exit_reason"] == "stop"
+    # Gap fill executes at the (worse) 95 open, not the 98 stop level.
+    assert r_gap["exit_price"] < r_nogap["exit_price"], (r_gap["exit_price"], r_nogap["exit_price"])
+    assert r_gap["realized_r"] < r_nogap["realized_r"]
+    print("  PASS: test_gap_fill_worsens_stop_price")
+
+
+def test_default_mode_is_conservative_stop_first():
+    # No explicit args -> stop_first + gap_fill on the outside bar -> stop.
+    outside = [{"open": 100, "high": 107, "low": 97, "close": 100, "volume": 1e6}]
+    df = _make_controlled(outside)
+    as_of = df.index[19].strftime("%Y-%m-%d")
+    r = replay_trade_plan("T", as_of, "BULLISH", df)
+    assert r["exit_reason"] == "stop", r["exit_reason"]
+    print("  PASS: test_default_mode_is_conservative_stop_first")
+
+
 def test_real_exit_is_matured():
     # A trade that hits a real exit (T2 / stop / T1_then_stop) is matured.
     closes = _ramp_up_setup() + [101.5, 103.0, 104.5, 106.0, 108.0]
@@ -266,6 +320,9 @@ def main():
         test_empty_ohlcv_returns_no_exit_cleanly,
         test_hit_at_r_levels,
         test_partial_pnl_blends_correctly,
+        test_intrabar_priority_flips_outside_bar,
+        test_gap_fill_worsens_stop_price,
+        test_default_mode_is_conservative_stop_first,
         test_real_exit_is_matured,
         test_ran_out_of_bars_is_not_matured,
         test_held_full_horizon_is_matured,
