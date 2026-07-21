@@ -34,8 +34,8 @@
 {% macro _delta_chip(row) %}
   {# Premium-weighted average |Δ| chip. Source badge: UW (green), proxy (amber),
      or mixed when the row has both. Hidden when no delta enrichment ran. #}
-  {% set ad = row.avg_delta %}
-  {% set sm = row.delta_source_mix %}
+  {% set ad = row.get('avg_delta') %}
+  {% set sm = row.get('delta_source_mix') %}
   {% if ad is not none and ad > 0 %}
     {% if sm is none %}
       {% set cls = 'tc-delta-chip-mixed' %}{% set src = '' %}
@@ -149,7 +149,7 @@
 
 {% macro _earn_badge(row) %}
   {% set e = row.earnings or {} %}
-  {% set d = e.days_until_earnings %}
+  {% set d = e.get('days_until_earnings') if e else none %}
   {% if d is not none %}
     {% if d <= 5 %}<span class="tc-catalyst tc-catalyst-hot" title="Earnings on {{ e.next_earnings_date }}">ER in {{ d }}d</span>
     {% elif d <= 10 %}<span class="tc-catalyst tc-catalyst-warm" title="Earnings on {{ e.next_earnings_date }}">ER in {{ d }}d</span>
@@ -194,8 +194,8 @@
          spot.  Shown only when one strike carries ≥25% of near-spot
          gamma, i.e. when it can act as a magnet.  Matters most for
          weekly expiries and sizing targets near the pin. #}
-  {% set bias = row.dealer_hedge_bias %}
-  {% set pin = row.pin_risk_strike %}
+  {% set bias = row.get('dealer_hedge_bias') %}
+  {% set pin = row.get('pin_risk_strike') %}
   {% if bias and bias != 'neutral' %}
     {% set cls = 'tc-dealer-suppress' if bias == 'suppress' else 'tc-dealer-chase' %}
     {% set tip = row.dealer_hedge_label or ('Dealers ' ~ bias) %}
@@ -204,8 +204,8 @@
     </span>
   {% endif %}
   {% if pin is not none %}
-    {% set dist = row.pin_risk_distance_pct %}
-    {% set conc = row.pin_risk_concentration %}
+    {% set dist = row.get('pin_risk_distance_pct') %}
+    {% set conc = row.get('pin_risk_concentration') %}
     {% set _dist_txt = ('%+.1f'|format(dist)) ~ '%' if dist is not none else '' %}
     {% set _conc_txt = (conc * 100)|round|int ~ '%' if conc is not none else '' %}
     <span class="tc-pin" title="Pin-risk strike: {{ pin }}{% if dist is not none %} ({{ _dist_txt }} from spot){% endif %}{% if conc is not none %} carrying {{ _conc_txt }} of near-spot gamma — price often magnetises here into expiry{% endif %}.">
@@ -257,15 +257,15 @@
    ========================================================================= #}
 {% macro trader_card(row, grade=None) %}
 {% set dir_cls = 'tc-long' if row.direction == 'LONG' else 'tc-short' %}
-{% set eff_grade = grade or row.conviction_grade %}
-{% set eff_score = row.conviction_score if row.conviction_score is not none else (row.final_score or 0) %}
+{% set eff_grade = grade or row.get('conviction_grade') %}
+{% set eff_score = row.conviction_score if row.get('conviction_score') is not none else (row.get('final_score') or 0) %}
 <article class="trader-card {{ dir_cls }}" data-ticker="{{ row.ticker }}">
   <header class="tc-head">
     <div class="tc-title">
       <span class="tc-ticker">{{ row.ticker }}</span>
       <span class="tc-dir {{ dir_cls }}">{{ row.direction or '—' }}</span>
       {% if eff_grade %}{{ _grade_badge(eff_grade, eff_score) }}{% endif %}
-      {% if row.final_score is not none and not row.conviction_grade %}
+      {% if row.get('final_score') is not none and not row.get('conviction_grade') %}
         <span class="tc-grade tc-grade-c" title="Final conviction 0-10">{{ "%.1f"|format(row.final_score) }}</span>
       {% endif %}
       {{ _ztier_chip(row) }}
@@ -310,21 +310,22 @@
 
   <div class="tc-row tc-row-context">
     {{ _expression_badge(row.trade_expression or {}) }}
-    {% if row.iv_rank is not none %}
+    {% set ivr = row.get('iv_rank') %}
+    {% if ivr is not none %}
       {# Wave 2 — append rolling 5d IV-rank delta when we have ≥2 samples.
          Positive = options getting richer, negative = cheaper. #}
-      {% set ivd = row.iv_rank_5d_delta %}
+      {% set ivd = row.get('iv_rank_5d_delta') %}
       {% set _ivd_abs = (ivd if ivd is not none and ivd >= 0 else (-ivd if ivd is not none else 0)) %}
       {% if ivd is not none and _ivd_abs >= 3.0 %}
         {% set ivd_cls = 'tc-iv-delta-up' if ivd > 0 else 'tc-iv-delta-dn' %}
         {% set ivd_sym = '▲' if ivd > 0 else '▼' %}
-        {% set ivd_tip = 'IV rank ' ~ ('+' if ivd > 0 else '') ~ ('%.1f'|format(ivd)) ~ ' pts over last 5d (' ~ (row.iv_rank_5d_samples or 0) ~ ' samples). Rising = options richer; falling = options cheaper.' %}
+        {% set ivd_tip = 'IV rank ' ~ ('+' if ivd > 0 else '') ~ ('%.1f'|format(ivd)) ~ ' pts over last 5d (' ~ (row.get('iv_rank_5d_samples') or 0) ~ ' samples). Rising = options richer; falling = options cheaper.' %}
         <span class="tc-iv" title="Implied volatility rank (0-100)">
-          IVR {{ row.iv_rank | int }}
+          IVR {{ ivr | int }}
           <span class="tc-iv-delta {{ ivd_cls }}" title="{{ ivd_tip }}">{{ ivd_sym }}{{ '%.0f'|format(_ivd_abs) }}</span>
         </span>
       {% else %}
-        <span class="tc-iv" title="Implied volatility rank (0-100){% if ivd is not none %} — 5d delta {{ '+' if ivd > 0 else '' }}{{ '%.1f'|format(ivd) }}{% endif %}">IVR {{ row.iv_rank | int }}</span>
+        <span class="tc-iv" title="Implied volatility rank (0-100){% if ivd is not none %} — 5d delta {{ '+' if ivd > 0 else '' }}{{ '%.1f'|format(ivd) }}{% endif %}">IVR {{ ivr | int }}</span>
       {% endif %}
     {% endif %}
     {{ _dealer_gamma_chip(row) }}
@@ -355,8 +356,8 @@
 <div class="ft-insight">
   {{ _liq_badge(ft.liquidity or {}) }}
   {{ _expression_badge(ft.trade_expression or {}) }}
-  {% if ft.accel_t_stat is not none %}
-    {% set t = ft.accel_t_stat %}
+  {% set t = ft.get('accel_t_stat') %}
+  {% if t is not none %}
     <span class="ft-tstat {% if t > 1 %}tc-pos{% elif t < -1 %}tc-neg{% else %}tc-mute{% endif %}" title="Acceleration t-statistic from daily premium regression (|t|>1 = meaningful trend)">
       t={{ "%+.2f"|format(t) }}
     </span>
