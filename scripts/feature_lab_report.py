@@ -42,6 +42,7 @@ from app.features.feature_lab import (  # noqa: E402
     AGGRESSOR_FEATURE_COLS,
     FREE_FEATURE_COLS,
     MOMENTUM_COLS,
+    PRICE_FEATURE_COLS,
     UW_FEATURE_COLS,
 )
 
@@ -65,6 +66,7 @@ ALL_FEATURE_COLS = (
     + list(AGGRESSOR_FEATURE_COLS)
     + list(UW_FEATURE_COLS)
     + list(MOMENTUM_COLS)
+    + list(PRICE_FEATURE_COLS)
     + list(FLOW_TRACKER_MONITOR_COLS)
 )
 

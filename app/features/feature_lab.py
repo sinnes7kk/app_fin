@@ -128,12 +128,21 @@ MOMENTUM_COLS = (
     "momentum_score",      # momentum_composite * 100, 0..100
 )
 
+# Price / volume / volatility technicals (Tier 1) + cross-sectional /
+# cross-asset residual signals (Tier 2). Computed off the OHLCV we already
+# fetch (see app/features/price_technicals.py). Shadow-logged, orthogonal to
+# the options-flow features; feed no live score until proven by the sweep.
+from app.features.price_technicals import PRICE_TECHNICAL_COLS  # noqa: E402
+
+PRICE_FEATURE_COLS = tuple(PRICE_TECHNICAL_COLS)
+
 LAB_COLS = (
     ID_COLS
     + FREE_FEATURE_COLS
     + AGGRESSOR_FEATURE_COLS
     + UW_FEATURE_COLS
     + MOMENTUM_COLS
+    + PRICE_FEATURE_COLS
 )
 
 
@@ -541,7 +550,9 @@ def compute_lab_features(
     if ohlcv_loader is None:
         try:
             from app.features.price_features import fetch_ohlcv as _fetch
-            ohlcv_loader = lambda t: _fetch(t, lookback_days=120, include_partial=False)  # noqa: E731
+            # 400 calendar days ≈ 275 trading bars — enough for the 200-day
+            # SMA, 52-week-high distance, and 63-day beta the technicals need.
+            ohlcv_loader = lambda t: _fetch(t, lookback_days=400, include_partial=False)  # noqa: E731
         except Exception:
             ohlcv_loader = lambda t: None  # noqa: E731
     if uw_loader is None and fetch_uw:
@@ -569,6 +580,28 @@ def compute_lab_features(
         for g in ranked[:topn_cutoff]
     }
 
+    # Market proxy + sector ETF frames for the Tier-2 residual signals.
+    # Fetched once per scan and cached so we don't re-download SPY/XLK per
+    # ticker. Fail-soft: a missing benchmark just leaves those columns None.
+    from app.features.price_technicals import (
+        compute_price_technicals,
+        sector_etf,
+    )
+
+    _bench_cache: dict[str, Any] = {}
+
+    def _load_bench(sym: str):
+        if sym in _bench_cache:
+            return _bench_cache[sym]
+        try:
+            frame = ohlcv_loader(sym)
+        except Exception:
+            frame = None
+        _bench_cache[sym] = frame
+        return frame
+
+    market_df = _load_bench("SPY")
+
     out_rows: list[dict] = []
     for g in grades:
         ticker = str(g.get("ticker") or "").upper().strip()
@@ -580,6 +613,17 @@ def compute_lab_features(
             ohlcv = ohlcv_loader(ticker)
         except Exception:
             ohlcv = None
+
+        sector_df = _load_bench(sector_etf(g.get("sector")))
+        try:
+            technicals = compute_price_technicals(
+                ohlcv,
+                market_df=market_df,
+                sector_df=sector_df,
+                as_of=momentum_as_of if not pd.isna(momentum_as_of) else None,
+            )
+        except Exception:
+            technicals = {c: None for c in PRICE_FEATURE_COLS}
 
         ticker_flow = pd.DataFrame()
         if raw_flow_df is not None and not raw_flow_df.empty and "ticker" in raw_flow_df.columns:
@@ -610,6 +654,7 @@ def compute_lab_features(
             ),
             "realized_vol_regime": _realized_vol_regime(ohlcv),
             **{c: aggressor.get(c) for c in AGGRESSOR_FEATURE_COLS},
+            **{c: technicals.get(c) for c in PRICE_FEATURE_COLS},
         }
         # UW columns — populated for top-N only.
         for col in UW_FEATURE_COLS:
