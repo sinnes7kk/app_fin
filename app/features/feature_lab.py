@@ -123,6 +123,15 @@ UW_FEATURE_COLS = (
 # Shadow momentum score (Spec 2): cross-sectional composite of the
 # validated free features + aggressor family. Never affects live grades
 # until it clears the promotion gate; see app/features/momentum_score.py.
+# Relative options-volume surge (today's total option volume vs the ticker's
+# own trailing 3-day average). Sourced from the flow-tracker grade dict and
+# carried onto the lab row so the shadow momentum composite can read it (it is
+# a FEATURE_SPECS input). Persisted here too so the sweep can score the lab
+# copy directly. Confirmation signal (direction-agnostic).
+CONFIRMATION_COLS = (
+    "perc_3_day_total_latest",
+)
+
 MOMENTUM_COLS = (
     "momentum_composite",  # mean cross-sectional percentile, 0..1
     "momentum_score",      # momentum_composite * 100, 0..100
@@ -141,6 +150,7 @@ LAB_COLS = (
     + FREE_FEATURE_COLS
     + AGGRESSOR_FEATURE_COLS
     + UW_FEATURE_COLS
+    + CONFIRMATION_COLS
     + MOMENTUM_COLS
     + PRICE_FEATURE_COLS
 )
@@ -653,6 +663,7 @@ def compute_lab_features(
                 premium_history_df,
             ),
             "realized_vol_regime": _realized_vol_regime(ohlcv),
+            "perc_3_day_total_latest": _safe_float(g.get("perc_3_day_total_latest")),
             **{c: aggressor.get(c) for c in AGGRESSOR_FEATURE_COLS},
             **{c: technicals.get(c) for c in PRICE_FEATURE_COLS},
         }

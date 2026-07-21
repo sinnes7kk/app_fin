@@ -60,6 +60,15 @@ FEATURE_SPECS: tuple[tuple[str, str], ...] = (
     ("dollar_delta_weighted_flow", "neutral"),
     ("realized_vol_regime", "fade"),
     ("far_otm_directional", "fade"),
+    # Relative options-volume surge: today's total option volume vs the
+    # ticker's own trailing 3-day average (>1 = above baseline). Added
+    # 2026-07-21 after the matured-only sweep ranked it the strongest single
+    # feature (pooled Spearman +0.22 p=0.005, OOS +0.25) and it works both
+    # directions (bull +0.21, bear +0.28) while being ~uncorrelated with the
+    # existing inputs (rho +0.08 vs flow_intensity). "neutral" = a big volume
+    # surge confirms conviction regardless of trade direction, so it is NOT
+    # flipped for bearish. Still shadow-only.
+    ("perc_3_day_total_latest", "neutral"),
 )
 
 # Minimum number of non-null oriented features required to emit a score.

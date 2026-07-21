@@ -74,6 +74,36 @@ def test_bearish_candidate_ranks_high_on_bearish_flow():
     print("  PASS: test_bearish_candidate_ranks_high_on_bearish_flow")
 
 
+def test_perc_3day_confirmation_lifts_score_both_directions():
+    # perc_3_day_total_latest is "neutral": a bigger volume surge should raise
+    # the composite for BOTH a bullish and a bearish candidate (not flipped).
+    def _pair(direction):
+        rows = [
+            {"ticker": "HI", "direction": direction, "bullish_premium_share": 0.5,
+             "aggressor_bull_share": 0.5, "ask_side_ratio": 0.5,
+             "perc_3_day_total_latest": 8.0},
+            {"ticker": "LO", "direction": direction, "bullish_premium_share": 0.5,
+             "aggressor_bull_share": 0.5, "ask_side_ratio": 0.5,
+             "perc_3_day_total_latest": 1.0},
+        ]
+        return ms.compute_day_scores(rows)
+
+    for d in ("BULLISH", "BEARISH"):
+        s = _pair(d)
+        assert s[0]["momentum_score"] > s[1]["momentum_score"], (
+            f"{d}: higher volume surge should score higher, got {s}")
+    print("  PASS: test_perc_3day_confirmation_lifts_score_both_directions")
+
+
+def test_perc_3day_is_in_feature_specs():
+    feats = {c for c, _ in ms.FEATURE_SPECS}
+    assert "perc_3_day_total_latest" in feats
+    # neutral orientation: value passes through unflipped for bearish.
+    assert ms._oriented_value({"perc_3_day_total_latest": 4.0},
+                              "perc_3_day_total_latest", "neutral", False) == 4.0
+    print("  PASS: test_perc_3day_is_in_feature_specs")
+
+
 def test_min_features_gate_returns_none():
     # Only two usable features -> below MIN_FEATURES -> None.
     rows = [
@@ -104,6 +134,8 @@ def main() -> int:
         ("test_far_otm_directional_picks_side_by_direction", test_far_otm_directional_picks_side_by_direction),
         ("test_cross_sectional_ranking_orders_candidates", test_cross_sectional_ranking_orders_candidates),
         ("test_bearish_candidate_ranks_high_on_bearish_flow", test_bearish_candidate_ranks_high_on_bearish_flow),
+        ("test_perc_3day_confirmation_lifts_score_both_directions", test_perc_3day_confirmation_lifts_score_both_directions),
+        ("test_perc_3day_is_in_feature_specs", test_perc_3day_is_in_feature_specs),
         ("test_min_features_gate_returns_none", test_min_features_gate_returns_none),
         ("test_nan_and_empty_inputs", test_nan_and_empty_inputs),
     ]

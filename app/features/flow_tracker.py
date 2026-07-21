@@ -1232,7 +1232,9 @@ def compute_multi_day_flow(
             "window_return_pct": window_return_pct,
             "perc_3_day_total_latest": round(perc_3d_latest, 3),
             "perc_3_day_total_max": round(perc_3d_window_max, 3),
-            "oi_change_window_avg": round(oi_change_window_avg, 2),
+            # NOTE: ``oi_change_window_avg`` was emitted here but read nowhere
+            # (not scored, persisted, surfaced, or monitored) — removed
+            # 2026-07-21. The value still drives ``oi_change_norm`` below.
             "premium_mix": premium_mix,
             "premium_source": source_tag,
             "_consistency_raw": consistency_raw,
