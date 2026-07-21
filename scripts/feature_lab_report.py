@@ -50,11 +50,22 @@ LAB_PATH = DATA_DIR / "feature_lab.csv"
 REPLAY_PATH = DATA_DIR / "grade_history_with_replay.csv"
 
 DTE_BUCKETS = ("lottery", "swing", "position", "leap", "unknown")
+
+# Flow-tracker fields that are computed + persisted but never enter
+# conviction_score or final_score. Pulled from the replay panel (they live
+# on grade_history, not feature_lab) purely to keep them under the same
+# weekly Spearman ranking as the feature-lab candidates. Monitoring-only:
+# they are NOT in the momentum composite or the meta-label feature set, so
+# ranking them here has zero effect on any score. Promote only if they clear
+# the same bar as any other candidate (n>=30, |Spearman|>=0.10, OOS>=0).
+FLOW_TRACKER_MONITOR_COLS = ("sweep_share", "multileg_share")
+
 ALL_FEATURE_COLS = (
     list(FREE_FEATURE_COLS)
     + list(AGGRESSOR_FEATURE_COLS)
     + list(UW_FEATURE_COLS)
     + list(MOMENTUM_COLS)
+    + list(FLOW_TRACKER_MONITOR_COLS)
 )
 
 
@@ -131,6 +142,9 @@ def build_panel(
         ["__key_t", "__key_d", "__key_a", "replay_realized_r"]
         + [c for c in ("dominant_dte_bucket", "conviction_grade", "is_promoted")
            if c in replay.columns]
+        # Monitor-only flow-tracker fields (see FLOW_TRACKER_MONITOR_COLS).
+        + [c for c in FLOW_TRACKER_MONITOR_COLS
+           if c in replay.columns and c not in lab.columns]
     )
     merged = lab.merge(
         replay[keep_cols],

@@ -26,6 +26,13 @@ from typing import Any
 
 DATA_DIR = Path(__file__).resolve().parents[2] / "data"
 ATTRIBUTION_PATH = DATA_DIR / "grade_attribution.json"
+# Bar-by-bar replay panel. Preferred target source: its ``replay_realized_r``
+# is directionally-signed and is refreshed every weekly backtest, whereas the
+# legacy ``forward_excess_return`` path (5d close-to-close vs SPY) depends on a
+# live OHLCV fetch inside the hourly scan and silently stopped populating
+# recent rows on 2026-05-22 — which is why grade_attribution.json went empty
+# (0 matured rows inside the 60d window) despite 900+ graded rows on disk.
+REPLAY_PATH = DATA_DIR / "grade_history_with_replay.csv"
 
 # Features evaluated by attribution.  Categorical columns live in
 # CATEGORICAL_FEATURES and get one-hot-into-indicator treatment instead
@@ -161,10 +168,24 @@ def _signed_forward(r: dict[str, Any]) -> float | None:
     return sign * raw
 
 
-def _attrib_numeric(feature: str, rows: list[dict[str, Any]]) -> dict[str, Any]:
+def _replay_realized_r(r: dict[str, Any]) -> float | None:
+    """Target from the replay panel — already directionally-signed R.
+
+    ``replay_realized_r`` is the bar-by-bar trade R in the trade's own
+    direction (a bearish trade that profits is positive), so unlike
+    ``forward_excess_return`` it does *not* need re-signing.
+    """
+    return _to_float(r.get("replay_realized_r"))
+
+
+def _attrib_numeric(
+    feature: str,
+    rows: list[dict[str, Any]],
+    y_of: "Any" = _signed_forward,
+) -> dict[str, Any]:
     pairs = []
     for r in rows:
-        y = _signed_forward(r)
+        y = y_of(r)
         x = _to_float(r.get(feature))
         if y is None or x is None:
             continue
@@ -181,11 +202,15 @@ def _attrib_numeric(feature: str, rows: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def _attrib_categorical(feature: str, rows: list[dict[str, Any]]) -> dict[str, Any]:
+def _attrib_categorical(
+    feature: str,
+    rows: list[dict[str, Any]],
+    y_of: "Any" = _signed_forward,
+) -> dict[str, Any]:
     """Per-level mean signed forward return (robust for small cohorts)."""
     buckets: dict[str, list[float]] = {}
     for r in rows:
-        y = _signed_forward(r)
+        y = y_of(r)
         if y is None:
             continue
         key = str(r.get(feature) or "").strip() or "—"
@@ -202,19 +227,58 @@ def _attrib_categorical(feature: str, rows: list[dict[str, Any]]) -> dict[str, A
     return {"levels": levels, "n": sum(lv["n"] for lv in levels.values())}
 
 
+def _load_replay_rows() -> list[dict[str, Any]]:
+    """Rows from the bar-by-bar replay panel that carry a realized R."""
+    if not REPLAY_PATH.exists():
+        return []
+    try:
+        import csv
+
+        with open(REPLAY_PATH, "r", newline="") as f:
+            rows = list(csv.DictReader(f))
+    except Exception:
+        return []
+    return [r for r in rows if _to_float(r.get("replay_realized_r")) is not None]
+
+
 def refresh_attribution(
     window_days: int = DEFAULT_WINDOW_DAYS,
     min_samples: int = DEFAULT_MIN_SAMPLES,
     write: bool = True,
+    source: str = "auto",
 ) -> dict[str, Any]:
     """Compute + (optionally) persist the attribution report.
 
-    Returns ``{}`` when the matured sample set is under ``min_samples``.
+    ``source`` selects the target metric:
+      - ``"replay"`` — Spearman vs the bar-by-bar ``replay_realized_r``
+        (preferred; already directional; refreshed every backtest).
+      - ``"forward"`` — the legacy 5d ``forward_excess_return`` path.
+      - ``"auto"`` (default) — use the replay panel when it has at least
+        ``min_samples`` realized rows, else fall back to ``forward``.
+
+    The replay source is *not* window-filtered — the replay panel only
+    contains closed/replayed trades already, so every row is matured and a
+    trailing-window cut would just throw away signal.
+
+    Returns a dict with ``status`` ``"insufficient_history"`` when neither
+    source clears ``min_samples``.
     """
     from app.analytics.grade_history import load_history
 
-    rows = load_history(with_returns_only=True)
-    rows = _filter_window(rows, window_days)
+    y_of = _signed_forward
+    used_source = "forward_excess_return"
+    rows: list[dict[str, Any]] = []
+
+    if source in ("auto", "replay"):
+        replay_rows = _load_replay_rows()
+        if len(replay_rows) >= min_samples or source == "replay":
+            rows = replay_rows
+            y_of = _replay_realized_r
+            used_source = "replay_realized_r"
+
+    if used_source == "forward_excess_return":
+        rows = load_history(with_returns_only=True)
+        rows = _filter_window(rows, window_days)
 
     if len(rows) < min_samples:
         result = {
@@ -222,6 +286,7 @@ def refresh_attribution(
             "window_days": window_days,
             "min_samples": min_samples,
             "n_rows": len(rows),
+            "target": used_source,
             "status": "insufficient_history",
             "numeric": {},
             "categorical": {},
@@ -234,11 +299,11 @@ def refresh_attribution(
 
     numeric: dict[str, dict[str, Any]] = {}
     for feat in NUMERIC_FEATURES:
-        numeric[feat] = _attrib_numeric(feat, rows)
+        numeric[feat] = _attrib_numeric(feat, rows, y_of)
 
     categorical: dict[str, dict[str, Any]] = {}
     for feat in CATEGORICAL_FEATURES:
-        categorical[feat] = _attrib_categorical(feat, rows)
+        categorical[feat] = _attrib_categorical(feat, rows, y_of)
 
     # Rank numeric features by |rho| so the UI can show the top
     # predictors without client-side sorting.
@@ -257,6 +322,7 @@ def refresh_attribution(
         "window_days": window_days,
         "min_samples": min_samples,
         "n_rows": len(rows),
+        "target": used_source,
         "status": "ok",
         "numeric": numeric,
         "categorical": categorical,

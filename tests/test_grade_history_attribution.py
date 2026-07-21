@@ -207,7 +207,11 @@ def test_attribution_recovers_known_correlations():
 
     with patch.object(gh, "GRADE_HISTORY_PATH", tmp_hist), \
          patch.object(ga, "ATTRIBUTION_PATH", tmp_attr):
-        report = ga.refresh_attribution(window_days=3650, min_samples=10)
+        # Pin the legacy forward_excess_return path this test seeds; "auto"
+        # would otherwise fall through to the real repo replay panel.
+        report = ga.refresh_attribution(
+            window_days=3650, min_samples=10, source="forward"
+        )
 
     assert report.get("status") == "ok", f"attribution report failed: {report}"
     numeric = report.get("numeric", {})
@@ -222,6 +226,37 @@ def test_attribution_recovers_known_correlations():
     assert rho_wr < -0.9, (
         f"window_return_pct should show strong -ρ, got {rho_wr}"
     )
+
+
+def test_attribution_prefers_replay_realized_r_source():
+    """With a replay panel present, auto-source uses replay_realized_r
+    (already directional) and reports target=replay_realized_r."""
+    from app.analytics import grade_attribution as ga
+
+    tmp_dir = Path(tempfile.mkdtemp())
+    tmp_replay = tmp_dir / "grade_history_with_replay.csv"
+    tmp_attr = tmp_dir / "grade_attribution.json"
+
+    # sweep_share monotonically increasing with realized R -> strong +rho.
+    n = 20
+    header = ["as_of", "ticker", "direction", "sweep_share",
+              "conviction_score", "replay_realized_r"]
+    lines = [",".join(header)]
+    for i in range(n):
+        lines.append(
+            f"2026-06-{i+1:02d},T{i:02d},BULLISH,{(i+1)/20:.3f},"
+            f"{float(i+1)},{(i+1)/10:.3f}"
+        )
+    tmp_replay.write_text("\n".join(lines) + "\n")
+
+    with patch.object(ga, "REPLAY_PATH", tmp_replay), \
+         patch.object(ga, "ATTRIBUTION_PATH", tmp_attr):
+        report = ga.refresh_attribution(min_samples=10, source="auto")
+
+    assert report.get("status") == "ok", report
+    assert report.get("target") == "replay_realized_r", report.get("target")
+    rho = report["numeric"].get("sweep_share", {}).get("rho")
+    assert rho is not None and rho > 0.9, f"expected strong +rho, got {rho}"
 
 
 def test_persist_stamps_flow_tracker_mode_and_streak_fields():
@@ -277,7 +312,9 @@ def test_attribution_reports_insufficient_history_below_threshold():
 
     with patch.object(gh, "GRADE_HISTORY_PATH", tmp_hist), \
          patch.object(ga, "ATTRIBUTION_PATH", tmp_attr):
-        report = ga.refresh_attribution(min_samples=30)
+        # Force the legacy path so the empty synthetic history is what's
+        # measured (not the real repo replay panel via "auto").
+        report = ga.refresh_attribution(min_samples=30, source="forward")
 
     assert report.get("status") == "insufficient_history", (
         f"expected insufficient_history; got {report.get('status')}"
@@ -297,6 +334,7 @@ if __name__ == "__main__":
         test_persist_leaves_mode_flags_blank_when_absent,
         test_attach_forward_returns_fills_matured_rows,
         test_attribution_recovers_known_correlations,
+        test_attribution_prefers_replay_realized_r_source,
         test_attribution_reports_insufficient_history_below_threshold,
     ]
     failures = 0
