@@ -380,6 +380,123 @@ def test_load_screener_premium_history_builds_daily_series(monkeypatch):
     print("  PASS: test_load_screener_premium_history_builds_daily_series")
 
 
+def _uptrend(n: int = 220) -> pd.DataFrame:
+    """A clean rising series with intrabar range so the scorer + feature
+    computation have enough history (structural window needs ~130 bars)."""
+    idx = pd.date_range("2025-06-01", periods=n, freq="B")
+    base = np.linspace(100.0, 180.0, n)
+    close = base + np.sin(np.linspace(0, 12, n)) * 1.5
+    return pd.DataFrame(
+        {
+            "open": close - 0.3,
+            "high": close + 1.0,
+            "low": close - 1.0,
+            "close": close,
+            "volume": np.linspace(2e6, 4e6, n),
+        },
+        index=idx,
+    )
+
+
+def test_setup_features_reconstructs_from_ohlcv():
+    """The price-setup scorer is re-run on OHLCV and mapped to flat cols."""
+    out = fl._setup_features(_uptrend(), "BULLISH")
+    # All declared setup columns must be present.
+    for col in fl.SETUP_FEATURE_COLS + fl.SETUP_LABEL_COLS:
+        assert col in out, f"missing setup col {col}"
+    # A 220-bar clean uptrend must produce a real numeric price score.
+    assert out["setup_price_score"] is not None
+    assert 0.0 <= out["setup_price_score"] <= 10.0
+    # Family one-hots are strict 0/1 (never None when scoring succeeds).
+    for fam in ("setup_is_breakout", "setup_is_pullback",
+                "setup_is_trend_cont", "setup_is_reversal"):
+        assert out[fam] in (0.0, 1.0)
+    assert isinstance(out["setup_family"], str)
+    assert out["setup_state_rank"] in (0.0, 1.0, 2.0)
+    print("  PASS: test_setup_features_reconstructs_from_ohlcv")
+
+
+def test_setup_features_empty_is_all_none():
+    out = fl._setup_features(None, "BULLISH")
+    assert set(out.keys()) == set(fl.SETUP_FEATURE_COLS + fl.SETUP_LABEL_COLS)
+    assert all(v is None for v in out.values())
+    print("  PASS: test_setup_features_empty_is_all_none")
+
+
+def test_volume_dynamics_basic():
+    """Smoothed relative-volume + trend features from a synthetic series."""
+    n = 30
+    idx = pd.date_range("2026-01-01", periods=n, freq="B")
+    # Flat baseline volume, then a recent surge on the last 3 bars.
+    vol = np.full(n, 1_000_000.0)
+    vol[-3:] = 3_000_000.0
+    close = np.linspace(100.0, 110.0, n)  # steady uptrend -> up-day dominated
+    ohlcv = pd.DataFrame(
+        {"open": close, "high": close + 1, "low": close - 1,
+         "close": close, "volume": vol},
+        index=idx,
+    )
+    out = fl._volume_dynamics(ohlcv)
+    for col in fl.VOLUME_DYNAMICS_COLS:
+        assert col in out
+    # Last-3 avg (3M) well above 20d avg (which includes the surge but is
+    # dominated by 1M baseline) -> ratio clearly > 1.
+    assert out["rel_vol_3d_20d"] is not None and out["rel_vol_3d_20d"] > 1.5
+    assert out["rel_vol_5d_20d"] is not None and out["rel_vol_5d_20d"] > 1.0
+    # Volume rising over the last 10 bars -> positive trend.
+    assert out["vol_trend_10d"] is not None and out["vol_trend_10d"] > 0
+    # Pure uptrend -> no down-close days in the last 10 -> ratio undefined (None).
+    assert out["up_down_vol_ratio_10d"] is None
+    print("  PASS: test_volume_dynamics_basic")
+
+
+def test_volume_dynamics_up_down_ratio():
+    """Up/down volume ratio splits volume by close-to-close direction."""
+    n = 30
+    idx = pd.date_range("2026-01-01", periods=n, freq="B")
+    close = 100.0 + np.zeros(n)
+    vol = np.full(n, 1_000_000.0)
+    # Alternate up/down over the last 10 bars; heavier volume on up days.
+    for i in range(n - 10, n):
+        if (n - i) % 2 == 0:
+            close[i] = close[i - 1] + 1.0   # up day
+            vol[i] = 2_000_000.0
+        else:
+            close[i] = close[i - 1] - 1.0   # down day
+            vol[i] = 1_000_000.0
+    ohlcv = pd.DataFrame(
+        {"open": close, "high": close + 1, "low": close - 1,
+         "close": close, "volume": vol},
+        index=idx,
+    )
+    out = fl._volume_dynamics(ohlcv)
+    assert out["up_down_vol_ratio_10d"] is not None
+    assert out["up_down_vol_ratio_10d"] > 1.0  # up days carry more volume
+    print("  PASS: test_volume_dynamics_up_down_ratio")
+
+
+def test_volume_dynamics_insufficient_history():
+    idx = pd.date_range("2026-01-01", periods=10, freq="B")
+    ohlcv = pd.DataFrame(
+        {"close": np.arange(10.0), "volume": np.full(10, 1e6)}, index=idx,
+    )
+    out = fl._volume_dynamics(ohlcv)
+    assert all(v is None for v in out.values())
+    assert fl._volume_dynamics(None) == {c: None for c in fl.VOLUME_DYNAMICS_COLS}
+    print("  PASS: test_volume_dynamics_insufficient_history")
+
+
+def test_setup_family_mapping():
+    assert fl._setup_family("flag_breakout") == "breakout"
+    assert fl._setup_family("pullback_to_support") == "pullback_retest"
+    assert fl._setup_family("trend_continuation") == "trend_cont"
+    assert fl._setup_family("volume_capitulation_reversal") == "reversal_at_level"
+    assert fl._setup_family(None) == "none"
+    assert fl._setup_pattern_of(["trend_aligned", "flag_breakout", "x"]) == "flag_breakout"
+    assert fl._setup_pattern_of(["trend_aligned"]) is None
+    print("  PASS: test_setup_family_mapping")
+
+
 # Minimal monkeypatch helper.
 class _Monkeypatch:
     def __init__(self):
@@ -415,6 +532,12 @@ def main():
         ("test_prem_momentum_z3d_scores_today_vs_trailing", test_prem_momentum_z3d_scores_today_vs_trailing, False),
         ("test_prem_momentum_z3d_requires_three_prior_days", test_prem_momentum_z3d_requires_three_prior_days, False),
         ("test_load_screener_premium_history_builds_daily_series", test_load_screener_premium_history_builds_daily_series, True),
+        ("test_setup_features_reconstructs_from_ohlcv", test_setup_features_reconstructs_from_ohlcv, False),
+        ("test_setup_features_empty_is_all_none", test_setup_features_empty_is_all_none, False),
+        ("test_volume_dynamics_basic", test_volume_dynamics_basic, False),
+        ("test_volume_dynamics_up_down_ratio", test_volume_dynamics_up_down_ratio, False),
+        ("test_volume_dynamics_insufficient_history", test_volume_dynamics_insufficient_history, False),
+        ("test_setup_family_mapping", test_setup_family_mapping, False),
     ]
     failures = 0
     for name, fn, needs_mp in tests:

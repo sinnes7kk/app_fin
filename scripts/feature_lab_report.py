@@ -43,7 +43,9 @@ from app.features.feature_lab import (  # noqa: E402
     FREE_FEATURE_COLS,
     MOMENTUM_COLS,
     PRICE_FEATURE_COLS,
+    SETUP_FEATURE_COLS,
     UW_FEATURE_COLS,
+    VOLUME_DYNAMICS_COLS,
 )
 
 DATA_DIR = ROOT / "data"
@@ -67,6 +69,8 @@ ALL_FEATURE_COLS = (
     + list(UW_FEATURE_COLS)
     + list(MOMENTUM_COLS)
     + list(PRICE_FEATURE_COLS)
+    + list(VOLUME_DYNAMICS_COLS)
+    + list(SETUP_FEATURE_COLS)
     + list(FLOW_TRACKER_MONITOR_COLS)
 )
 

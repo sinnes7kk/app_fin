@@ -145,6 +145,178 @@ from app.features.price_technicals import PRICE_TECHNICAL_COLS  # noqa: E402
 
 PRICE_FEATURE_COLS = tuple(PRICE_TECHNICAL_COLS)
 
+# Volume-dynamics features. The existing ``rel_volume`` is only today-vs-20d
+# (noisy, single-bar). These add smoothed multi-day participation ratios and a
+# trend/accumulation read so we can backtest whether *sustained* volume shifts
+# predict outcomes. Computed off the OHLCV the scan already fetches; numeric,
+# shadow-only, auto-ranked by the weekly Spearman report.
+VOLUME_DYNAMICS_COLS = (
+    "rel_vol_3d_20d",         # mean(vol,3) / mean(vol,20)
+    "rel_vol_5d_20d",         # mean(vol,5) / mean(vol,20)
+    "vol_trend_10d",          # OLS slope of vol over last 10d, / mean(vol,10)
+    "up_down_vol_ratio_10d",  # up-close-day vol / down-close-day vol, last 10d
+)
+
+
+def _volume_dynamics(ohlcv: pd.DataFrame | None) -> dict[str, float | None]:
+    """Smoothed relative-volume + volume-trend features for one ticker.
+
+    All fail-soft: insufficient history or a zero denominator yields None so
+    the row schema stays intact.
+    """
+    out: dict[str, float | None] = {c: None for c in VOLUME_DYNAMICS_COLS}
+    if ohlcv is None or ohlcv.empty or "volume" not in ohlcv.columns:
+        return out
+    vol = pd.to_numeric(ohlcv["volume"], errors="coerce").dropna()
+    if len(vol) < 21:
+        return out
+
+    avg20 = float(vol.iloc[-20:].mean())
+    if avg20 > 0:
+        out["rel_vol_3d_20d"] = float(vol.iloc[-3:].mean() / avg20)
+        out["rel_vol_5d_20d"] = float(vol.iloc[-5:].mean() / avg20)
+
+    last10 = vol.iloc[-10:]
+    if len(last10) == 10:
+        mean10 = float(last10.mean())
+        if mean10 > 0:
+            slope = float(np.polyfit(np.arange(10), last10.to_numpy(dtype=float), 1)[0])
+            # Normalise to a per-day fraction of average volume so it's
+            # comparable across tickers of very different absolute volume.
+            out["vol_trend_10d"] = slope / mean10
+
+    if "close" in ohlcv.columns:
+        d = pd.DataFrame({
+            "c": pd.to_numeric(ohlcv["close"], errors="coerce"),
+            "v": pd.to_numeric(ohlcv["volume"], errors="coerce"),
+        }).dropna()
+        if len(d) >= 11:
+            d["chg"] = d["c"].diff()
+            recent = d.iloc[-10:]
+            up_vol = float(recent.loc[recent["chg"] > 0, "v"].sum())
+            dn_vol = float(recent.loc[recent["chg"] < 0, "v"].sum())
+            if dn_vol > 0:
+                out["up_down_vol_ratio_10d"] = up_vol / dn_vol
+    return out
+
+
+# Price-SETUP classification features (Tier 3). Reconstructed by re-running
+# the deterministic price scorer (``score_long_setup`` / ``score_short_setup``)
+# on the same OHLCV we already fetch, so we can finally *track and backtest*
+# the pullback / continuation / breakout classification as FEATURES rather
+# than the near-invisible entry gate it is today (a recognised pattern is only
+# ~6% of the final blended score, and ~73% of real trades are flow-promoted
+# and never see it at all). All numeric + direction-oriented (the scorer is
+# chosen by the row's direction), so they slot straight into the weekly
+# Spearman-vs-realized-R ranking. Shadow-only: never touches a live score.
+SETUP_FEATURE_COLS = (
+    "setup_price_score",   # composite 0-10 price/TA score
+    "setup_trend",         # component 0-3
+    "setup_extension",     # component 0-1
+    "setup_room",          # component 0-1
+    "setup_pattern_pts",   # component 0-2 (the pattern's own credit)
+    "setup_momentum",      # component 0-2
+    "setup_confirm_vol",   # component 0-1
+    "setup_extended",      # 1.0 if price beyond the extension cap else 0.0
+    "setup_ext_cap_atr",   # which extension cap applied (2.5/3/4/5 ATR)
+    "setup_state_rank",    # REJECT=0, WATCHLIST=1, SIGNAL=2
+    "setup_is_breakout",   # family one-hots (0/1)
+    "setup_is_pullback",
+    "setup_is_trend_cont",
+    "setup_is_reversal",
+)
+
+# Categorical setup labels — persisted for group-by analysis (e.g.
+# scripts/setup_type_analysis.py), NOT fed to the numeric Spearman ranker.
+SETUP_LABEL_COLS = (
+    "setup_pattern",       # specific label, e.g. "trend_continuation"
+    "setup_family",        # coarse family: breakout / pullback_retest / ...
+)
+
+# Pattern labels emitted by the scorers, grouped into coarse families.
+_SETUP_BREAKOUT = {
+    "structural_breakout", "structural_breakdown", "flag_breakout",
+    "flag_breakdown", "consolidation_breakout", "consolidation_breakdown",
+}
+_SETUP_PULLBACK = {
+    "pullback_to_support", "pullback_to_resistance", "ema_pullback",
+    "ema_rally", "support_ema_confluence", "resistance_ema_confluence",
+    "retest_and_confirm",
+}
+_SETUP_TREND = {"trend_continuation"}
+_SETUP_REVERSAL = {
+    "bounce_and_fail", "engulfing_at_support", "engulfing_at_resistance",
+    "volume_capitulation_reversal", "hammer_at_support",
+    "shooting_star_at_resistance",
+}
+_SETUP_ALL_LABELS = _SETUP_BREAKOUT | _SETUP_PULLBACK | _SETUP_TREND | _SETUP_REVERSAL
+
+
+def _setup_family(label: str | None) -> str:
+    if label in _SETUP_BREAKOUT:
+        return "breakout"
+    if label in _SETUP_PULLBACK:
+        return "pullback_retest"
+    if label in _SETUP_TREND:
+        return "trend_cont"
+    if label in _SETUP_REVERSAL:
+        return "reversal_at_level"
+    return "none"
+
+
+def _setup_pattern_of(reasons: list[str]) -> str | None:
+    for r in reasons or []:
+        if r in _SETUP_ALL_LABELS:
+            return r
+    return None
+
+
+def _setup_features(ohlcv: pd.DataFrame | None, direction: str) -> dict[str, Any]:
+    """Reconstruct the price-setup classification for one candidate.
+
+    Runs the deterministic price scorer on the candidate's OHLCV and maps
+    its components + winning pattern into flat feature columns. Fail-soft:
+    any error (too little history, missing indicators) yields all-None so
+    the row schema stays intact.
+    """
+    empty = {c: None for c in SETUP_FEATURE_COLS + SETUP_LABEL_COLS}
+    if ohlcv is None or ohlcv.empty:
+        return empty
+    try:
+        from app.features.price_features import clean_ohlcv, compute_features
+        from app.signals.scoring import score_long_setup, score_short_setup
+
+        feat = compute_features(clean_ohlcv(ohlcv.copy()))
+        is_long = str(direction).upper() in ("BULLISH", "LONG")
+        sig = score_long_setup(feat) if is_long else score_short_setup(feat)
+    except Exception:
+        return empty
+
+    comps = sig.get("score_components", {}) or {}
+    pattern = _setup_pattern_of(sig.get("reasons", []))
+    family = _setup_family(pattern)
+    state = str(sig.get("state") or "")
+    out = {
+        "setup_price_score": _safe_float(sig.get("score")),
+        "setup_trend": _safe_float(comps.get("trend")),
+        "setup_extension": _safe_float(comps.get("extension")),
+        "setup_room": _safe_float(comps.get("room")),
+        "setup_pattern_pts": _safe_float(comps.get("pattern")),
+        "setup_momentum": _safe_float(comps.get("momentum")),
+        "setup_confirm_vol": _safe_float(comps.get("confirm_vol")),
+        "setup_extended": 1.0 if sig.get("extended") else 0.0,
+        "setup_ext_cap_atr": _safe_float(sig.get("extension_cap_atr")),
+        "setup_state_rank": {"REJECT": 0.0, "WATCHLIST": 1.0, "SIGNAL": 2.0}.get(state),
+        "setup_is_breakout": 1.0 if family == "breakout" else 0.0,
+        "setup_is_pullback": 1.0 if family == "pullback_retest" else 0.0,
+        "setup_is_trend_cont": 1.0 if family == "trend_cont" else 0.0,
+        "setup_is_reversal": 1.0 if family == "reversal_at_level" else 0.0,
+        "setup_pattern": pattern or "none",
+        "setup_family": family,
+    }
+    return out
+
+
 LAB_COLS = (
     ID_COLS
     + FREE_FEATURE_COLS
@@ -153,6 +325,9 @@ LAB_COLS = (
     + CONFIRMATION_COLS
     + MOMENTUM_COLS
     + PRICE_FEATURE_COLS
+    + VOLUME_DYNAMICS_COLS
+    + SETUP_FEATURE_COLS
+    + SETUP_LABEL_COLS
 )
 
 
@@ -642,6 +817,8 @@ def compute_lab_features(
         far_call, far_put = _far_otm_shares(ticker_flow)
         ddw = _dollar_delta_weighted_flow(ticker_flow, direction)
         aggressor = _aggressor_signed_features(ticker_flow)
+        setup = _setup_features(ohlcv, direction)
+        voldyn = _volume_dynamics(ohlcv)
 
         row: dict[str, Any] = {
             "as_of": "",
@@ -666,6 +843,8 @@ def compute_lab_features(
             "perc_3_day_total_latest": _safe_float(g.get("perc_3_day_total_latest")),
             **{c: aggressor.get(c) for c in AGGRESSOR_FEATURE_COLS},
             **{c: technicals.get(c) for c in PRICE_FEATURE_COLS},
+            **{c: voldyn.get(c) for c in VOLUME_DYNAMICS_COLS},
+            **{c: setup.get(c) for c in SETUP_FEATURE_COLS + SETUP_LABEL_COLS},
         }
         # UW columns — populated for top-N only.
         for col in UW_FEATURE_COLS:
