@@ -966,7 +966,7 @@ as_of,ticker,direction,sector,conviction_score,conviction_grade,conviction_stack
 2026-07-22,CRWV,BULLISH,Technology,7.0,A-,,31.87,0.75,59.3,1.0,0.0,0.0,12.44,204651754.0,31.87,0.4,71.8,2.2,0.885,,31-90,per_ticker_api,5d,false,false,true,3,0.3333,false,false,watchlist_reeval_failed,,
 2026-07-22,TEN,BEARISH,Consumer Cyclical,7.0,A-,,28.22,0.5,77.7,0.0,1.0,0.0,-0.5,3426637.0,28.22,0.01,59.3,0.46,9.231,,31-90,screener,5d,false,false,true,2,1.0,false,false,not_evaluated,,
 2026-07-22,SMCI,BULLISH,Technology,6.9,A-,,74.59,0.75,57.5,0.333,0.0,0.0,28.03,249140951.0,74.59,0.32,96.2,3.08,4.88,,31-90,screener,5d,false,false,true,3,0.6667,false,false,not_evaluated,,
-2026-07-22,OKLO,BULLISH,Utilities,6.4,B+,,27.56,0.75,51.6,0.0,0.0,0.667,7.88,39512009.0,27.56,0.28,28.2,2.87,1.38,,91+,per_ticker_api,5d,false,false,true,3,0.3333,false,false,price_validation_failed,,
+2026-07-22,OKLO,BULLISH,Utilities,6.3,B+,,27.52,0.75,51.0,0.0,0.0,0.667,7.88,39360009.0,27.52,0.26,28.2,2.87,1.347,,91+,per_ticker_api,5d,false,false,true,3,0.3333,false,false,price_validation_failed,,
 2026-07-22,APPN,BEARISH,Technology,6.1,B+,,3.62,0.5,72.7,0.0,0.0,0.0,1.73,368783.0,3.62,3.02,70.1,0.2,6.344,,unknown,screener,5d,false,false,false,2,1.0,false,false,not_evaluated,,
 2026-07-22,BOX,BEARISH,Technology,6.1,B+,,3.33,0.5,71.9,0.0,0.0,0.0,0.78,1398995.0,3.33,1.39,43.4,1.17,5.829,,unknown,screener,5d,false,false,false,2,1.0,false,false,not_evaluated,,
 2026-07-22,PEGA,BEARISH,Technology,6.1,B+,,3.24,1.0,69.2,0.0,0.0,0.0,-17.57,2090724.0,3.24,1.01,47.7,24.34,2.599,,unknown,screener,5d,false,false,true,4,0.75,false,false,not_evaluated,,
