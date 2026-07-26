@@ -1,7 +1,7 @@
 {
   "global": {
-    "n_train": 282,
-    "n_val": 189,
+    "n_train": 289,
+    "n_val": 194,
     "weights": {
       "persistence_proxy": 0.25,
       "intensity_proxy": 0.2,
@@ -10,11 +10,11 @@
       "mass_proxy": 0.05,
       "oi_change_proxy": 0.05
     },
-    "oos_spearman": -0.014044756445444484,
-    "oos_spearman_legacy": 0.038094573238206926,
+    "oos_spearman": -0.02200485709889247,
+    "oos_spearman_legacy": -0.014438889538234566,
     "accept": false,
     "confidence": "high",
-    "reason": "tight_threshold_unmet (need spearman>=0.10 and lift>=0.05, got new=-0.014, legacy=0.038)",
+    "reason": "tight_threshold_unmet (need spearman>=0.10 and lift>=0.05, got new=-0.022, legacy=-0.014)",
     "threshold_regime": "tight",
     "accept_threshold": 0.1,
     "accept_lift_threshold": 0.05
@@ -61,46 +61,6 @@
       "accept_lift_threshold": 0.0
     },
     "position": {
-      "n_train": 105,
-      "n_val": 70,
-      "weights": {
-        "persistence_proxy": 0.25,
-        "intensity_proxy": 0.2,
-        "consistency_proxy": 0.25,
-        "accel_proxy": 0.2,
-        "mass_proxy": 0.05,
-        "oi_change_proxy": 0.05
-      },
-      "oos_spearman": 0.007193581006902584,
-      "oos_spearman_legacy": 0.03732885279257556,
-      "accept": false,
-      "confidence": "high",
-      "reason": "tight_threshold_unmet (need spearman>=0.10 and lift>=0.05, got new=0.007, legacy=0.037)",
-      "threshold_regime": "tight",
-      "accept_threshold": 0.1,
-      "accept_lift_threshold": 0.05
-    },
-    "leap": {
-      "n_train": 52,
-      "n_val": 35,
-      "weights": {
-        "persistence_proxy": 0.25,
-        "intensity_proxy": 0.2,
-        "consistency_proxy": 0.25,
-        "accel_proxy": 0.2,
-        "mass_proxy": 0.05,
-        "oi_change_proxy": 0.05
-      },
-      "oos_spearman": -0.18476994477055847,
-      "oos_spearman_legacy": 0.16268051477565182,
-      "accept": false,
-      "confidence": "medium",
-      "reason": "oos_spearman_not_better_than_legacy",
-      "threshold_regime": "loose",
-      "accept_threshold": 0.0,
-      "accept_lift_threshold": 0.0
-    },
-    "unknown": {
       "n_train": 109,
       "n_val": 73,
       "weights": {
@@ -111,11 +71,51 @@
         "mass_proxy": 0.05,
         "oi_change_proxy": 0.05
       },
-      "oos_spearman": -0.00031811761857717503,
-      "oos_spearman_legacy": -0.024312660443487677,
+      "oos_spearman": 0.07828974746980252,
+      "oos_spearman_legacy": 0.09338754239361935,
       "accept": false,
       "confidence": "high",
-      "reason": "tight_threshold_unmet (need spearman>=0.10 and lift>=0.05, got new=-0.000, legacy=-0.024)",
+      "reason": "tight_threshold_unmet (need spearman>=0.10 and lift>=0.05, got new=0.078, legacy=0.093)",
+      "threshold_regime": "tight",
+      "accept_threshold": 0.1,
+      "accept_lift_threshold": 0.05
+    },
+    "leap": {
+      "n_train": 53,
+      "n_val": 36,
+      "weights": {
+        "persistence_proxy": 0.25,
+        "intensity_proxy": 0.2,
+        "consistency_proxy": 0.25,
+        "accel_proxy": 0.2,
+        "mass_proxy": 0.05,
+        "oi_change_proxy": 0.05
+      },
+      "oos_spearman": -0.20148768476943107,
+      "oos_spearman_legacy": 0.10060677239523672,
+      "accept": false,
+      "confidence": "medium",
+      "reason": "oos_spearman_not_better_than_legacy",
+      "threshold_regime": "loose",
+      "accept_threshold": 0.0,
+      "accept_lift_threshold": 0.0
+    },
+    "unknown": {
+      "n_train": 111,
+      "n_val": 74,
+      "weights": {
+        "persistence_proxy": 0.25,
+        "intensity_proxy": 0.2,
+        "consistency_proxy": 0.25,
+        "accel_proxy": 0.2,
+        "mass_proxy": 0.05,
+        "oi_change_proxy": 0.05
+      },
+      "oos_spearman": -0.045098670483256026,
+      "oos_spearman_legacy": -0.05334892106454119,
+      "accept": false,
+      "confidence": "high",
+      "reason": "tight_threshold_unmet (need spearman>=0.10 and lift>=0.05, got new=-0.045, legacy=-0.053)",
       "threshold_regime": "tight",
       "accept_threshold": 0.1,
       "accept_lift_threshold": 0.05

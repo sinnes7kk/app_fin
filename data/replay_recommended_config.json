@@ -15,33 +15,33 @@
     "ATR_TRAIL_MULT": 2.1,
     "confidence": "high",
     "observed_median_d_to_mfe": 1.0,
-    "observed_mean_r": -0.03885416666666666
+    "observed_mean_r": 0.042037499999999985
   },
   "position": {
-    "n": 446,
+    "n": 501,
     "MAX_HOLD_DAYS": 10,
+    "TIME_STOP_MIN_R": 0.5,
+    "ATR_TRAIL_MULT": 2.2,
+    "confidence": "high",
+    "observed_median_d_to_mfe": 1.0,
+    "observed_mean_r": 0.16810384615384616
+  },
+  "leap": {
+    "n": 222,
+    "MAX_HOLD_DAYS": 15,
     "TIME_STOP_MIN_R": 0.5,
     "ATR_TRAIL_MULT": 2.1,
     "confidence": "high",
     "observed_median_d_to_mfe": 1.0,
-    "observed_mean_r": 0.3060451428571429
-  },
-  "leap": {
-    "n": 214,
-    "MAX_HOLD_DAYS": 15,
-    "TIME_STOP_MIN_R": 0.5,
-    "ATR_TRAIL_MULT": 2.0,
-    "confidence": "high",
-    "observed_median_d_to_mfe": 1.0,
-    "observed_mean_r": 0.16806781609195398
+    "observed_mean_r": 0.0031224719101123673
   },
   "unknown": {
-    "n": 216,
+    "n": 222,
     "MAX_HOLD_DAYS": 5,
     "TIME_STOP_MIN_R": 1.0,
     "ATR_TRAIL_MULT": 2.1,
     "confidence": "high",
     "observed_median_d_to_mfe": 1.0,
-    "observed_mean_r": 0.4063554945054945
+    "observed_mean_r": 0.34290918918918917
   }
 }
