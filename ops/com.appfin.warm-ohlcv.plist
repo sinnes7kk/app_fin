@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.appfin.warm-ohlcv</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/philip.sierpinski/Documents/app_fin/ops/warm_ohlcv.sh</string>
+    </array>
+
+    <!-- Sunday 20:00 local. The backtest fires at 22:00 UTC the same day, so
+         the refreshed cache is on main roughly four hours before it runs. -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Weekday</key>
+        <integer>0</integer>
+        <key>Hour</key>
+        <integer>20</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <!-- Catch up after the Mac has been asleep through the scheduled slot. -->
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/philip.sierpinski/Documents/app_fin/data/ohlcv_warm.stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/philip.sierpinski/Documents/app_fin/data/ohlcv_warm.stderr.log</string>
+</dict>
+</plist>

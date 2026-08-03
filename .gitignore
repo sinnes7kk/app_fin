@@ -65,3 +65,4 @@ data/dp_scan_count.txt
 
 # Migration backups (see scripts/restamp_snapshot_weekends.py)
 data/*.bak
+data/ohlcv_warm*.log
