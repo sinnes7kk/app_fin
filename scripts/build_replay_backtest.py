@@ -49,6 +49,9 @@ GRADE_HISTORY = DATA_DIR / "grade_history.csv"
 OUT_PANEL = DATA_DIR / "grade_history_with_replay.csv"
 OHLCV_CACHE_DIR = DATA_DIR / "_ohlcv_cache"
 OHLCV_CACHE_TTL_S = 24 * 3600
+# Calendar days of history to keep before the oldest signal so the ATR-14 at
+# the decision bar is warm rather than seeded from a half-filled window.
+ATR_WARMUP_DAYS = 60
 
 ASSUMED_STOP_PCT = 0.02  # legacy metric we cross-reference
 
@@ -60,19 +63,68 @@ def _ohlcv_cache_path(ticker: str) -> Path:
     return OHLCV_CACHE_DIR / f"{safe}.csv"
 
 
-def _load_ohlcv(ticker: str, lookback_days: int = 120) -> pd.DataFrame | None:
-    """Disk-cached OHLCV fetch via yfinance (fail soft)."""
+def _covers(df: pd.DataFrame | None, start, end) -> bool:
+    """True when ``df``'s index spans ``[start, end]``."""
+    if df is None or df.empty:
+        return False
+    try:
+        idx = pd.DatetimeIndex(df.index)
+        if idx.tz is not None:
+            idx = idx.tz_localize(None)
+        return bool(idx.min() <= start and idx.max() >= end)
+    except Exception:
+        return False
+
+
+def _merge_cached(path: Path, fresh: pd.DataFrame) -> pd.DataFrame:
+    """Union a freshly-fetched frame with whatever is already cached.
+
+    Fresh bars win on overlapping dates. Any failure (unreadable file,
+    mismatched index dtype) falls back to the fresh frame untouched.
+    """
+    if not path.exists():
+        return fresh
+    try:
+        prev = pd.read_csv(path, index_col=0, parse_dates=True)
+        if prev.empty:
+            return fresh
+        merged = pd.concat([prev, fresh])
+        merged = merged[~merged.index.duplicated(keep="last")].sort_index()
+        return merged if not merged.empty else fresh
+    except Exception:
+        return fresh
+
+
+def _load_ohlcv(
+    ticker: str,
+    lookback_days: int = 120,
+    needed_from=None,
+    needed_through=None,
+) -> pd.DataFrame | None:
+    """Disk-cached OHLCV fetch via yfinance (fail soft).
+
+    A cached frame is only reused when it actually spans
+    ``[needed_from, needed_through]``. Age alone is not a safe test: CI
+    checks the committed cache out fresh on every run, so every file looks
+    new, and a frame that stops short of a row's ``as_of`` would be reused
+    forever — the replay then returns ``not_enough_forward_bars`` and the
+    row silently drops out of the panel with a NaN label.
+    """
     OHLCV_CACHE_DIR.mkdir(parents=True, exist_ok=True)
     p = _ohlcv_cache_path(ticker)
     if p.exists():
-        age = time.time() - p.stat().st_mtime
-        if age < OHLCV_CACHE_TTL_S:
-            try:
-                df = pd.read_csv(p, index_col=0, parse_dates=True)
-                if not df.empty:
+        try:
+            df = pd.read_csv(p, index_col=0, parse_dates=True)
+        except Exception:
+            df = None
+        if df is not None and not df.empty:
+            if needed_from is not None or needed_through is not None:
+                lo = needed_from if needed_from is not None else df.index.min()
+                hi = needed_through if needed_through is not None else df.index.max()
+                if _covers(df, lo, hi):
                     return df
-            except Exception:
-                pass
+            elif time.time() - p.stat().st_mtime < OHLCV_CACHE_TTL_S:
+                return df
     try:
         from app.features.price_features import fetch_ohlcv
         df = fetch_ohlcv(ticker, lookback_days=lookback_days, include_partial=False)
@@ -80,6 +132,11 @@ def _load_ohlcv(ticker: str, lookback_days: int = 120) -> pd.DataFrame | None:
         return None
     if df is None or df.empty:
         return None
+    # Widen the cached file rather than replacing it. This directory is shared
+    # with the hourly scan, which only ever needs a short recent window — a
+    # plain overwrite means the two callers keep truncating each other's
+    # history and the replay refetches all ~600 tickers every run.
+    df = _merge_cached(p, df)
     try:
         df.to_csv(p)
     except Exception:
@@ -156,7 +213,23 @@ def replay_panel(panel: pd.DataFrame, max_rows: int | None = None) -> pd.DataFra
 
     Skips rows where OHLCV fetch fails. Returns a new DataFrame.
     """
-    spy = _load_ohlcv("SPY", lookback_days=120)
+    # The fetch/cache window has to span the whole panel — from enough
+    # warm-up for the ATR-14 before the oldest signal through the newest one.
+    # A 120-day window silently truncates as grade_history grows past it.
+    as_of_dt = pd.to_datetime(panel["as_of"], errors="coerce").dropna()
+    if as_of_dt.empty:
+        needed_from = needed_through = None
+        lookback_days = 120
+    else:
+        needed_from = as_of_dt.min() - pd.Timedelta(days=ATR_WARMUP_DAYS)
+        needed_through = as_of_dt.max()
+        span = (pd.Timestamp.today().normalize() - needed_from).days
+        lookback_days = max(120, int(span) + 30)
+        print(f"  [replay] OHLCV window: {needed_from.date()} → "
+              f"{needed_through.date()} (lookback_days={lookback_days})")
+
+    spy = _load_ohlcv("SPY", lookback_days=lookback_days,
+                      needed_from=needed_from, needed_through=needed_through)
 
     rows = panel.to_dict("records")
     if max_rows is not None:
@@ -173,7 +246,8 @@ def replay_panel(panel: pd.DataFrame, max_rows: int | None = None) -> pd.DataFra
             skipped += 1
             fetch_fail["missing_id"] += 1
             continue
-        df = _load_ohlcv(ticker, lookback_days=120)
+        df = _load_ohlcv(ticker, lookback_days=lookback_days,
+                         needed_from=needed_from, needed_through=needed_through)
         if df is None or df.empty:
             skipped += 1
             fetch_fail[ticker] += 1

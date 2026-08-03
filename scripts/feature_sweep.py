@@ -11,14 +11,25 @@ every scorer against the bar-by-bar ``replay_realized_r``:
   - the feature-lab free features, the aggressor family, the UW options
     features, and the shadow composites.
 
+Each feature is scored against *two* labels, because they answer different
+questions: ``replay_realized_r`` is the outcome after the replay's exit
+policy (what the account earns, but confounded with stop/target quality),
+while ``replay_forward_return_5d`` is a plain 5-day close-to-close move that
+no entry or exit rule touches (does the feature predict price at all). A
+feature that scores well on forward return but poorly on realized R points
+at the exit policy, not the feature.
+
 For each feature it reports:
 
-  - ``n``            rows with both feature and realized_r populated
+  - ``n``            matured rows with both feature and realized_r populated
   - ``spearman``     pooled rank IC vs realized_r (in-sample)
   - ``oos_spearman`` chronological 60/40 walk-forward rank IC (leakage-safe-ish)
   - ``r_spread``     mean realized R of the top tercile minus the bottom
                      tercile (the actual $ edge, in R units)
   - ``p``            two-sided p-value on the pooled rank IC
+  - ``n_fwd`` / ``fwd_spearman`` / ``fwd_oos`` — the same rank ICs against the
+                     plan-free forward return, over all rows (no maturity
+                     filter, so newly-added features become readable sooner)
 
 Sorted by a robustness score = sign-agreeing OOS rank IC, so features that
 only look good in-sample sink. Writes
@@ -49,6 +60,12 @@ DATA_DIR = ROOT / "data"
 REPLAY_PATH = DATA_DIR / "grade_history_with_replay.csv"
 LAB_PATH = DATA_DIR / "feature_lab.csv"
 TARGET = "replay_realized_r"
+# Plan-free companion label. ``replay_realized_r`` is the outcome *after* the
+# replay's stop/target/trail policy, so a feature that predicts price can look
+# flat purely because the exit policy ate the move. The raw forward return
+# answers the narrower question — does the feature predict where price goes —
+# and needs no matured trade, only N more bars.
+FWD_TARGET = "replay_forward_return_5d"
 
 # Feature -> (family, in_score?) provenance. "family" groups the output;
 # "role" says whether the feature actually feeds a live score today.
@@ -147,15 +164,15 @@ def _spearman_p(rho: float, n: int) -> float:
 
 
 def _oos_spearman(df: pd.DataFrame, feat: str, train_frac: float = 0.6,
-                  min_train: int = 12) -> tuple[float, int]:
-    sub = df[["__dt", feat, TARGET]].dropna().sort_values("__dt")
+                  min_train: int = 12, target: str = TARGET) -> tuple[float, int]:
+    sub = df[["__dt", feat, target]].dropna().sort_values("__dt")
     if len(sub) < min_train + 5:
         return float("nan"), 0
     n_train = int(len(sub) * train_frac)
     val = sub.iloc[n_train:]
     if len(val) < 5:
         return float("nan"), 0
-    sp, _ = _spearman(val[feat], val[TARGET])
+    sp, _ = _spearman(val[feat], val[target])
     return sp, len(val)
 
 
@@ -222,33 +239,41 @@ def build_panel() -> pd.DataFrame:
         lab[["__t", "__d", "__a"] + lab_only],
         on=["__t", "__d", "__a"], how="left",
     )
-    merged = merged[pd.to_numeric(merged[TARGET], errors="coerce").notna()].copy()
+    if FWD_TARGET not in merged.columns:
+        merged[FWD_TARGET] = float("nan")
+    has_r = pd.to_numeric(merged[TARGET], errors="coerce").notna()
+    has_fwd = pd.to_numeric(merged[FWD_TARGET], errors="coerce").notna()
+    merged = merged[has_r | has_fwd].copy()
 
-    # Matured-only: exclude trades whose OHLCV ran out before an exit fired.
-    # Those "no_exit_yet" rows carry a truncated mark-to-market R (typically
+    # Matured-only applies to the realized-R label only. Trades whose OHLCV ran
+    # out before an exit fired carry a truncated mark-to-market R (typically
     # 0-3 days held) and, being the most recent signals, would otherwise
-    # dominate the time-based OOS window and bias every feature verdict.
-    before = len(merged)
-    mask = _matured_mask(merged)
-    merged = merged[mask].copy()
-    dropped = before - len(merged)
-    if dropped:
-        print(f"  [feature_sweep] matured filter: kept {len(merged)}, dropped {dropped} immature rows")
-
+    # dominate the time-based OOS window and bias every feature verdict. The
+    # forward-return label has no such failure mode — it just needs N more bars
+    # — so immature rows stay in the panel and are masked per-label instead.
+    merged["__matured"] = _matured_mask(merged)
     merged["__dt"] = pd.to_datetime(merged["as_of"], errors="coerce")
+    n_r = int((merged["__matured"] & pd.to_numeric(
+        merged[TARGET], errors="coerce").notna()).sum())
+    n_fwd = int(pd.to_numeric(merged[FWD_TARGET], errors="coerce").notna().sum())
+    print(f"  [feature_sweep] panel {len(merged)} rows: "
+          f"{n_r} matured realized_r, {n_fwd} with {FWD_TARGET}")
     return merged
 
 
 def sweep(panel: pd.DataFrame, min_n: int = 30) -> pd.DataFrame:
+    matured = panel[panel["__matured"]]
     rows = []
     for feat, (family, role) in FEATURE_PROVENANCE.items():
         if feat not in panel.columns:
             continue
-        sp, n = _spearman(panel[feat], panel[TARGET])
-        if n < min_n:
+        sp, n = _spearman(matured[feat], matured[TARGET])
+        fwd_sp, n_fwd = _spearman(panel[feat], panel[FWD_TARGET])
+        if n < min_n and n_fwd < min_n:
             continue
-        oos, n_val = _oos_spearman(panel, feat)
-        spread, _ = _tercile_spread(panel, feat)
+        oos, n_val = _oos_spearman(matured, feat)
+        fwd_oos, _ = _oos_spearman(panel, feat, target=FWD_TARGET)
+        spread, _ = _tercile_spread(matured, feat)
         p = _spearman_p(sp, n)
         # Robustness: OOS rank IC, but only credited when it agrees in sign
         # with the pooled IC (kills in-sample-only flukes).
@@ -260,6 +285,7 @@ def sweep(panel: pd.DataFrame, min_n: int = 30) -> pd.DataFrame:
             "n": n, "spearman": sp, "p": p,
             "oos_spearman": oos, "n_val": n_val,
             "r_spread": spread, "robust": robust,
+            "n_fwd": n_fwd, "fwd_spearman": fwd_sp, "fwd_oos": fwd_oos,
         })
     df = pd.DataFrame(rows)
     if df.empty:
@@ -278,18 +304,37 @@ def _f(v, nd=3, signed=True):
 def render(panel: pd.DataFrame, ranked: pd.DataFrame) -> str:
     today = datetime.now().strftime("%Y-%m-%d %H:%M")
     n_rows = len(panel)
+    n_mat = int(panel["__matured"].sum())
+    n_fwd = int(pd.to_numeric(panel[FWD_TARGET], errors="coerce").notna().sum())
     lines = [
         f"# Unified feature sweep — {today}",
         "",
-        f"Panel: **{n_rows} rows** with a bar-by-bar `replay_realized_r`, "
-        "joined `grade_history_with_replay.csv` × `feature_lab.csv` on "
-        "(as_of, ticker, direction).",
+        f"Panel: **{n_rows} rows** joined `grade_history_with_replay.csv` × "
+        "`feature_lab.csv` on (as_of, ticker, direction) — "
+        f"**{n_mat}** matured rows carry `replay_realized_r`, "
+        f"**{n_fwd}** carry `{FWD_TARGET}`.",
         "",
-        "`spearman` = pooled rank IC vs realized R (in-sample). "
+        "Every feature is scored against **two labels**:",
+        "",
+        f"- **realized R** (`{TARGET}`, matured rows only) — the outcome after "
+        "the replay's stop/target/trail policy. This is what the account "
+        "actually earns, but it confounds feature quality with exit-policy "
+        "quality: a feature can predict the move correctly and still score "
+        "flat because the stop took the trade out first.",
+        f"- **forward return** (`{FWD_TARGET}`, all rows) — plain 5-day "
+        "close-to-close, independent of any entry or exit rule. This isolates "
+        "*does the feature predict price*, and needs no matured trade, so it "
+        "reaches a usable sample far sooner on newly-added features.",
+        "",
+        "Read them together. Agreement in sign is the strong signal. A feature "
+        "with a good forward IC but a poor realized-R IC is a hint that the "
+        "**exit policy**, not the feature, is the thing to fix.",
+        "",
+        "`spearman` = pooled rank IC (in-sample). "
         "`oos` = chronological 60/40 walk-forward rank IC. "
         "`r_spread` = mean realized R of top tercile − bottom tercile "
-        "(the $ edge, in R). Sorted by sign-agreeing OOS IC so in-sample-only "
-        "flukes sink.",
+        "(the $ edge, in R). Sorted by sign-agreeing OOS IC on realized R so "
+        "in-sample-only flukes sink.",
         "",
         "**Caveat:** one bull-market regime, small OOS slices. Treat this as a "
         "hypothesis watchlist, not a hit list. A feature needs |IC| that holds "
@@ -297,11 +342,11 @@ def render(panel: pd.DataFrame, ranked: pd.DataFrame) -> str:
         "",
         "---",
         "",
-        "## Full ranking (all scorers, one target)",
+        "## Full ranking (all scorers, both targets)",
         "",
     ]
     headers = ["Feature", "Family", "Live?", "n", "Spearman", "p",
-               "OOS", "n_val", "R-spread"]
+               "OOS", "n_val", "R-spread", "n (fwd)", "Fwd IC", "Fwd OOS"]
     body = ["| " + " | ".join(headers) + " |",
             "| " + " | ".join(["---"] * len(headers)) + " |"]
     for _, r in ranked.iterrows():
@@ -310,6 +355,7 @@ def render(panel: pd.DataFrame, ranked: pd.DataFrame) -> str:
             _f(r["spearman"]), _f(r["p"], nd=3, signed=False),
             _f(r["oos_spearman"]), int(r["n_val"]),
             _f(r["r_spread"], nd=2),
+            int(r["n_fwd"]), _f(r["fwd_spearman"]), _f(r["fwd_oos"]),
         ]) + " |")
     lines.append("\n".join(body))
     lines.append("")
@@ -331,6 +377,31 @@ def render(panel: pd.DataFrame, ranked: pd.DataFrame) -> str:
                 f"- `{r['feature']}` ({r['family']}, {r['role']}): "
                 f"Spearman {_f(r['spearman'])}, OOS {_f(r['oos_spearman'])}, "
                 f"R-spread {_f(r['r_spread'], nd=2)}, n={int(r['n'])}"
+            )
+    lines.append("")
+
+    # Where the two labels disagree, the exit policy is the suspect.
+    lines.append("## Predicts price but not realized R (exit-policy suspects)")
+    lines.append("")
+    lines.append(
+        "Features whose forward-return IC is meaningfully positive while their "
+        "realized-R IC is flat or negative. The feature is calling the move; "
+        "the stop/target/trail is giving it back."
+    )
+    lines.append("")
+    gap = ranked[
+        (ranked["n_fwd"] >= 40)
+        & (ranked["fwd_spearman"] >= 0.10)
+        & (ranked["spearman"].fillna(0) < 0.05)
+    ]
+    if gap.empty:
+        lines.append("_No feature shows that split on current data._")
+    else:
+        for _, r in gap.iterrows():
+            lines.append(
+                f"- `{r['feature']}` ({r['family']}, {r['role']}): "
+                f"forward IC {_f(r['fwd_spearman'])} (n={int(r['n_fwd'])}) vs "
+                f"realized-R IC {_f(r['spearman'])} (n={int(r['n'])})"
             )
     lines.append("")
     return "\n".join(lines)
@@ -358,7 +429,8 @@ def main(argv: list[str] | None = None) -> int:
     for _, r in ranked.head(15).iterrows():
         print(f"  {r['feature']:28s} {r['family']:28s} "
               f"n={int(r['n']):4d} sp={_f(r['spearman'])} "
-              f"oos={_f(r['oos_spearman'])} Rspread={_f(r['r_spread'],nd=2)}")
+              f"oos={_f(r['oos_spearman'])} Rspread={_f(r['r_spread'],nd=2)} "
+              f"| fwd n={int(r['n_fwd']):4d} ic={_f(r['fwd_spearman'])}")
     return 0
 
 

@@ -53,6 +53,21 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      # The replay needs OHLCV spanning the whole grade_history panel, which
+      # is far more history than the short frames the hourly scan commits to
+      # this directory. Persisting the widened frames here (rather than in
+      # git) keeps ~600 refetches off every run without adding price data to
+      # the repo. Restored after checkout, so the cached wide frames win over
+      # the committed short ones. A miss just means a slow run, not a wrong
+      # one — build_replay_backtest refetches anything the cache can't cover.
+      - name: Restore OHLCV cache
+        uses: actions/cache@v4
+        with:
+          path: data/_ohlcv_cache
+          key: ohlcv-${{ github.run_id }}
+          restore-keys: |
+            ohlcv-
+
       - name: Run replay backtest
         if: env.MODE == 'replay' || env.MODE == 'both'
         run: python scripts/build_replay_backtest.py
@@ -96,8 +111,10 @@ jobs:
             data/diagnostic_replay_*.md \
             data/diagnostic_recalibration_*.md \
             data/diagnostic_feature_lab_*.md \
+            data/diagnostic_feature_sweep_*.md \
             data/momentum_shadow_*.md \
-            data/meta_label_shadow_*.md; do
+            data/meta_label_shadow_*.md \
+            data/grade_attribution.json; do
             # Tolerate absent files (e.g. recal-only runs don't refresh
             # diagnostic_replay) — same idiom as hourly_scan.
             for path in $f; do
