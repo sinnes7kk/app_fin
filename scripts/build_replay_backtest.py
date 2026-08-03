@@ -112,26 +112,32 @@ def _load_ohlcv(
     """
     OHLCV_CACHE_DIR.mkdir(parents=True, exist_ok=True)
     p = _ohlcv_cache_path(ticker)
+    cached: pd.DataFrame | None = None
     if p.exists():
         try:
-            df = pd.read_csv(p, index_col=0, parse_dates=True)
+            cached = pd.read_csv(p, index_col=0, parse_dates=True)
         except Exception:
-            df = None
-        if df is not None and not df.empty:
+            cached = None
+        if cached is not None and not cached.empty:
             if needed_from is not None or needed_through is not None:
-                lo = needed_from if needed_from is not None else df.index.min()
-                hi = needed_through if needed_through is not None else df.index.max()
-                if _covers(df, lo, hi):
-                    return df
+                lo = needed_from if needed_from is not None else cached.index.min()
+                hi = needed_through if needed_through is not None else cached.index.max()
+                if _covers(cached, lo, hi):
+                    return cached
             elif time.time() - p.stat().st_mtime < OHLCV_CACHE_TTL_S:
-                return df
+                return cached
     try:
         from app.features.price_features import fetch_ohlcv
         df = fetch_ohlcv(ticker, lookback_days=lookback_days, include_partial=False)
     except Exception:
-        return None
+        df = None
     if df is None or df.empty:
-        return None
+        # Refetch failed. Yahoo blocks the GitHub runner outright, so this is
+        # the norm there, not the exception. Serve the short cached frame
+        # anyway: rows past its last bar still drop out, but that is exactly
+        # the pre-coverage-check behaviour rather than an empty panel and a
+        # failed job.
+        return cached
     # Widen the cached file rather than replacing it. This directory is shared
     # with the hourly scan, which only ever needs a short recent window — a
     # plain overwrite means the two callers keep truncating each other's
