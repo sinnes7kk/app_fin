@@ -90,6 +90,7 @@ snapshot_date,ticker,st_messages,st_bullish,st_bearish,st_sentiment,rd_mentions,
 2026-07-30,NRG,0,0,0,0.5,0,0,0,—,neutral
 2026-07-30,VRT,0,0,0,0.5,0,0,0,—,neutral
 2026-07-31,COIN,0,0,0,0.5,0,0,0,—,neutral
+2026-07-31,FSLR,0,0,0,0.5,0,0,0,—,neutral
 2026-07-31,CRWV,0,0,0,0.5,0,0,0,—,neutral
 2026-07-31,CVNA,0,0,0,0.5,0,0,0,—,neutral
 2026-07-31,ALMS,0,0,0,0.5,0,0,0,—,neutral
@@ -98,9 +99,8 @@ snapshot_date,ticker,st_messages,st_bullish,st_bearish,st_sentiment,rd_mentions,
 2026-07-31,CORZ,0,0,0,0.5,0,0,0,—,neutral
 2026-07-31,EWY,0,0,0,0.5,0,0,0,—,neutral
 2026-07-31,MSTR,0,0,0,0.5,0,0,0,—,neutral
+2026-07-31,UAN,0,0,0,0.5,0,0,0,—,neutral
 2026-07-31,NOW,0,0,0,0.5,0,0,0,—,neutral
 2026-07-31,CECO,0,0,0,0.5,0,0,0,—,neutral
 2026-07-31,FRMI,0,0,0,0.5,0,0,0,—,neutral
-2026-07-31,RIOT,0,0,0,0.5,0,0,0,—,neutral
-2026-07-31,CRCL,0,0,0,0.5,0,0,0,—,neutral
 2026-07-31,MRCY,0,0,0,0.5,0,0,0,—,neutral
