@@ -8,6 +8,11 @@ computes:
   - Spearman vs ``replay_realized_r``
   - Per-DTE-bucket Spearman
   - Walk-forward OOS Spearman (60/40 chronological split, requires n>=20)
+  - The same rank ICs against ``replay_forward_return_5d`` — a plan-free
+    5-day close-to-close label. Realized R is the outcome *after* the
+    replay's stop/target/trail policy, so a feature that reads the move
+    correctly can still score flat there. Comparing the two separates a bad
+    feature from a bad exit policy.
 
 Writes ``data/diagnostic_feature_lab_<YYYY-MM-DD>.md`` with the ranked
 table.  Designed to be run weekly alongside the existing replay
@@ -52,6 +57,13 @@ DATA_DIR = ROOT / "data"
 LAB_PATH = DATA_DIR / "feature_lab.csv"
 REPLAY_PATH = DATA_DIR / "grade_history_with_replay.csv"
 
+TARGET = "replay_realized_r"
+# Plan-free companion label — see the module docstring. Realized R is the
+# outcome after the replay's stop/target/trail policy; the forward return is
+# the raw move, so the pair separates "the feature is wrong" from "the exit
+# policy gave the move back".
+FWD_TARGET = "replay_forward_return_5d"
+
 DTE_BUCKETS = ("lottery", "swing", "position", "leap", "unknown")
 
 # Flow-tracker fields that are computed + persisted but never enter
@@ -85,7 +97,7 @@ def _spearman(a: pd.Series, b: pd.Series) -> tuple[float, int]:
 
 
 def _walk_forward_spearman(
-    df: pd.DataFrame, feature: str, target: str = "replay_realized_r",
+    df: pd.DataFrame, feature: str, target: str = TARGET,
     train_frac: float = 0.6, min_train: int = 12,
 ) -> tuple[float, int, int]:
     sub = df[["as_of", feature, target]].dropna()
@@ -136,8 +148,12 @@ def build_panel(
                          "scripts/build_replay_backtest.py first.")
     lab = pd.read_csv(lab_path)
     replay = pd.read_csv(replay_path)
-    if "replay_realized_r" not in replay.columns:
-        raise SystemExit("replay panel missing replay_realized_r column.")
+    if TARGET not in replay.columns:
+        raise SystemExit(f"replay panel missing {TARGET} column.")
+    if FWD_TARGET not in replay.columns:
+        # Pre-dating the forward-return columns: degrade to realized R only
+        # rather than failing the weekly run.
+        replay[FWD_TARGET] = float("nan")
 
     # Normalize join keys
     for df in (lab, replay):
@@ -145,7 +161,7 @@ def build_panel(
         df["__key_d"] = df["direction"].astype(str).str.upper().str.strip()
         df["__key_a"] = df["as_of"].astype(str).str.strip()
     keep_cols = (
-        ["__key_t", "__key_d", "__key_a", "replay_realized_r"]
+        ["__key_t", "__key_d", "__key_a", TARGET, FWD_TARGET]
         + [c for c in ("dominant_dte_bucket", "conviction_grade", "is_promoted")
            if c in replay.columns]
         # Monitor-only flow-tracker fields (see FLOW_TRACKER_MONITOR_COLS).
@@ -168,15 +184,17 @@ def rank_features(panel: pd.DataFrame) -> pd.DataFrame:
     for feat in ALL_FEATURE_COLS:
         if feat not in panel.columns:
             continue
-        sp_overall, n_overall = _spearman(panel[feat], panel["replay_realized_r"])
+        sp_overall, n_overall = _spearman(panel[feat], panel[TARGET])
         per_bucket = {}
         for b in DTE_BUCKETS:
             sub = panel[panel["dte_bucket"] == b]
             if sub.empty:
                 continue
-            sp_b, n_b = _spearman(sub[feat], sub["replay_realized_r"])
+            sp_b, n_b = _spearman(sub[feat], sub[TARGET])
             per_bucket[b] = (sp_b, n_b)
         sp_oos, n_total, n_val = _walk_forward_spearman(panel, feat)
+        fwd_sp, n_fwd = _spearman(panel[feat], panel[FWD_TARGET])
+        fwd_oos, _, _ = _walk_forward_spearman(panel, feat, target=FWD_TARGET)
         rows.append({
             "feature": feat,
             "n": n_overall,
@@ -184,6 +202,9 @@ def rank_features(panel: pd.DataFrame) -> pd.DataFrame:
             "per_bucket": per_bucket,
             "oos_spearman": sp_oos,
             "n_val": n_val,
+            "n_fwd": n_fwd,
+            "fwd_spearman": fwd_sp,
+            "fwd_oos": fwd_oos,
         })
     df = pd.DataFrame(rows)
     if df.empty:
@@ -207,6 +228,13 @@ def render_report(panel: pd.DataFrame, ranked: pd.DataFrame) -> str:
         "walk-forward OOS Spearman are promotion candidates. Features with "
         "consistently *negative* Spearman are candidates for sign inversion.",
         "",
+        f"The `Fwd IC` columns repeat the same rank correlation against "
+        f"`{FWD_TARGET}` — a plain 5-day close-to-close move that no entry or "
+        "exit rule touches. Realized R tells you what the account earned; the "
+        "forward return tells you whether the feature called the move at all. "
+        "A feature that scores well on forward return but flat on realized R "
+        "is evidence against the **exit policy**, not against the feature.",
+        "",
         "**Caveat:** until the panel reaches ~250 closed-and-replayed rows "
         "any single ranking is dominated by sampling noise. Treat this as a "
         "watchlist of hypotheses, not a hit list of fixes.",
@@ -224,9 +252,13 @@ def render_report(panel: pd.DataFrame, ranked: pd.DataFrame) -> str:
             _fmt_corr(r["spearman"]),
             _fmt_corr(r["oos_spearman"]),
             int(r["n_val"]),
+            int(r["n_fwd"]),
+            _fmt_corr(r["fwd_spearman"]),
+            _fmt_corr(r["fwd_oos"]),
         ])
     lines.append(_table(
-        ["Feature", "n", "Spearman", "OOS Spearman", "n_val"], rows,
+        ["Feature", "n", "Spearman", "OOS Spearman", "n_val",
+         "n (fwd)", "Fwd IC", "Fwd OOS"], rows,
     ))
     lines.append("")
     lines.append("## 2. Per-DTE-bucket breakdown")
