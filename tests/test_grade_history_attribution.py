@@ -350,6 +350,37 @@ def test_attribution_reports_insufficient_history_below_threshold():
     )
 
 
+def test_insufficient_history_does_not_clobber_populated_report():
+    """The hourly scan has no replay panel, so it always computes an empty
+    legacy result. That must not overwrite the backtest's populated report."""
+    import json
+
+    from app.analytics import grade_attribution as ga
+    from app.analytics import grade_history as gh
+
+    tmp_hist = Path(tempfile.mkdtemp()) / "grade_history.csv"
+    tmp_attr = tmp_hist.parent / "grade_attribution.json"
+    good = {"n_rows": 161, "target": "replay_realized_r", "status": "ok"}
+    tmp_attr.write_text(json.dumps(good))
+
+    with patch.object(gh, "GRADE_HISTORY_PATH", tmp_hist), \
+         patch.object(ga, "ATTRIBUTION_PATH", tmp_attr):
+        report = ga.refresh_attribution(min_samples=30, source="forward")
+
+    assert report.get("status") == "insufficient_history", report.get("status")
+    on_disk = json.loads(tmp_attr.read_text())
+    assert on_disk == good, f"populated report was overwritten: {on_disk}"
+
+    # An already-empty report is still refreshed in place.
+    tmp_attr.write_text(json.dumps({"n_rows": 0, "status": "insufficient_history"}))
+    with patch.object(gh, "GRADE_HISTORY_PATH", tmp_hist), \
+         patch.object(ga, "ATTRIBUTION_PATH", tmp_attr):
+        ga.refresh_attribution(min_samples=30, source="forward")
+    assert "computed_at" in json.loads(tmp_attr.read_text()), (
+        "empty report should still be rewritten"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Standalone runner
 # ---------------------------------------------------------------------------
@@ -366,6 +397,7 @@ if __name__ == "__main__":
         test_attribution_prefers_replay_realized_r_source,
         test_attribution_drops_immature_replay_rows,
         test_attribution_reports_insufficient_history_below_threshold,
+        test_insufficient_history_does_not_clobber_populated_report,
     ]
     failures = 0
     for t in tests:

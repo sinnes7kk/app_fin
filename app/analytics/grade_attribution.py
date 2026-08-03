@@ -275,6 +275,17 @@ def _load_replay_rows() -> list[dict[str, Any]]:
     ]
 
 
+def _persisted_report_has_rows() -> bool:
+    """True when the on-disk report already holds a populated result."""
+    if not ATTRIBUTION_PATH.exists():
+        return False
+    try:
+        with open(ATTRIBUTION_PATH, "r") as f:
+            return int(json.load(f).get("n_rows") or 0) > 0
+    except Exception:
+        return False
+
+
 def refresh_attribution(
     window_days: int = DEFAULT_WINDOW_DAYS,
     min_samples: int = DEFAULT_MIN_SAMPLES,
@@ -325,7 +336,12 @@ def refresh_attribution(
             "numeric": {},
             "categorical": {},
         }
-        if write:
+        # The hourly scan calls this without a replay panel — REPLAY_PATH is
+        # produced (and gitignored) by the weekly backtest job only — so it
+        # always lands on the empty legacy branch and would clobber the
+        # backtest's populated report. An empty result never replaces a
+        # populated one on disk.
+        if write and not _persisted_report_has_rows():
             ATTRIBUTION_PATH.parent.mkdir(parents=True, exist_ok=True)
             with open(ATTRIBUTION_PATH, "w") as f:
                 json.dump(result, f, indent=2)
