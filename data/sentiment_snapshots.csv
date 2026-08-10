@@ -89,7 +89,6 @@ snapshot_date,ticker,st_messages,st_bullish,st_bearish,st_sentiment,rd_mentions,
 2026-08-06,DFTX,0,0,0,0.5,0,0,0,—,neutral
 2026-08-06,FLUT,0,0,0,0.5,0,0,0,—,neutral
 2026-08-06,SBH,0,0,0,0.5,0,0,0,—,neutral
-2026-08-07,EYE,0,0,0,0.5,0,0,0,—,neutral
 2026-08-07,TDC,0,0,0,0.5,0,0,0,—,neutral
 2026-08-07,LULU,0,0,0,0.5,0,0,0,—,neutral
 2026-08-07,LCID,0,0,0,0.5,0,0,0,—,neutral
@@ -97,6 +96,7 @@ snapshot_date,ticker,st_messages,st_bullish,st_bearish,st_sentiment,rd_mentions,
 2026-08-07,RARE,0,0,0,0.5,0,0,0,—,neutral
 2026-08-07,DAVE,0,0,0,0.5,0,0,0,—,neutral
 2026-08-07,ERO,0,0,0,0.5,0,0,0,—,neutral
+2026-08-07,EYE,0,0,0,0.5,0,0,0,—,neutral
 2026-08-07,CRWV,0,0,0,0.5,0,0,0,—,neutral
 2026-08-07,GLXY,0,0,0,0.5,0,0,0,—,neutral
 2026-08-07,ZETA,0,0,0,0.5,0,0,0,—,neutral
