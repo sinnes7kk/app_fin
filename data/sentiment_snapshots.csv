@@ -95,6 +95,7 @@ snapshot_date,ticker,st_messages,st_bullish,st_bearish,st_sentiment,rd_mentions,
 2026-08-07,LCID,0,0,0,0.5,0,0,0,—,neutral
 2026-08-07,ESTA,0,0,0,0.5,0,0,0,—,neutral
 2026-08-07,RARE,0,0,0,0.5,0,0,0,—,neutral
+2026-08-07,DAVE,0,0,0,0.5,0,0,0,—,neutral
 2026-08-07,ERO,0,0,0,0.5,0,0,0,—,neutral
 2026-08-07,CRWV,0,0,0,0.5,0,0,0,—,neutral
 2026-08-07,GLXY,0,0,0,0.5,0,0,0,—,neutral
@@ -103,4 +104,3 @@ snapshot_date,ticker,st_messages,st_bullish,st_bearish,st_sentiment,rd_mentions,
 2026-08-07,CE,0,0,0,0.5,0,0,0,—,neutral
 2026-08-07,MSTR,0,0,0,0.5,0,0,0,—,neutral
 2026-08-07,NBIS,0,0,0,0.5,0,0,0,—,neutral
-2026-08-07,RKLB,0,0,0,0.5,0,0,0,—,neutral
