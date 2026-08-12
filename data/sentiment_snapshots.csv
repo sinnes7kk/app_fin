@@ -89,13 +89,12 @@ snapshot_date,ticker,st_messages,st_bullish,st_bearish,st_sentiment,rd_mentions,
 2026-08-10,CBRS,0,0,0,0.5,0,0,0,—,neutral
 2026-08-10,DAVE,0,0,0,0.5,0,0,0,—,neutral
 2026-08-10,FLYW,0,0,0,0.5,0,0,0,—,neutral
+2026-08-11,DFTX,0,0,0,0.5,0,0,0,—,neutral
 2026-08-11,UPWK,0,0,0,0.5,0,0,0,—,neutral
 2026-08-11,CLMT,0,0,0,0.5,0,0,0,—,neutral
 2026-08-11,ERO,0,0,0,0.5,0,0,0,—,neutral
 2026-08-11,BW,0,0,0,0.5,0,0,0,—,neutral
-2026-08-11,DFTX,0,0,0,0.5,0,0,0,—,neutral
 2026-08-11,LULU,0,0,0,0.5,0,0,0,—,neutral
-2026-08-11,ONON,0,0,0,0.5,0,0,0,—,neutral
 2026-08-11,SITM,0,0,0,0.5,0,0,0,—,neutral
 2026-08-11,BROS,0,0,0,0.5,0,0,0,—,neutral
 2026-08-11,CRCL,0,0,0,0.5,0,0,0,—,neutral
@@ -104,3 +103,4 @@ snapshot_date,ticker,st_messages,st_bullish,st_bearish,st_sentiment,rd_mentions,
 2026-08-11,BTU,0,0,0,0.5,0,0,0,—,neutral
 2026-08-11,EYE,0,0,0,0.5,0,0,0,—,neutral
 2026-08-11,PCT,0,0,0,0.5,0,0,0,—,neutral
+2026-08-11,ROKU,0,0,0,0.5,0,0,0,—,neutral
