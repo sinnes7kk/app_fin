@@ -1124,21 +1124,21 @@ as_of,ticker,direction,sector,conviction_score,conviction_grade,conviction_stack
 2026-08-05,VPG,BULLISH,Technology,6.5,B+,,18.0,1.0,63.9,0.0,0.0,0.0,-20.48,3158062.0,18.0,0.46,73.9,12.92,2.322,,unknown,screener,5d,false,false,true,4,0.0,true,false,not_evaluated,-0.072072,2026-08-11T14:56:51Z
 2026-08-05,ELAN,BEARISH,Healthcare,6.4,B+,,1.65,0.75,69.5,0.0,0.0,0.0,2.72,2587414.0,1.65,1.11,55.5,104.53,2.12,,unknown,screener,5d,false,false,true,3,1.0,false,false,not_evaluated,-0.160877,2026-08-11T14:56:51Z
 2026-08-05,ETSY,BEARISH,Consumer Cyclical,6.4,B+,,14.71,0.75,58.9,0.0,0.0,0.0,2.64,21162386.0,14.71,0.53,99.5,4.17,6.212,,31-90,screener,5d,false,false,true,3,1.0,false,false,not_evaluated,-0.008118,2026-08-11T14:56:51Z
-2026-08-06,EYE,BEARISH,Consumer Cyclical,8.1,A,,20.74,0.5,78.5,0.0,0.0,0.0,0.22,3858654.0,20.74,0.0,55.5,7.4,29.435,,31-90,screener,5d,false,false,true,2,1.0,false,false,watchlist_reeval_failed,,
-2026-08-06,TDC,BEARISH,Technology,8.0,A,,22.0,0.75,74.1,0.0,0.0,0.0,-24.33,6493731.0,22.0,0.92,27.8,87.74,3.453,,unknown,screener,5d,false,false,true,3,0.6667,true,true,,,
-2026-08-06,LULU,BEARISH,Consumer Cyclical,7.6,A,,24.1,0.5,68.6,0.0,0.0,0.0,4.25,39403948.0,24.1,0.73,58.1,1.31,2.13,,31-90,per_ticker_api,5d,false,false,true,2,0.5,false,false,price_validation_failed,,
-2026-08-06,LCID,BEARISH,Consumer Cyclical,7.4,A-,,42.95,0.5,66.1,0.0,0.0,0.0,1.52,16761065.0,42.95,1.66,38.9,1.81,2.498,,31-90,per_ticker_api,5d,false,false,true,2,1.0,false,false,not_evaluated,,
-2026-08-06,ESTA,BEARISH,Healthcare,7.1,A-,,5.77,0.75,77.0,0.0,0.0,0.0,-3.18,1821687.0,5.77,0.59,42.5,14.29,1.552,,91+,screener,5d,false,false,false,3,1.0,false,false,not_evaluated,,
-2026-08-06,RARE,BEARISH,Healthcare,7.1,A-,,23.66,0.75,63.9,0.0,0.5,0.0,4.55,9603019.0,23.66,0.93,50.5,11.35,2.335,,31-90,screener,5d,false,false,true,3,0.6667,true,false,not_evaluated,,
-2026-08-06,CRWV,BULLISH,Technology,6.8,A-,,30.32,0.75,57.2,0.0,0.0,0.0,-1.87,222905282.0,30.32,0.57,56.9,0.49,1.085,,31-90,per_ticker_api,5d,false,false,true,3,0.0,false,false,not_evaluated,,
-2026-08-06,ZETA,BULLISH,Technology,6.7,B+,,75.0,0.75,57.5,0.222,0.0,0.0,11.88,90073413.0,75.0,0.13,37.4,19.86,2.721,,8-30,screener,5d,false,false,true,3,0.3333,false,false,not_evaluated,,
-2026-08-06,GLXY,BEARISH,Financial Services,6.5,B+,,40.96,0.5,54.9,0.0,0.0,0.0,-2.13,25018363.0,40.96,0.5,75.4,5.02,2.928,,91+,screener,5d,false,false,true,2,1.0,false,false,not_evaluated,,
-2026-08-06,HNGE,BEARISH,Healthcare,6.5,B+,,21.32,0.75,56.6,0.0,0.0,0.0,-0.16,17347088.0,21.32,1.02,32.5,7.87,1.977,,31-90,screener,5d,false,false,true,3,0.6667,true,false,watchlist_reeval_failed,,
-2026-08-06,MSTR,BEARISH,Technology,6.4,B+,,157.2,1.0,65.1,0.0,0.0,0.0,3.07,1068946988.0,157.2,0.21,26.7,2.09,3.85,,31-90,screener,5d,false,false,true,4,0.0,true,false,not_evaluated,,
-2026-08-06,RKLB,BULLISH,Industrials,6.4,B+,,17.41,0.75,56.9,0.333,0.0,0.333,9.6,148102902.0,17.41,0.47,60.6,2.76,1.568,,31-90,per_ticker_api,5d,false,false,true,3,0.0,false,false,price_validation_failed,,
-2026-08-06,SHAK,BULLISH,Consumer Cyclical,6.4,B+,,24.22,0.75,56.9,0.0,0.0,0.0,13.31,13958555.0,24.22,0.28,53.2,25.48,2.016,,8-30,screener,5d,false,false,true,3,0.3333,false,false,not_evaluated,,
-2026-08-06,CE,BULLISH,Basic Materials,6.3,B+,,11.04,0.5,61.9,0.0,0.0,0.0,0.48,7296642.0,11.04,0.09,20.4,5.92,19.683,,31-90,screener,5d,false,false,true,2,1.0,false,false,not_evaluated,,
-2026-08-06,NBIS,BEARISH,Communication Services,6.3,B+,,50.06,0.5,51.2,0.417,0.0,0.0,-16.99,388531397.0,50.06,0.77,53.5,2.9,1.502,,31-90,per_ticker_api,5d,false,false,true,2,0.0,false,false,weak_bearish_flow,,
+2026-08-06,EYE,BEARISH,Consumer Cyclical,8.1,A,,20.74,0.5,78.5,0.0,0.0,0.0,0.22,3858654.0,20.74,0.0,55.5,7.4,29.435,,31-90,screener,5d,false,false,true,2,1.0,false,false,watchlist_reeval_failed,-0.002555,2026-08-12T14:56:50Z
+2026-08-06,TDC,BEARISH,Technology,8.0,A,,22.0,0.75,74.1,0.0,0.0,0.0,-24.33,6493731.0,22.0,0.92,27.8,87.74,3.453,,unknown,screener,5d,false,false,true,3,0.6667,true,true,,0.010211,2026-08-12T14:56:50Z
+2026-08-06,LULU,BEARISH,Consumer Cyclical,7.6,A,,24.1,0.5,68.6,0.0,0.0,0.0,4.25,39403948.0,24.1,0.73,58.1,1.31,2.13,,31-90,per_ticker_api,5d,false,false,true,2,0.5,false,false,price_validation_failed,0.024751,2026-08-12T14:56:50Z
+2026-08-06,LCID,BEARISH,Consumer Cyclical,7.4,A-,,42.95,0.5,66.1,0.0,0.0,0.0,1.52,16761065.0,42.95,1.66,38.9,1.81,2.498,,31-90,per_ticker_api,5d,false,false,true,2,1.0,false,false,not_evaluated,0.002481,2026-08-12T14:56:50Z
+2026-08-06,ESTA,BEARISH,Healthcare,7.1,A-,,5.77,0.75,77.0,0.0,0.0,0.0,-3.18,1821687.0,5.77,0.59,42.5,14.29,1.552,,91+,screener,5d,false,false,false,3,1.0,false,false,not_evaluated,-0.026735,2026-08-12T14:56:50Z
+2026-08-06,RARE,BEARISH,Healthcare,7.1,A-,,23.66,0.75,63.9,0.0,0.5,0.0,4.55,9603019.0,23.66,0.93,50.5,11.35,2.335,,31-90,screener,5d,false,false,true,3,0.6667,true,false,not_evaluated,-0.002630,2026-08-12T14:56:50Z
+2026-08-06,CRWV,BULLISH,Technology,6.8,A-,,30.32,0.75,57.2,0.0,0.0,0.0,-1.87,222905282.0,30.32,0.57,56.9,0.49,1.085,,31-90,per_ticker_api,5d,false,false,true,3,0.0,false,false,not_evaluated,0.056465,2026-08-12T14:56:50Z
+2026-08-06,ZETA,BULLISH,Technology,6.7,B+,,75.0,0.75,57.5,0.222,0.0,0.0,11.88,90073413.0,75.0,0.13,37.4,19.86,2.721,,8-30,screener,5d,false,false,true,3,0.3333,false,false,not_evaluated,0.036138,2026-08-12T14:56:50Z
+2026-08-06,GLXY,BEARISH,Financial Services,6.5,B+,,40.96,0.5,54.9,0.0,0.0,0.0,-2.13,25018363.0,40.96,0.5,75.4,5.02,2.928,,91+,screener,5d,false,false,true,2,1.0,false,false,not_evaluated,0.026126,2026-08-12T14:56:50Z
+2026-08-06,HNGE,BEARISH,Healthcare,6.5,B+,,21.32,0.75,56.6,0.0,0.0,0.0,-0.16,17347088.0,21.32,1.02,32.5,7.87,1.977,,31-90,screener,5d,false,false,true,3,0.6667,true,false,watchlist_reeval_failed,0.109394,2026-08-12T14:56:50Z
+2026-08-06,MSTR,BEARISH,Technology,6.4,B+,,157.2,1.0,65.1,0.0,0.0,0.0,3.07,1068946988.0,157.2,0.21,26.7,2.09,3.85,,31-90,screener,5d,false,false,true,4,0.0,true,false,not_evaluated,0.026512,2026-08-12T14:56:50Z
+2026-08-06,RKLB,BULLISH,Industrials,6.4,B+,,17.41,0.75,56.9,0.333,0.0,0.333,9.6,148102902.0,17.41,0.47,60.6,2.76,1.568,,31-90,per_ticker_api,5d,false,false,true,3,0.0,false,false,price_validation_failed,0.088506,2026-08-12T14:56:50Z
+2026-08-06,SHAK,BULLISH,Consumer Cyclical,6.4,B+,,24.22,0.75,56.9,0.0,0.0,0.0,13.31,13958555.0,24.22,0.28,53.2,25.48,2.016,,8-30,screener,5d,false,false,true,3,0.3333,false,false,not_evaluated,0.006555,2026-08-12T14:56:50Z
+2026-08-06,CE,BULLISH,Basic Materials,6.3,B+,,11.04,0.5,61.9,0.0,0.0,0.0,0.48,7296642.0,11.04,0.09,20.4,5.92,19.683,,31-90,screener,5d,false,false,true,2,1.0,false,false,not_evaluated,-0.007481,2026-08-12T14:56:50Z
+2026-08-06,NBIS,BEARISH,Communication Services,6.3,B+,,50.06,0.5,51.2,0.417,0.0,0.0,-16.99,388531397.0,50.06,0.77,53.5,2.9,1.502,,31-90,per_ticker_api,5d,false,false,true,2,0.0,false,false,weak_bearish_flow,-0.016174,2026-08-12T14:56:50Z
 2026-08-07,TDC,BEARISH,Technology,7.6,A,,22.0,0.6,74.1,0.0,0.0,0.0,-24.33,6493731.0,22.0,0.92,27.8,87.74,3.453,,unknown,screener,5d,false,false,true,3,0.6667,true,false,not_evaluated,,
 2026-08-07,LULU,BEARISH,Consumer Cyclical,7.3,A-,,24.1,0.4,68.6,0.0,0.0,0.0,4.25,39403948.0,24.1,0.73,58.1,1.31,2.13,,31-90,per_ticker_api,5d,false,false,true,2,0.5,false,false,watchlist_reeval_failed,,
 2026-08-07,LCID,BEARISH,Consumer Cyclical,7.2,A-,,42.95,0.4,66.1,0.0,0.0,0.0,1.52,16761065.0,42.95,1.66,38.9,1.81,2.498,,31-90,per_ticker_api,5d,false,false,true,2,1.0,false,false,not_evaluated,,
@@ -1169,18 +1169,18 @@ as_of,ticker,direction,sector,conviction_score,conviction_grade,conviction_stack
 2026-08-10,CBRS,BEARISH,Technology,5.4,B,,11.31,0.5,49.1,0.25,0.0,0.0,7.58,47087153.0,11.31,0.54,69.5,-18.23,0.97,,31-90,per_ticker_api,5d,false,false,true,2,0.5,false,false,not_evaluated,,
 2026-08-10,CRCL,BULLISH,Financial Services,5.4,B,,26.59,0.75,38.9,0.5,0.0,0.0,6.06,80497665.0,26.59,0.62,30.3,2.42,1.165,,31-90,per_ticker_api,5d,false,false,true,3,0.0,false,false,weak_bullish_flow,,
 2026-08-10,DAVE,BEARISH,Technology,5.4,B,,30.82,0.5,52.3,0.0,0.0,0.0,-28.52,19552272.0,30.82,1.54,25.1,-16.21,0.873,,0-7,screener,5d,false,false,true,2,0.5,false,false,not_evaluated,,
-2026-08-11,UPWK,BEARISH,Industrials,6.9,A-,,17.3,1.0,68.9,0.0,0.0,0.0,-13.59,3016825.0,17.3,0.55,25.9,19.76,2.015,,unknown,screener,5d,false,false,true,4,0.75,false,false,not_evaluated,,
-2026-08-11,CRCL,BULLISH,Financial Services,6.5,B+,,37.69,1.0,50.6,0.5,0.0,0.0,6.0,114663261.0,37.69,0.62,28.6,2.42,1.165,,31-90,per_ticker_api,5d,false,true,true,4,0.0,false,false,weak_bullish_flow,,
-2026-08-11,ONON,BEARISH,Consumer Cyclical,6.5,B+,,15.59,0.75,58.6,0.0,0.0,0.0,-20.18,24325318.0,15.59,0.76,17.1,9.38,3.728,,91+,screener,5d,false,false,true,3,0.6667,false,false,not_evaluated,,
-2026-08-11,BIRK,BEARISH,Consumer Cyclical,6.4,B+,,23.68,0.5,55.8,0.0,0.0,0.0,-0.08,17246896.0,23.68,294.95,86.3,0.69,71.376,,unknown,screener,5d,false,false,true,2,1.0,false,false,not_evaluated,,
-2026-08-11,BW,BULLISH,Industrials,6.4,B+,,23.44,0.75,56.0,1.0,0.0,0.0,0.87,5894960.0,23.44,0.55,12.1,10.71,5.631,,31-90,screener,5d,false,false,true,3,0.3333,false,false,not_evaluated,,
-2026-08-11,BROS,BEARISH,Consumer Cyclical,6.3,B+,,10.46,1.0,58.0,0.0,0.0,0.0,-6.55,11655677.0,10.46,0.67,5.4,9.94,0.743,,31-90,screener,5d,false,false,true,4,1.0,false,false,not_evaluated,,
-2026-08-11,NBIS,BULLISH,Communication Services,6.3,B+,,100.25,1.0,48.3,0.5,0.0,1.0,2.45,800218221.0,100.25,0.78,41.6,2.97,0.891,,31-90,per_ticker_api,5d,false,true,true,4,0.0,false,false,weak_bullish_flow,,
-2026-08-11,SITM,BEARISH,Technology,6.1,B+,,4.77,0.75,64.5,0.0,0.0,0.167,-3.73,14242905.0,4.77,0.47,39.5,2.86,1.19,,31-90,per_ticker_api,5d,false,false,true,3,1.0,false,false,price_validation_failed,,
-2026-08-11,BTU,BULLISH,Energy,6.0,B+,,5.97,0.75,63.6,1.0,0.0,0.0,-0.89,2645902.0,5.97,0.03,19.0,7.69,1.547,,31-90,screener,5d,false,false,true,3,1.0,false,false,not_evaluated,,
-2026-08-11,DJT,BULLISH,Communication Services,6.0,B+,,13.47,0.75,57.1,0.0,0.0,0.0,-5.46,6238313.0,13.47,0.24,63.6,5.76,1.312,,91+,per_ticker_api,5d,false,false,true,3,0.6667,true,false,price_validation_failed,,
-2026-08-11,EYE,BEARISH,Consumer Cyclical,6.0,B+,,17.76,0.75,60.8,0.0,0.0,0.0,-1.16,3147600.0,17.76,0.01,42.7,80.97,1.522,,31-90,screener,5d,false,false,true,3,1.0,false,false,price_validation_failed,,
-2026-08-11,HROW,BULLISH,Healthcare,6.0,B+,,12.36,0.75,61.4,0.0,0.0,0.0,-2.91,2877064.0,12.36,0.66,16.6,1.56,3.491,,unknown,screener,5d,false,false,true,3,0.6667,true,false,not_evaluated,,
-2026-08-11,LULU,BEARISH,Consumer Cyclical,6.0,B+,,25.09,0.75,49.0,0.0,0.0,0.0,-2.45,43497025.0,25.09,0.72,53.3,1.49,0.396,,31-90,per_ticker_api,5d,false,false,true,3,0.3333,false,false,price_validation_failed,,
-2026-08-11,PCT,BULLISH,Industrials,6.0,B+,,18.47,0.75,54.3,0.0,0.0,0.0,5.81,5489191.0,18.47,0.05,26.4,-0.13,2.379,,91+,screener,5d,false,false,true,3,0.0,false,false,not_evaluated,,
-2026-08-11,RUM,BULLISH,Technology,6.0,B+,,11.05,0.75,62.1,0.0,0.0,0.0,11.61,3267413.0,11.05,0.29,38.8,7.24,2.938,,unknown,screener,5d,false,false,true,3,1.0,false,false,not_evaluated,,
+2026-08-11,NBIS,BULLISH,Communication Services,6.9,A-,,105.64,1.0,56.4,0.375,0.0,0.0,23.81,878867196.0,105.64,0.67,36.8,3.77,1.24,,31-90,per_ticker_api,5d,false,true,true,4,0.0,false,false,price_validation_failed,,
+2026-08-11,UPWK,BEARISH,Industrials,6.0,B+,,11.67,0.75,62.0,0.0,0.0,0.0,-13.64,2026349.0,11.67,0.55,25.7,19.76,2.015,,unknown,screener,5d,false,false,true,3,0.6667,false,false,not_evaluated,,
+2026-08-11,CLMT,BULLISH,Energy,5.7,B,,10.51,0.5,55.9,0.0,0.5,0.0,14.84,6806121.0,10.51,0.06,72.9,3.67,1.098,,91+,screener,5d,false,false,true,2,0.5,false,false,not_evaluated,,
+2026-08-11,ERO,BULLISH,Basic Materials,5.7,B,,18.16,0.5,54.2,0.0,0.0,0.0,6.75,11797035.0,18.16,0.02,52.1,7.81,2.664,,unknown,screener,5d,false,false,true,2,0.5,false,false,not_evaluated,,
+2026-08-11,BW,BULLISH,Industrials,5.5,B,,13.55,0.5,52.6,1.0,0.0,0.0,0.98,3317537.0,13.55,0.55,15.3,10.71,5.631,,31-90,screener,5d,false,false,true,2,0.5,false,false,not_evaluated,,
+2026-08-11,DFTX,BULLISH,Healthcare,5.5,B,,6.88,0.75,55.2,0.0,0.5,0.0,-0.43,7574191.0,6.88,0.61,22.1,7.11,1.111,,31-90,screener,5d,false,false,true,3,0.6667,false,false,not_evaluated,,
+2026-08-11,LULU,BEARISH,Consumer Cyclical,5.5,B,,24.34,0.5,43.8,0.0,0.0,0.0,-5.39,39983028.0,24.34,0.39,51.5,1.08,0.22,,31-90,per_ticker_api,5d,false,false,true,2,0.6667,false,false,price_validation_failed,,
+2026-08-11,ONON,BEARISH,Consumer Cyclical,5.5,B,,9.11,0.5,53.5,0.0,0.0,0.0,-20.18,14524860.0,9.11,0.76,18.3,9.38,3.728,,91+,screener,5d,false,false,true,2,0.5,false,false,not_evaluated,,
+2026-08-11,BROS,BEARISH,Consumer Cyclical,5.4,B,,7.91,0.75,51.6,0.0,0.0,0.0,-6.54,8722775.0,7.91,0.67,0.0,9.94,0.743,,31-90,screener,5d,false,false,true,3,1.0,false,false,not_evaluated,,
+2026-08-11,CRCL,BULLISH,Financial Services,5.2,B,,26.19,1.0,39.0,0.5,0.0,0.0,3.38,84627665.0,26.19,0.54,28.1,3.04,0.183,,31-90,per_ticker_api,5d,false,false,true,4,0.0,false,false,weak_bullish_flow,,
+2026-08-11,HL,BEARISH,Basic Materials,5.2,B,,7.36,0.5,51.9,0.0,0.0,0.0,1.37,16036494.0,7.36,4.18,30.1,-1.58,1.794,,91+,screener,5d,false,false,true,2,0.5,false,false,not_evaluated,,
+2026-08-11,BTU,BULLISH,Energy,5.1,B,,3.66,0.5,56.1,1.0,0.0,0.0,-0.87,1642231.0,3.66,0.03,16.2,7.69,1.547,,31-90,screener,5d,false,false,false,2,1.0,false,false,not_evaluated,,
+2026-08-11,EYE,BEARISH,Consumer Cyclical,5.1,B,,12.28,0.5,53.9,0.0,0.0,0.0,-1.16,2175407.0,12.28,0.01,60.2,80.97,1.522,,31-90,screener,5d,false,false,true,2,1.0,false,false,watchlist_reeval_failed,,
+2026-08-11,PCT,BULLISH,Industrials,5.1,B,,11.24,0.5,49.9,0.0,0.0,0.0,5.81,3355600.0,11.24,0.05,46.7,-0.13,2.379,,91+,screener,5d,false,false,true,2,0.0,false,false,not_evaluated,,
+2026-08-11,RKLB,BULLISH,Industrials,5.1,B,,24.38,1.0,38.0,0.0,0.0,0.333,-3.08,233212959.0,24.38,0.48,22.8,1.36,0.19,,31-90,per_ticker_api,5d,false,false,true,4,0.0,false,false,price_validation_failed,,
