@@ -1,6 +1,6 @@
 {
   "lottery": {
-    "n": 7,
+    "n": 8,
     "MAX_HOLD_DAYS": 4,
     "TIME_STOP_MIN_R": 1.0,
     "ATR_TRAIL_MULT": 1.8,
@@ -9,7 +9,7 @@
     "observed_mean_r": 0.59714
   },
   "swing": {
-    "n": 46,
+    "n": 48,
     "MAX_HOLD_DAYS": 5,
     "TIME_STOP_MIN_R": 1.0,
     "ATR_TRAIL_MULT": 2.6,
@@ -18,7 +18,7 @@
     "observed_mean_r": -0.12905813953488374
   },
   "position": {
-    "n": 599,
+    "n": 637,
     "MAX_HOLD_DAYS": 10,
     "TIME_STOP_MIN_R": 1.0,
     "ATR_TRAIL_MULT": 2.3,
@@ -27,16 +27,16 @@
     "observed_mean_r": 0.08651088929219601
   },
   "leap": {
-    "n": 245,
+    "n": 257,
     "MAX_HOLD_DAYS": 15,
     "TIME_STOP_MIN_R": 1.0,
     "ATR_TRAIL_MULT": 2.3,
     "confidence": "high",
     "observed_median_d_to_mfe": 2.0,
-    "observed_mean_r": 0.054727586206896536
+    "observed_mean_r": 0.05421888412017165
   },
   "unknown": {
-    "n": 257,
+    "n": 263,
     "MAX_HOLD_DAYS": 5,
     "TIME_STOP_MIN_R": 1.0,
     "ATR_TRAIL_MULT": 2.3,
