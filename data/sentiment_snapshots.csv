@@ -78,6 +78,8 @@ snapshot_date,ticker,st_messages,st_bullish,st_bearish,st_sentiment,rd_mentions,
 2026-08-17,HLF,0,0,0,0.5,0,0,0,—,neutral
 2026-08-17,RDDT,0,0,0,0.5,0,0,0,—,neutral
 2026-08-17,FN,0,0,0,0.5,0,0,0,—,neutral
+2026-08-17,HCI,0,0,0,0.5,0,0,0,—,neutral
+2026-08-17,ETON,0,0,0,0.5,0,0,0,—,neutral
 2026-08-17,LUNR,0,0,0,0.5,0,0,0,—,neutral
 2026-08-17,HOOD,0,0,0,0.5,0,0,0,—,neutral
 2026-08-17,KLAR,0,0,0,0.5,0,0,0,—,neutral
@@ -87,5 +89,3 @@ snapshot_date,ticker,st_messages,st_bullish,st_bearish,st_sentiment,rd_mentions,
 2026-08-17,FLYW,0,0,0,0.5,0,0,0,—,neutral
 2026-08-17,KLAC,0,0,0,0.5,0,0,0,—,neutral
 2026-08-17,MRVL,0,0,0,0.5,0,0,0,—,neutral
-2026-08-17,MSTR,0,0,0,0.5,0,0,0,—,neutral
-2026-08-17,VST,0,0,0,0.5,0,0,0,—,neutral
