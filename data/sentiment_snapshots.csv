@@ -96,6 +96,7 @@ snapshot_date,ticker,st_messages,st_bullish,st_bearish,st_sentiment,rd_mentions,
 2026-08-18,HCI,0,0,0,0.5,0,0,0,—,neutral
 2026-08-18,ETON,0,0,0,0.5,0,0,0,—,neutral
 2026-08-18,KLAR,0,0,0,0.5,0,0,0,—,neutral
+2026-08-18,PONY,0,0,0,0.5,0,0,0,—,neutral
 2026-08-18,IREN,0,0,0,0.5,0,0,0,—,neutral
 2026-08-18,CLS,0,0,0,0.5,0,0,0,—,neutral
 2026-08-18,FLYW,0,0,0,0.5,0,0,0,—,neutral
@@ -103,4 +104,3 @@ snapshot_date,ticker,st_messages,st_bullish,st_bearish,st_sentiment,rd_mentions,
 2026-08-18,CRWD,0,0,0,0.5,0,0,0,—,neutral
 2026-08-18,RBLX,0,0,0,0.5,0,0,0,—,neutral
 2026-08-18,AAOI,0,0,0,0.5,0,0,0,—,neutral
-2026-08-18,INTC,0,0,0,0.5,0,0,0,—,neutral
