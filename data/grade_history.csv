@@ -1283,7 +1283,7 @@ as_of,ticker,direction,sector,conviction_score,conviction_grade,conviction_stack
 2026-08-20,BULL,BULLISH,Technology,6.8,A-,,105.99,0.75,59.6,0.0,0.0,0.0,3.81,68619237.0,105.99,0.25,10.1,9.74,2.799,,8-30,screener,5d,false,false,true,3,1.0,false,false,not_evaluated,,
 2026-08-20,AMSC,BULLISH,Industrials,6.7,B+,,31.3,0.5,77.0,0.0,0.0,0.0,0.77,4713532.0,31.3,9.04,13.4,-0.18,3.551,,unknown,screener,5d,false,false,true,2,1.0,false,false,not_evaluated,,
 2026-08-20,FN,BULLISH,Technology,6.7,B+,,43.9,1.0,66.7,0.0,0.0,0.0,-6.6,124684893.0,43.9,4.27,28.3,7.08,0.889,,31-90,screener,5d,false,false,true,4,0.0,true,false,price_validation_failed,,
-2026-08-20,ROST,BEARISH,Consumer Cyclical,6.7,B+,,6.42,0.5,68.0,0.0,0.0,0.0,-0.13,57778739.0,6.42,2.59,100.0,7.63,6.356,,31-90,screener,5d,false,false,true,2,1.0,false,false,poor_rr (0.3:1),,
+2026-08-20,ROST,BEARISH,Consumer Cyclical,6.7,B+,,6.42,0.5,68.0,0.0,0.0,0.0,-0.13,57778739.0,6.42,2.59,100.0,7.63,6.356,,31-90,screener,5d,false,false,true,2,1.0,false,false,price_validation_failed,,
 2026-08-20,SILJ,BULLISH,nan,6.7,B+,,162.92,0.75,56.5,0.0,0.0,0.0,0.81,29169908.0,162.92,1.13,31.7,1.26,3.21,,31-90,per_ticker_api,5d,false,false,true,3,0.6667,false,false,weak_bullish_flow,,
 2026-08-20,BLZE,BULLISH,Technology,6.6,B+,,33.82,0.5,72.0,0.0,0.0,0.0,1.12,3850879.0,33.82,2.46,65.4,1.84,4.722,,91+,screener,5d,false,false,true,2,1.0,false,false,not_evaluated,,
 2026-08-20,IBIT,BULLISH,nan,6.6,B+,,41.0,0.75,54.3,0.0,0.0,0.0,12.4,530238583.0,41.0,0.36,13.0,7.1,1.688,,91+,per_ticker_api,5d,false,false,true,3,0.3333,false,false,not_evaluated,,
