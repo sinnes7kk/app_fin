@@ -96,6 +96,7 @@ snapshot_date,ticker,st_messages,st_bullish,st_bearish,st_sentiment,rd_mentions,
 2026-08-21,BHF,0,0,0,0.5,0,0,0,—,neutral
 2026-08-21,FSLR,0,0,0,0.5,0,0,0,—,neutral
 2026-08-21,HOOD,0,0,0,0.5,0,0,0,—,neutral
+2026-08-21,NMM,0,0,0,0.5,0,0,0,—,neutral
 2026-08-21,TLN,0,0,0,0.5,0,0,0,—,neutral
 2026-08-21,CRCL,0,0,0,0.5,0,0,0,—,neutral
 2026-08-21,PLTR,0,0,0,0.5,0,0,0,—,neutral
@@ -103,4 +104,3 @@ snapshot_date,ticker,st_messages,st_bullish,st_bearish,st_sentiment,rd_mentions,
 2026-08-21,IBIT,0,0,0,0.5,0,0,0,—,neutral
 2026-08-21,AMLX,0,0,0,0.5,0,0,0,—,neutral
 2026-08-21,ASST,0,0,0,0.5,0,0,0,—,neutral
-2026-08-21,FIGR,0,0,0,0.5,0,0,0,—,neutral
