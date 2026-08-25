@@ -76,6 +76,7 @@ snapshot_date,ticker,st_messages,st_bullish,st_bearish,st_sentiment,rd_mentions,
 2026-08-21,ASST,0,0,0,0.5,0,0,0,—,neutral
 2026-08-24,SILJ,0,0,0,0.5,0,0,0,—,neutral
 2026-08-24,VERA,0,0,0,0.5,0,0,0,—,neutral
+2026-08-24,ASST,0,0,0,0.5,0,0,0,—,neutral
 2026-08-24,DKS,0,0,0,0.5,0,0,0,—,neutral
 2026-08-24,AXTI,0,0,0,0.5,0,0,0,—,neutral
 2026-08-24,ABVX,0,0,0,0.5,0,0,0,—,neutral
@@ -85,7 +86,6 @@ snapshot_date,ticker,st_messages,st_bullish,st_bearish,st_sentiment,rd_mentions,
 2026-08-24,CBRS,0,0,0,0.5,0,0,0,—,neutral
 2026-08-24,IBIT,0,0,0,0.5,0,0,0,—,neutral
 2026-08-24,NMM,0,0,0,0.5,0,0,0,—,neutral
-2026-08-24,ASST,0,0,0,0.5,0,0,0,—,neutral
 2026-08-24,IOVA,0,0,0,0.5,0,0,0,—,neutral
 2026-08-24,NTNX,0,0,0,0.5,0,0,0,—,neutral
 2026-08-24,SBET,0,0,0,0.5,0,0,0,—,neutral
