@@ -1,12 +1,12 @@
 {
   "window_days": 5,
   "history_days": 90,
-  "evaluations": 779,
-  "computed_at": "2026-08-27T23:43:46.157273Z",
-  "as_of": "2026-08-27",
+  "evaluations": 765,
+  "computed_at": "2026-08-28T23:32:11.416838Z",
+  "as_of": "2026-08-28",
   "stats": {
     "A": {
-      "count": 779,
+      "count": 765,
       "hit_rate": 0.52,
       "avg_r": NaN,
       "best_r": 39.67,
