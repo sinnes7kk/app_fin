@@ -1,7 +1,7 @@
 {
   "global": {
-    "n_train": 726,
-    "n_val": 485,
+    "n_train": 769,
+    "n_val": 514,
     "weights": {
       "persistence_proxy": 0.25,
       "intensity_proxy": 0.2,
@@ -10,18 +10,18 @@
       "mass_proxy": 0.05,
       "oi_change_proxy": 0.05
     },
-    "oos_spearman": 0.046924216831726706,
-    "oos_spearman_legacy": 0.01208415650867346,
+    "oos_spearman": 0.0605312696061343,
+    "oos_spearman_legacy": 0.00782566714696679,
     "accept": false,
     "confidence": "high",
-    "reason": "tight_threshold_unmet (need spearman>=0.10 and lift>=0.05, got new=0.047, legacy=0.012)",
+    "reason": "tight_threshold_unmet (need spearman>=0.10 and lift>=0.05, got new=0.061, legacy=0.008)",
     "threshold_regime": "tight",
     "accept_threshold": 0.1,
     "accept_lift_threshold": 0.05
   },
   "per_bucket": {
     "lottery": {
-      "n_train": 6,
+      "n_train": 7,
       "n_val": 0,
       "weights": {
         "persistence_proxy": 0.25,
@@ -35,14 +35,14 @@
       "oos_spearman_legacy": NaN,
       "accept": false,
       "confidence": "low",
-      "reason": "insufficient_n (n=6, need \u226533)",
+      "reason": "insufficient_n (n=7, need \u226533)",
       "threshold_regime": "loose",
       "accept_threshold": 0.0,
       "accept_lift_threshold": 0.0
     },
     "swing": {
-      "n_train": 32,
-      "n_val": 22,
+      "n_train": 35,
+      "n_val": 24,
       "weights": {
         "persistence_proxy": 0.25,
         "intensity_proxy": 0.2,
@@ -51,8 +51,8 @@
         "mass_proxy": 0.05,
         "oi_change_proxy": 0.05
       },
-      "oos_spearman": 0.3367916934707544,
-      "oos_spearman_legacy": 0.4360505741699715,
+      "oos_spearman": 0.18116204563765384,
+      "oos_spearman_legacy": 0.23163207398578745,
       "accept": false,
       "confidence": "medium",
       "reason": "oos_spearman_not_better_than_legacy",
@@ -61,8 +61,8 @@
       "accept_lift_threshold": 0.0
     },
     "position": {
-      "n_train": 378,
-      "n_val": 252,
+      "n_train": 400,
+      "n_val": 267,
       "weights": {
         "persistence_proxy": 0.25,
         "intensity_proxy": 0.2,
@@ -71,18 +71,18 @@
         "mass_proxy": 0.05,
         "oi_change_proxy": 0.05
       },
-      "oos_spearman": -0.07824692459290278,
-      "oos_spearman_legacy": -0.08244905809485016,
+      "oos_spearman": -0.049483429616494184,
+      "oos_spearman_legacy": -0.0626945903671979,
       "accept": false,
       "confidence": "high",
-      "reason": "tight_threshold_unmet (need spearman>=0.10 and lift>=0.05, got new=-0.078, legacy=-0.082)",
+      "reason": "tight_threshold_unmet (need spearman>=0.10 and lift>=0.05, got new=-0.049, legacy=-0.063)",
       "threshold_regime": "tight",
       "accept_threshold": 0.1,
       "accept_lift_threshold": 0.05
     },
     "leap": {
-      "n_train": 154,
-      "n_val": 104,
+      "n_train": 166,
+      "n_val": 112,
       "weights": {
         "persistence_proxy": 0.25,
         "intensity_proxy": 0.2,
@@ -91,18 +91,18 @@
         "mass_proxy": 0.05,
         "oi_change_proxy": 0.05
       },
-      "oos_spearman": 0.10961291480049559,
-      "oos_spearman_legacy": 0.09769902664142932,
+      "oos_spearman": 0.0753307522432201,
+      "oos_spearman_legacy": 0.07955051030606532,
       "accept": false,
       "confidence": "high",
-      "reason": "tight_threshold_unmet (need spearman>=0.10 and lift>=0.05, got new=0.110, legacy=0.098)",
+      "reason": "tight_threshold_unmet (need spearman>=0.10 and lift>=0.05, got new=0.075, legacy=0.080)",
       "threshold_regime": "tight",
       "accept_threshold": 0.1,
       "accept_lift_threshold": 0.05
     },
     "unknown": {
-      "n_train": 157,
-      "n_val": 106,
+      "n_train": 163,
+      "n_val": 109,
       "weights": {
         "persistence_proxy": 0.25,
         "intensity_proxy": 0.2,
@@ -111,11 +111,11 @@
         "mass_proxy": 0.05,
         "oi_change_proxy": 0.05
       },
-      "oos_spearman": -0.26226132345594116,
-      "oos_spearman_legacy": -0.18449620037261868,
+      "oos_spearman": -0.23807115956663777,
+      "oos_spearman_legacy": -0.2030898547843036,
       "accept": false,
       "confidence": "high",
-      "reason": "tight_threshold_unmet (need spearman>=0.10 and lift>=0.05, got new=-0.262, legacy=-0.184)",
+      "reason": "tight_threshold_unmet (need spearman>=0.10 and lift>=0.05, got new=-0.238, legacy=-0.203)",
       "threshold_regime": "tight",
       "accept_threshold": 0.1,
       "accept_lift_threshold": 0.05
