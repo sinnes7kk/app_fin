@@ -2,12 +2,12 @@
   "window_days": 5,
   "history_days": 90,
   "evaluations": 762,
-  "computed_at": "2026-09-02T23:07:54.436135Z",
-  "as_of": "2026-09-02",
+  "computed_at": "2026-09-03T17:39:39.755415Z",
+  "as_of": "2026-09-03",
   "stats": {
     "A": {
-      "count": 762,
-      "hit_rate": 0.531,
+      "count": 756,
+      "hit_rate": 0.534,
       "avg_r": NaN,
       "best_r": 39.67,
       "worst_r": -27.51,
@@ -15,13 +15,13 @@
       "metric_source": "legacy"
     },
     "B": {
-      "count": 0,
-      "hit_rate": null,
-      "avg_r": null,
-      "best_r": null,
-      "worst_r": null,
-      "avg_excess_return_pct": null,
-      "metric_source": "n/a"
+      "count": 6,
+      "hit_rate": 0.667,
+      "avg_r": 0.29,
+      "best_r": 2.5,
+      "worst_r": -1.98,
+      "avg_excess_return_pct": 0.58,
+      "metric_source": "legacy"
     },
     "C": {
       "count": 0,
