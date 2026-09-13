@@ -1,7 +1,7 @@
 {
   "global": {
-    "n_train": 777,
-    "n_val": 519,
+    "n_train": 886,
+    "n_val": 592,
     "weights": {
       "persistence_proxy": 0.25,
       "intensity_proxy": 0.2,
@@ -10,11 +10,11 @@
       "mass_proxy": 0.05,
       "oi_change_proxy": 0.05
     },
-    "oos_spearman": 0.07050660572963095,
-    "oos_spearman_legacy": 0.010826782696189823,
+    "oos_spearman": 0.05403393908029141,
+    "oos_spearman_legacy": 0.011433758169238348,
     "accept": false,
     "confidence": "high",
-    "reason": "tight_threshold_unmet (need spearman>=0.10 and lift>=0.05, got new=0.071, legacy=0.011)",
+    "reason": "tight_threshold_unmet (need spearman>=0.10 and lift>=0.05, got new=0.054, legacy=0.011)",
     "threshold_regime": "tight",
     "accept_threshold": 0.1,
     "accept_lift_threshold": 0.05
@@ -41,18 +41,18 @@
       "accept_lift_threshold": 0.0
     },
     "swing": {
-      "n_train": 37,
-      "n_val": 26,
+      "n_train": 48,
+      "n_val": 33,
       "weights": {
-        "persistence_proxy": 0.5538,
-        "intensity_proxy": 0.0874,
+        "persistence_proxy": 0.7464,
+        "intensity_proxy": 0.1459,
         "consistency_proxy": 0.0,
-        "accel_proxy": 0.0,
-        "mass_proxy": 0.0355,
-        "oi_change_proxy": 0.3233
+        "accel_proxy": 0.1077,
+        "mass_proxy": 0.0,
+        "oi_change_proxy": 0.0
       },
-      "oos_spearman": 0.20299206865171038,
-      "oos_spearman_legacy": 0.19293780735213803,
+      "oos_spearman": 0.1071889787731485,
+      "oos_spearman_legacy": 0.06850198824169619,
       "accept": true,
       "confidence": "medium",
       "reason": "ok",
@@ -61,8 +61,8 @@
       "accept_lift_threshold": 0.0
     },
     "position": {
-      "n_train": 402,
-      "n_val": 269,
+      "n_train": 457,
+      "n_val": 305,
       "weights": {
         "persistence_proxy": 0.25,
         "intensity_proxy": 0.2,
@@ -71,18 +71,18 @@
         "mass_proxy": 0.05,
         "oi_change_proxy": 0.05
       },
-      "oos_spearman": -0.039251487921865766,
-      "oos_spearman_legacy": -0.051733042615167965,
+      "oos_spearman": -0.05897338705714596,
+      "oos_spearman_legacy": -0.06860720658428036,
       "accept": false,
       "confidence": "high",
-      "reason": "tight_threshold_unmet (need spearman>=0.10 and lift>=0.05, got new=-0.039, legacy=-0.052)",
+      "reason": "tight_threshold_unmet (need spearman>=0.10 and lift>=0.05, got new=-0.059, legacy=-0.069)",
       "threshold_regime": "tight",
       "accept_threshold": 0.1,
       "accept_lift_threshold": 0.05
     },
     "leap": {
-      "n_train": 166,
-      "n_val": 112,
+      "n_train": 196,
+      "n_val": 132,
       "weights": {
         "persistence_proxy": 0.25,
         "intensity_proxy": 0.2,
@@ -91,18 +91,18 @@
         "mass_proxy": 0.05,
         "oi_change_proxy": 0.05
       },
-      "oos_spearman": 0.0753307522432201,
-      "oos_spearman_legacy": 0.07955051030606532,
+      "oos_spearman": 0.07796142534571274,
+      "oos_spearman_legacy": 0.0871518076877776,
       "accept": false,
       "confidence": "high",
-      "reason": "tight_threshold_unmet (need spearman>=0.10 and lift>=0.05, got new=0.075, legacy=0.080)",
+      "reason": "tight_threshold_unmet (need spearman>=0.10 and lift>=0.05, got new=0.078, legacy=0.087)",
       "threshold_regime": "tight",
       "accept_threshold": 0.1,
       "accept_lift_threshold": 0.05
     },
     "unknown": {
-      "n_train": 166,
-      "n_val": 111,
+      "n_train": 180,
+      "n_val": 120,
       "weights": {
         "persistence_proxy": 0.25,
         "intensity_proxy": 0.2,
@@ -111,11 +111,11 @@
         "mass_proxy": 0.05,
         "oi_change_proxy": 0.05
       },
-      "oos_spearman": -0.2325416695474002,
-      "oos_spearman_legacy": -0.21724155743116122,
+      "oos_spearman": -0.08117525632657854,
+      "oos_spearman_legacy": -0.16459749325880635,
       "accept": false,
       "confidence": "high",
-      "reason": "tight_threshold_unmet (need spearman>=0.10 and lift>=0.05, got new=-0.233, legacy=-0.217)",
+      "reason": "tight_threshold_unmet (need spearman>=0.10 and lift>=0.05, got new=-0.081, legacy=-0.165)",
       "threshold_regime": "tight",
       "accept_threshold": 0.1,
       "accept_lift_threshold": 0.05
