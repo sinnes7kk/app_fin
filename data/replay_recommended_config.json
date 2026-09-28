@@ -15,7 +15,7 @@
     "ATR_TRAIL_MULT": 2.3,
     "confidence": "high",
     "observed_median_d_to_mfe": 2.0,
-    "observed_mean_r": -0.0952493827160494
+    "observed_mean_r": -0.09495802469135804
   },
   "position": {
     "n": 765,
@@ -24,7 +24,7 @@
     "ATR_TRAIL_MULT": 2.3,
     "confidence": "high",
     "observed_median_d_to_mfe": 2.0,
-    "observed_mean_r": 0.08365091863517062
+    "observed_mean_r": 0.0755232283464567
   },
   "leap": {
     "n": 329,
@@ -33,7 +33,7 @@
     "ATR_TRAIL_MULT": 2.4,
     "confidence": "high",
     "observed_median_d_to_mfe": 2.0,
-    "observed_mean_r": 0.033186890243902444
+    "observed_mean_r": 0.0271359756097561
   },
   "unknown": {
     "n": 300,
@@ -42,6 +42,6 @@
     "ATR_TRAIL_MULT": 2.3,
     "confidence": "high",
     "observed_median_d_to_mfe": 2.0,
-    "observed_mean_r": 0.188751
+    "observed_mean_r": 0.19092033333333333
   }
 }
