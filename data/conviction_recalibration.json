@@ -10,8 +10,8 @@
       "mass_proxy": 0.05,
       "oi_change_proxy": 0.05
     },
-    "oos_spearman": 0.032088203987760335,
-    "oos_spearman_legacy": -0.006697070644323339,
+    "oos_spearman": 0.03208820398776034,
+    "oos_spearman_legacy": -0.00669707064432334,
     "accept": false,
     "confidence": "high",
     "reason": "tight_threshold_unmet (need spearman>=0.10 and lift>=0.05, got new=0.032, legacy=-0.007)",
@@ -71,8 +71,8 @@
         "mass_proxy": 0.05,
         "oi_change_proxy": 0.05
       },
-      "oos_spearman": -0.07665717459718588,
-      "oos_spearman_legacy": -0.0955996741444502,
+      "oos_spearman": -0.07665717459718585,
+      "oos_spearman_legacy": -0.09559967414445018,
       "accept": false,
       "confidence": "high",
       "reason": "tight_threshold_unmet (need spearman>=0.10 and lift>=0.05, got new=-0.077, legacy=-0.096)",
@@ -91,8 +91,8 @@
         "mass_proxy": 0.05,
         "oi_change_proxy": 0.05
       },
-      "oos_spearman": 0.06573238803299994,
-      "oos_spearman_legacy": 0.08768118026334816,
+      "oos_spearman": 0.06573238803299992,
+      "oos_spearman_legacy": 0.08768118026334812,
       "accept": false,
       "confidence": "high",
       "reason": "tight_threshold_unmet (need spearman>=0.10 and lift>=0.05, got new=0.066, legacy=0.088)",
@@ -111,8 +111,8 @@
         "mass_proxy": 0.05,
         "oi_change_proxy": 0.05
       },
-      "oos_spearman": -0.09440569752650665,
-      "oos_spearman_legacy": -0.16669645948522036,
+      "oos_spearman": -0.0944056975265066,
+      "oos_spearman_legacy": -0.1666964594852203,
       "accept": false,
       "confidence": "high",
       "reason": "tight_threshold_unmet (need spearman>=0.10 and lift>=0.05, got new=-0.094, legacy=-0.167)",
